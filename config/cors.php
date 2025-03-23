@@ -6,8 +6,12 @@ return [
 
     'allowed_methods' => ['*'],
 
-    // Cambia esto según la URL de tu frontend en desarrollo
-    'allowed_origins' => ['http://localhost:3000'],
+    // Acepta localhost y tu IP local con cualquier subruta
+    'allowed_origins' => [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://192.168.1.205:3000', // esto cubre http://192.168.1.205:3000/captura también
+    ],
 
     'allowed_origins_patterns' => [],
 
@@ -17,7 +21,6 @@ return [
 
     'max_age' => 0,
 
-    // Si vas a usar cookies o tokens con credenciales, cámbialo a true
     'supports_credentials' => true,
 
 ];

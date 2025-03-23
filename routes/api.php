@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\ProspectoController;
 
 /*
 |--------------------------------------------------------------------------
@@ -17,3 +18,10 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
+
+Route::get('/ping', function () {
+    return response()->json(['message' => 'pong!']);
+});
+//Rutas y metodos para los prospectos
+Route::get('/prospectos', [ProspectoController::class, 'index']);
+Route::post('/prospectos', [ProspectoController::class, 'store']);
