@@ -38,6 +38,8 @@ class ProspectoController extends Controller
             'nota2' => 'nullable|string',
             'nota3' => 'nullable|string',
             'cierre' => 'nullable|string',
+            'departamento' => 'required|string',  // Agregado: validación obligatoria
+            'municipio' => 'required|string'        // Agregado: validación obligatoria
         ]);
 
         $prospecto = Prospecto::create([
@@ -51,11 +53,13 @@ class ProspectoController extends Controller
             'notas_generales' => $validated['notasGenerales'] ?? null,
             'observaciones' => $validated['observaciones'] ?? null,
             'interes' => $validated['interes'] ?? null,
-            'status' => $validated['status'] ?? 'En seguimiento', // ✅ valor por defecto
+            'status' => $validated['status'] ?? 'En seguimiento',
             'nota1' => $validated['nota1'] ?? null,
             'nota2' => $validated['nota2'] ?? null,
             'nota3' => $validated['nota3'] ?? null,
             'cierre' => $validated['cierre'] ?? null,
+            'departamento' => $validated['departamento'],  // Agregado
+            'municipio' => $validated['municipio']         // Agregado
         ]);
 
         return response()->json([
@@ -103,13 +107,15 @@ class ProspectoController extends Controller
             'notasGenerales' => 'nullable|string',
             'observaciones' => 'nullable|string',
             'interes' => 'nullable|string',
-            'status' => 'nullable|string', // ✅ incluido en update también
+            'status' => 'nullable|string',
             'nota1' => 'nullable|string',
             'nota2' => 'nullable|string',
             'nota3' => 'nullable|string',
             'cierre' => 'nullable|string',
+            'departamento' => 'nullable|string',  // Agregado (puedes hacerlo required si lo necesitas)
+            'municipio' => 'nullable|string'       // Agregado (puedes hacerlo required si lo necesitas)
         ]);
-
+        
         // Asignar valores si están presentes
         if (isset($validated['fecha'])) {
             $prospecto->fecha = $validated['fecha'];
@@ -156,7 +162,13 @@ class ProspectoController extends Controller
         if (isset($validated['cierre'])) {
             $prospecto->cierre = $validated['cierre'];
         }
-
+        if (isset($validated['departamento'])) {
+            $prospecto->departamento = $validated['departamento'];
+        }
+        if (isset($validated['municipio'])) {
+            $prospecto->municipio = $validated['municipio'];
+        }
+        
         $prospecto->save();
 
         return response()->json([

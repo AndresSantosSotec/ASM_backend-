@@ -3,6 +3,8 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\ProspectoController;
+use App\Http\Controllers\Api\ProgramaController;
+use App\Http\Controllers\Api\UbicacionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -25,3 +27,12 @@ Route::get('/ping', function () {
 //Rutas y metodos para los prospectos
 Route::get('/prospectos', [ProspectoController::class, 'index']);
 Route::post('/prospectos', [ProspectoController::class, 'store']);
+
+
+//Rutas y metodos para los programas
+//obtener programas
+Route::get('/programas', [ProgramaController::class, 'ObtenerProgramas']);
+
+//Rutas y metodos para las ubicacioneroi
+Route::get('/ubicacion/{paisId}', [UbicacionController::class, 'getUbicacionByPais']);
+//rutas para ontener el pais por id

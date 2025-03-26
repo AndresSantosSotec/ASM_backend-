@@ -24,6 +24,8 @@ class Prospecto extends Model
         'nota2',
         'nota3',
         'cierre',
-        'status', // 👈 Este campo debe estar aquí
+        'status',
+        'departamento',   // Nuevo campo
+        'municipio'       // Nuevo campo
     ];
 }
