@@ -44,23 +44,59 @@ class User extends Authenticatable
      * @var array<string, string>
      */
     protected $casts = [
-        'is_active' => 'boolean',
-        'email_verified' => 'boolean',
-        'mfa_enabled' => 'boolean',
+        'is_active'         => 'boolean',
+        'email_verified'    => 'boolean',
+        'mfa_enabled'       => 'boolean',
         'email_verified_at' => 'datetime',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
-        'last_login' => 'datetime',
-        'deleted_at' => 'datetime',
+        'created_at'        => 'datetime',
+        'updated_at'        => 'datetime',
+        'last_login'        => 'datetime',
+        'deleted_at'        => 'datetime',
     ];
 
     /**
-     * Get the full name of the user.
+     * Obtiene el nombre completo del usuario.
      *
      * @return string
      */
     public function getFullNameAttribute()
     {
         return "{$this->first_name} {$this->last_name}";
+    }
+
+    /**
+     * Relación: asignación de rol para el usuario.
+     */
+    public function userRole()
+    {
+        return $this->hasOne(\App\Models\UserRole::class, 'user_id');
+    }
+
+    /**
+     * Accesor para obtener el nombre del rol asignado.
+     * Si el usuario tiene una asignación de rol y ésta tiene un rol relacionado, devuelve su nombre;
+     * en caso contrario, devuelve una cadena vacía.
+     *
+     * @return string
+     */
+    public function getRolAttribute()
+    {
+        return $this->userRole && $this->userRole->role ? $this->userRole->role->name : '';
+    }
+
+    /**
+     * Relación para las sesiones activas del usuario.
+     */
+    public function sessions()
+    {
+        return $this->hasMany(\App\Models\Session::class, 'user_id');
+    }
+
+    /**
+     * Relación para los registros de auditoría asociados al usuario.
+     */
+    public function auditLogs()
+    {
+        return $this->hasMany(\App\Models\AuditLog::class, 'user_id');
     }
 }
