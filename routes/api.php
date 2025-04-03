@@ -71,12 +71,12 @@ Route::delete('modules/{id}', [ModulesController::class, 'destroy']); // Elimina
 
 //Rutas para Vistas de Modulos
 Route::prefix('modules/{moduleId}')->group(function () {
-    Route::get('views', [ModulesViewsController::class, 'index']);             // Listar vistas del módulo
-    Route::post('views', [ModulesViewsController::class, 'store']);            // Crear nueva vista para el módulo
-    Route::get('views/{viewId}', [ModulesViewsController::class, 'show']);     // Mostrar vista específica
-    Route::put('views/{viewId}', [ModulesViewsController::class, 'update']);   // Actualizar vista específica
-    Route::delete('views/{viewId}', [ModulesViewsController::class, 'destroy']); // Eliminar vista
-    Route::put('views-order', [ModulesViewsController::class, 'updateOrder']); // Actualizar orden de vistas
+    Route::get('views', [ModulesViewsController::class, 'index']);
+    Route::post('views', [ModulesViewsController::class, 'store']);
+    Route::get('views/{viewId}', [ModulesViewsController::class, 'show']);
+    Route::put('views/{viewId}', [ModulesViewsController::class, 'update']);
+    Route::delete('views/{viewId}', [ModulesViewsController::class, 'destroy']);
+    Route::put('views-order', [ModulesViewsController::class, 'updateOrder']);
 });
 
 //routes de Permisos 
