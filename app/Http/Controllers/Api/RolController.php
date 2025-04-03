@@ -41,7 +41,8 @@ class RolController extends Controller
             'description' => 'nullable|string',
             'is_system'   => 'required|boolean',
             'user_count'  => 'nullable|integer',
-            'type'        => 'required|string|max:100',
+            // se cambia de "required" a "nullable"
+            'type'        => 'nullable|string|max:100',
         ]);
 
         $role = Role::create($validatedData);
@@ -65,7 +66,8 @@ class RolController extends Controller
             'description' => 'nullable|string',
             'is_system'   => 'sometimes|required|boolean',
             'user_count'  => 'nullable|integer',
-            'type'        => 'sometimes|required|string|max:100',
+            // se cambia de "required" a "nullable"
+            'type'        => 'sometimes|nullable|string|max:100',
         ]);
 
         $role->update($validatedData);

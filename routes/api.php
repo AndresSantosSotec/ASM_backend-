@@ -10,6 +10,10 @@ use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\LoginController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\SessionController;
+use App\Http\Controllers\Api\ModulesController;
+use App\Http\Controllers\Api\ModulesViewsController;
+use App\Http\Controllers\Api\UserPermisosController;
+
 
 // Rutas generales
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
@@ -23,7 +27,6 @@ Route::get('/ping', function () {
 // Rutas para prospectos
 Route::get('/prospectos', [ProspectoController::class, 'index']);
 Route::post('/prospectos', [ProspectoController::class, 'store']);
-
 // Rutas para programas
 Route::get('/programas', [ProgramaController::class, 'ObtenerProgramas']);
 
@@ -56,4 +59,38 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/sessions', [SessionController::class, 'index']);
     Route::put('/sessions/{id}/close', [SessionController::class, 'closeSession']);
     Route::put('/sessions/close-all', [SessionController::class, 'closeAllSessions']);
+});
+
+
+//Rutas Para Modulos 
+Route::get('modules', [ModulesController::class, 'index']);         // Obtener todos los módulos
+Route::post('modules', [ModulesController::class, 'store']);        // Agregado de nuevos modulos
+Route::get('modules/{id}', [ModulesController::class, 'show']);     // Obtener un módulo específico
+Route::put('modules/{id}', [ModulesController::class, 'update']);   // Actualizar un módulo
+Route::delete('modules/{id}', [ModulesController::class, 'destroy']); // Eliminar un módulo
+
+//Rutas para Vistas de Modulos
+Route::prefix('modules/{moduleId}')->group(function () {
+    Route::get('views', [ModulesViewsController::class, 'index']);             // Listar vistas del módulo
+    Route::post('views', [ModulesViewsController::class, 'store']);            // Crear nueva vista para el módulo
+    Route::get('views/{viewId}', [ModulesViewsController::class, 'show']);     // Mostrar vista específica
+    Route::put('views/{viewId}', [ModulesViewsController::class, 'update']);   // Actualizar vista específica
+    Route::delete('views/{viewId}', [ModulesViewsController::class, 'destroy']); // Eliminar vista
+    Route::put('views-order', [ModulesViewsController::class, 'updateOrder']); // Actualizar orden de vistas
+});
+
+//routes de Permisos 
+
+Route::prefix('userpermissions')->group(function () {
+    // Listar permisos asignados a un usuario (se espera que se pase ?user_id=)
+    Route::get('/', [UserPermisosController::class, 'index']);
+
+    // Asignar o actualizar permisos del usuario
+    Route::post('/', [UserPermisosController::class, 'store']);
+
+    // Actualizar un permiso específico (por ejemplo, para modificar el 'scope')
+    Route::put('/{id}', [UserPermisosController::class, 'update']);
+
+    // Eliminar un permiso asignado al usuario
+    Route::delete('/{id}', [UserPermisosController::class, 'destroy']);
 });
