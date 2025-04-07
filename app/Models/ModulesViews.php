@@ -20,12 +20,14 @@ class ModulesViews extends Model
         'submenu',
         'view_path',
         'status',
-        'order_num'
+        'order_num',
+        'icon'
     ];
 
     protected $casts = [
         'status' => 'boolean',
-        'order_num' => 'integer'
+        'order_num' => 'integer',
+        'icon'=> 'string'
     ];
 
     /**

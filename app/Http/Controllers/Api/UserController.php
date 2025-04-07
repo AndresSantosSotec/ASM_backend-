@@ -6,6 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+//use Illuminate\Support\Str;
+use Maatwebsite\Excel\Concerns\FromCollection;
+use App\Exports\UserExport;
+use Maatwebsite\Excel\Facades\Excel;
 
 class UserController extends Controller
 {
@@ -26,6 +30,11 @@ class UserController extends Controller
         });
 
         return response()->json($users);
+    }
+
+    public function export()
+    {
+        return Excel::download(new UserExport, 'usuarios.xlsx');
     }
 
     /**

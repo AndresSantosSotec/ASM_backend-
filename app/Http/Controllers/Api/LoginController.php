@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use App\Models\User;
 use App\Models\Session;
+use App\Models\UserPermisos;
+use App\Models\ModulesViews;
 use Carbon\Carbon;
 
 class LoginController extends Controller
@@ -37,8 +39,7 @@ class LoginController extends Controller
         }
 
         // Actualizar la última conexión del usuario
-        $user->last_login = Carbon::now();
-        $user->save();
+        $user->update(['last_login' => Carbon::now()]);
 
         // Registrar la sesión en la tabla 'sessions'
         $session = Session::create([
@@ -54,9 +55,41 @@ class LoginController extends Controller
         // Generar token de acceso usando Laravel Sanctum
         $token = $user->createToken('authToken')->plainTextToken;
 
+        // Obtener permisos asignados al usuario (opcional, si los necesitas en el frontend)
+        $permissions = UserPermisos::with('permission')
+            ->where('user_id', $user->id)
+            ->get();
+
+        // Obtener únicamente las vistas de módulos que el usuario tiene asignadas.
+        // Se hace una subconsulta para obtener solo aquellas moduleviews cuyo id esté presente en la tabla de permisos del usuario.
+        $allowedViews = ModulesViews::whereIn('id', function($query) use ($user) {
+                $query->select('permission_id')
+                      ->from('userpermissions')
+                      ->where('user_id', $user->id);
+            })
+            ->with('module')
+            ->where('status', 1)
+            ->orderBy('order_num')
+            ->get();
+
+        // Retornar la respuesta con toda la información necesaria
         return response()->json([
-            'token' => $token,
-            'user'  => $user,
+            'user_id'     => $user->id,
+            'name'        => $user->name,
+            'token'        => $token,
+            'user'         => $user,
+            'permissions'  => $permissions,
+            'session'      => [
+                'id'            => $session->id,
+                'token_hash'    => $session->token_hash,
+                'ip_address'    => $session->ip_address,
+                'user_agent'    => $session->user_agent,
+                'created_at'    => $session->created_at,
+                'last_activity' => $session->last_activity,
+            ],
+            'allowedViews' => $allowedViews,
+            'success'      => true,
+            'message'      => 'Autenticación exitosa',
         ]);
     }
 
@@ -65,14 +98,10 @@ class LoginController extends Controller
      */
     public function logout(Request $request)
     {
-        // Obtiene el usuario autenticado a partir del token actual
         $user = $request->user();
 
         if ($user) {
-            // Revocar el token actual de Laravel Sanctum
             $user->currentAccessToken()->delete();
-
-            // Marcar todas las sesiones del usuario como inactivas
             Session::where('user_id', $user->id)
                 ->update(['is_active' => false]);
 

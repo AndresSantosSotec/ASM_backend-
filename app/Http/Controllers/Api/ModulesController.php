@@ -21,14 +21,18 @@ class ModulesController extends Controller
             'description' => 'nullable|string',
             'status'      => 'required|boolean',
             'view_count'  => 'nullable|integer',
-            'icon'        => 'nullable|string|max:255',
+            'icon'        => 'nullable|string|max:255', // valida si se envía con este nombre
             'order_num'   => 'nullable|integer',
         ]);
-    
+
+        // Si el front-end envía el campo "icono", se mapea a "icon"
+        if ($request->has('icono')) {
+            $validated['icon'] = $request->input('icono');
+        }
+
         $module = Modules::create($validated);
         return response()->json($module, 201);
     }
-    
 
     public function show($id)
     {
@@ -50,13 +54,17 @@ class ModulesController extends Controller
         }
 
         $validated = $request->validate([
-            'name' => 'sometimes|required|string|max:255',
+            'name'        => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
-            'status' => 'sometimes|required|boolean',
-            'view_count' => 'nullable|integer',
-            'icon' => 'nullable|string|max:255',
-            'order_num' => 'nullable|integer',
+            'status'      => 'sometimes|required|boolean',
+            'view_count'  => 'nullable|integer',
+            'icon'        => 'nullable|string|max:255',
+            'order_num'   => 'nullable|integer',
         ]);
+
+        if ($request->has('icono')) {
+            $validated['icon'] = $request->input('icono');
+        }
 
         $module->update($validated);
 
@@ -72,7 +80,6 @@ class ModulesController extends Controller
         }
     
         // Eliminar primero las vistas asociadas
-        // Asumiendo que tienes una relación "views" definida en tu modelo Modules
         $module->views()->delete();
         
         // Luego eliminar el módulo

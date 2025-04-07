@@ -57,33 +57,39 @@ class ModulesViewsController extends Controller
         }
     
         $validator = Validator::make($request->all(), [
-            'menu' => 'required|string|max:255',
-            'submenu' => 'nullable|string|max:255',
+            'menu'      => 'required|string|max:255',
+            'submenu'   => 'nullable|string|max:255',
             'view_path' => 'required|string|max:255|unique:moduleviews,view_path,NULL,id,module_id,'.$moduleId,
-            'status' => 'boolean',
-            'order_num' => 'required|integer'
+            'status'    => 'boolean',
+            'order_num' => 'required|integer',
+            'icon'      => 'nullable|string|max:255'  // Validación para el campo icon
         ]);
     
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors'  => $validator->errors()
             ], 422);
         }
     
-        $view = $module->views()->create($validator->validated());
+        $validatedData = $validator->validated();
+        // Si el front-end envía "icono" en lugar de "icon", lo mapeamos
+        if ($request->has('icono')) {
+            $validatedData['icon'] = $request->input('icono');
+        }
+    
+        $view = $module->views()->create($validatedData);
     
         // Incrementamos el contador de vistas en el módulo
         $module->increment('view_count');
     
         return response()->json([
             'success' => true,
-            'data' => $view,
+            'data'    => $view,
             'message' => 'Vista creada exitosamente'
         ], 201);
     }
     
-
     /**
      * Display the specified module view.
      *
@@ -108,7 +114,7 @@ class ModulesViewsController extends Controller
             'data' => $view
         ]);
     }
-
+    
     /**
      * Update the specified module view.
      *
@@ -130,8 +136,8 @@ class ModulesViewsController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'menu' => 'required|string|max:255',
-            'submenu' => 'nullable|string|max:255',
+            'menu'      => 'required|string|max:255',
+            'submenu'   => 'nullable|string|max:255',
             'view_path' => [
                 'required',
                 'string',
@@ -140,26 +146,32 @@ class ModulesViewsController extends Controller
                     return $query->where('module_id', $moduleId);
                 })
             ],
-            'status' => 'boolean',
-            'order_num' => 'required|integer'
+            'status'    => 'boolean',
+            'order_num' => 'required|integer',
+            'icon'      => 'nullable|string|max:255'  // Validación para el campo icon
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors'  => $validator->errors()
             ], 422);
         }
+        
+        $validatedData = $validator->validated();
+        if ($request->has('icono')) {
+            $validatedData['icon'] = $request->input('icono');
+        }
 
-        $view->update($validator->validated());
+        $view->update($validatedData);
 
         return response()->json([
             'success' => true,
-            'data' => $view,
+            'data'    => $view,
             'message' => 'Vista actualizada exitosamente'
         ]);
     }
-
+    
     /**
      * Remove the specified module view.
      *
@@ -186,7 +198,7 @@ class ModulesViewsController extends Controller
             'message' => 'Vista eliminada exitosamente'
         ]);
     }
-
+    
     /**
      * Update the order of module views.
      *

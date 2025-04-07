@@ -22,6 +22,12 @@ class ProspectoController extends Controller
     // Crear un nuevo prospecto
     public function store(Request $request)
     {
+        // Verificar que el usuario esté autenticado
+        $user = auth()->user();
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no autenticado'], 401);
+        }
+
         $validated = $request->validate([
             'fecha' => 'required|date',
             'nombreCompleto' => 'required|string',
@@ -33,15 +39,16 @@ class ProspectoController extends Controller
             'notasGenerales' => 'nullable|string',
             'observaciones' => 'nullable|string',
             'interes' => 'nullable|string',
-            'status' => 'nullable|string', // ✅ nuevo campo
+            'status' => 'nullable|string',
             'nota1' => 'nullable|string',
             'nota2' => 'nullable|string',
             'nota3' => 'nullable|string',
             'cierre' => 'nullable|string',
-            'departamento' => 'required|string',  // Agregado: validación obligatoria
-            'municipio' => 'required|string'        // Agregado: validación obligatoria
+            'departamento' => 'required|string',
+            'municipio' => 'required|string'
         ]);
 
+        // Al crear el prospecto, se asigna el id del usuario autenticado
         $prospecto = Prospecto::create([
             'fecha' => $validated['fecha'],
             'nombre_completo' => $validated['nombreCompleto'],
@@ -58,8 +65,9 @@ class ProspectoController extends Controller
             'nota2' => $validated['nota2'] ?? null,
             'nota3' => $validated['nota3'] ?? null,
             'cierre' => $validated['cierre'] ?? null,
-            'departamento' => $validated['departamento'],  // Agregado
-            'municipio' => $validated['municipio']         // Agregado
+            'departamento' => $validated['departamento'],
+            'municipio' => $validated['municipio'],
+            'created_by' => $user->id,  // Aquí se guarda el id del usuario autenticado
         ]);
 
         return response()->json([
@@ -88,6 +96,12 @@ class ProspectoController extends Controller
     // Actualizar un prospecto
     public function update(Request $request, $id)
     {
+        // Verificar que el usuario esté autenticado
+        $user = auth()->user();
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no autenticado'], 401);
+        }
+
         $prospecto = Prospecto::find($id);
 
         if (!$prospecto) {
@@ -112,11 +126,10 @@ class ProspectoController extends Controller
             'nota2' => 'nullable|string',
             'nota3' => 'nullable|string',
             'cierre' => 'nullable|string',
-            'departamento' => 'nullable|string',  // Agregado (puedes hacerlo required si lo necesitas)
-            'municipio' => 'nullable|string'       // Agregado (puedes hacerlo required si lo necesitas)
+            'departamento' => 'nullable|string',
+            'municipio' => 'nullable|string'
         ]);
-        
-        // Asignar valores si están presentes
+
         if (isset($validated['fecha'])) {
             $prospecto->fecha = $validated['fecha'];
         }
@@ -132,7 +145,7 @@ class ProspectoController extends Controller
         if (isset($validated['genero'])) {
             $prospecto->genero = $validated['genero'];
         }
-        if (array_key_exists('empresaDondeLaboraActualmente', $validated)) {
+        if (isset($validated['empresaDondeLaboraActualmente'])) {
             $prospecto->empresa_donde_labora_actualmente = $validated['empresaDondeLaboraActualmente'];
         }
         if (isset($validated['puesto'])) {
@@ -168,7 +181,9 @@ class ProspectoController extends Controller
         if (isset($validated['municipio'])) {
             $prospecto->municipio = $validated['municipio'];
         }
-        
+
+        // Asignar el id del usuario que actualiza
+        $prospecto->updated_by = $user->id;
         $prospecto->save();
 
         return response()->json([
@@ -176,7 +191,7 @@ class ProspectoController extends Controller
             'data' => $prospecto,
         ]);
     }
-
+    
     // Eliminar un prospecto
     public function destroy($id)
     {

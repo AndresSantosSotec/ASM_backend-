@@ -129,4 +129,6 @@ class UserPermisosController extends Controller
             'message' => 'Permiso eliminado correctamente.'
         ], 200);
     }
+
+    
 }

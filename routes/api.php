@@ -24,9 +24,16 @@ Route::get('/ping', function () {
     return response()->json(['message' => 'pong!']);
 });
 
-// Rutas para prospectos
+// Rutas públicas para prospectos
 Route::get('/prospectos', [ProspectoController::class, 'index']);
-Route::post('/prospectos', [ProspectoController::class, 'store']);
+Route::get('/prospectos/{id}', [ProspectoController::class, 'show']);
+
+// Rutas protegidas para prospectos (requieren autenticación)
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/prospectos', [ProspectoController::class, 'store']);
+    Route::put('/prospectos/{id}', [ProspectoController::class, 'update']);
+    Route::delete('/prospectos/{id}', [ProspectoController::class, 'destroy']);
+});
 // Rutas para programas
 Route::get('/programas', [ProgramaController::class, 'ObtenerProgramas']);
 
@@ -48,6 +55,9 @@ Route::put('/users/{id}', [UserController::class, 'update']);
 Route::delete('/users/{id}', [UserController::class, 'destroy']);
 Route::post('/users/{id}/restore', [UserController::class, 'restore']);
 Route::put('/users/bulk-update', [UserController::class, 'bulkUpdate']);
+Route::post('/users/bulk-delete', [UserController::class, 'bulkDelete']);
+Route::get('/users/export', [UserController::class, 'export']);
+
 
 // Rutas de Login & Logout
 Route::post('/login', [LoginController::class, 'login']);

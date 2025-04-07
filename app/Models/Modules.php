@@ -48,7 +48,8 @@ class Modules extends Model
     protected $casts = [
         'status' => 'boolean',
         'view_count' => 'integer',
-        'order_num' => 'integer'
+        'order_num' => 'integer',
+        'icon' => 'string'
     ];
 
     /**

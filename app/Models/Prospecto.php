@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,7 +24,11 @@ class Prospecto extends Model
         'nota3',
         'cierre',
         'status',
-        'departamento',   // Nuevo campo
-        'municipio'       // Nuevo campo
+        'departamento',
+        'municipio',
+        // Nuevos campos para auditoría
+        'created_by',
+        'updated_by',
+        'deleted_by'
     ];
 }
