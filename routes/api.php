@@ -25,15 +25,18 @@ Route::get('/ping', function () {
 });
 
 // Rutas públicas para prospectos
-Route::get('/prospectos', [ProspectoController::class, 'index']);
 Route::get('/prospectos/{id}', [ProspectoController::class, 'show']);
 
-// Rutas protegidas para prospectos (requieren autenticación)
+// Rutas protegidas para prospectos (todas requieren autenticación)
 Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/prospectos', [ProspectoController::class, 'index']);
+    Route::get('/prospectos/{id}', [ProspectoController::class, 'show']);
     Route::post('/prospectos', [ProspectoController::class, 'store']);
     Route::put('/prospectos/{id}', [ProspectoController::class, 'update']);
+    Route::put('/prospectos/{id}/status', [ProspectoController::class, 'updateStatus']);
     Route::delete('/prospectos/{id}', [ProspectoController::class, 'destroy']);
 });
+
 // Rutas para programas
 Route::get('/programas', [ProgramaController::class, 'ObtenerProgramas']);
 

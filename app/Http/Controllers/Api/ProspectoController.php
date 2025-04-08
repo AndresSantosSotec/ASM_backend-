@@ -9,16 +9,31 @@ use Illuminate\Http\Request;
 class ProspectoController extends Controller
 {
     // Obtener todos los prospectos
-    public function index()
+    public function index(Request $request)
     {
-        $prospectos = Prospecto::all();
-
+        // Obtener el usuario autenticado
+        $user = auth()->user();
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no autenticado'], 401);
+        }
+    
+        // Verificar si el usuario tiene el rol "administrador" usando el accesor 'rol'
+        // Nota: el accesor en el modelo User se encarga de retornar el nombre del rol.
+        $isAdmin = strtolower($user->rol) === 'administrador';
+    
+        // Devolver todos los prospectos si es administrador o solo los creados por él en otro caso
+        if ($isAdmin) {
+            $prospectos = Prospecto::all();
+        } else {
+            $prospectos = Prospecto::where('created_by', $user->id)->get();
+        }
+    
         return response()->json([
             'message' => 'Datos de prospectos obtenidos con éxito',
             'data' => $prospectos,
         ]);
     }
-
+    
     // Crear un nuevo prospecto
     public function store(Request $request)
     {
@@ -67,7 +82,7 @@ class ProspectoController extends Controller
             'cierre' => $validated['cierre'] ?? null,
             'departamento' => $validated['departamento'],
             'municipio' => $validated['municipio'],
-            'created_by' => $user->id,  // Aquí se guarda el id del usuario autenticado
+            'created_by' => $user->id, // Se guarda el id del usuario autenticado
         ]);
 
         return response()->json([
@@ -207,6 +222,39 @@ class ProspectoController extends Controller
 
         return response()->json([
             'message' => 'Prospecto eliminado con éxito',
+        ]);
+    }
+    
+    // Actualización de estatus: Actualizar solo el estado de un prospecto
+    public function updateStatus(Request $request, $id)
+    {
+        // Verificar que el usuario esté autenticado
+        $user = auth()->user();
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no autenticado'], 401);
+        }
+
+        // Validar el nuevo estado
+        $validated = $request->validate([
+            'status' => 'required|string'
+        ]);
+
+        $prospecto = Prospecto::find($id);
+
+        if (!$prospecto) {
+            return response()->json([
+                'message' => 'Prospecto no encontrado'
+            ], 404);
+        }
+
+        // Actualizar el estado y asignar el id del usuario que realiza la actualización
+        $prospecto->status = $validated['status'];
+        $prospecto->updated_by = $user->id;
+        $prospecto->save();
+
+        return response()->json([
+            'message' => 'Estado del prospecto actualizado con éxito',
+            'data' => $prospecto,
         ]);
     }
 }

@@ -85,6 +85,16 @@ class User extends Authenticatable
     }
 
     /**
+     * Método helper para determinar si el usuario es administrador.
+     *
+     * @return bool
+     */
+    public function isAdmin()
+    {
+        return strtolower($this->rol) === 'administrador';
+    }
+
+    /**
      * Relación para las sesiones activas del usuario.
      */
     public function sessions()
