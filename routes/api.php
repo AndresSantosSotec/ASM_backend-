@@ -13,7 +13,9 @@ use App\Http\Controllers\Api\SessionController;
 use App\Http\Controllers\Api\ModulesController;
 use App\Http\Controllers\Api\ModulesViewsController;
 use App\Http\Controllers\Api\UserPermisosController;
-
+use App\Http\Controllers\Api\ActividadesController;
+use App\Http\Controllers\Api\CitasController;
+use App\Http\Controllers\Api\InteraccionesController;
 
 // Rutas generales
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
@@ -106,4 +108,31 @@ Route::prefix('userpermissions')->group(function () {
 
     // Eliminar un permiso asignado al usuario
     Route::delete('/{id}', [UserPermisosController::class, 'destroy']);
+});
+
+//Estas son las rutas para controlador de Actividades
+Route::prefix('actividades')->group(function () {
+    Route::get('/', [ActividadesController::class, 'index']); // Obtener todas las actividades
+    Route::get('/{id}', [ActividadesController::class, 'show']); // Obtener una actividad específica
+    Route::post('/', [ActividadesController::class, 'store']); // Crear una nueva actividad
+    Route::put('/{id}', [ActividadesController::class, 'update']); // Actualizar una actividad existente
+    Route::delete('/{id}', [ActividadesController::class, 'destroy']); // Eliminar una actividad
+});
+
+// Rutas protegidas para el controlador de Citas
+Route::middleware('auth:sanctum')->prefix('citas')->group(function () {
+    Route::get('/', [CitasController::class, 'index']); // List all citas
+    Route::get('/{id}', [CitasController::class, 'show']); // Show a single cita
+    Route::post('/', [CitasController::class, 'store']); // Create a new cita
+    Route::put('/{id}', [CitasController::class, 'update']); // Update an existing cita
+    Route::delete('/{id}', [CitasController::class, 'destroy']); // Delete a cita
+});
+
+// Rutas protegidas para el controlador de Interacciones
+Route::middleware('auth:sanctum')->prefix('interacciones')->group(function () {
+    Route::get('/', [InteraccionesController::class, 'index']); // List all interacciones
+    Route::get('/{id}', [InteraccionesController::class, 'show']); // Show a single interaccion
+    Route::post('/', [InteraccionesController::class, 'store']); // Create a new interaccion
+    Route::put('/{id}', [InteraccionesController::class, 'update']); // Update an existing interaccion
+    Route::delete('/{id}', [InteraccionesController::class, 'destroy']); // Delete an interaccion
 });
