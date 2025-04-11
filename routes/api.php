@@ -13,6 +13,9 @@ use App\Http\Controllers\Api\SessionController;
 use App\Http\Controllers\Api\ModulesController;
 use App\Http\Controllers\Api\ModulesViewsController;
 use App\Http\Controllers\Api\UserPermisosController;
+use App\Http\Controllers\Api\ColumnConfigurationController;
+use App\Http\Controllers\Api\ProspectosImportController;
+use App\Http\Controllers\Api\CorreoController;
 
 
 // Rutas generales
@@ -93,7 +96,6 @@ Route::prefix('modules/{moduleId}')->group(function () {
 });
 
 //routes de Permisos 
-
 Route::prefix('userpermissions')->group(function () {
     // Listar permisos asignados a un usuario (se espera que se pase ?user_id=)
     Route::get('/', [UserPermisosController::class, 'index']);
@@ -107,3 +109,33 @@ Route::prefix('userpermissions')->group(function () {
     // Eliminar un permiso asignado al usuario
     Route::delete('/{id}', [UserPermisosController::class, 'destroy']);
 });
+
+// Rutas para el Column COnfiguration
+// Grupo de rutas para la configuración de columnas de prospectos
+Route::prefix('/columns')->group(function () {
+    // Listar todas las columnas configurables
+    Route::get('/', [ColumnConfigurationController::class, 'index'])
+        ->name('prospectos.columns.index');
+
+    // Crear o actualizar una configuración de columna (upsert)
+    Route::post('/', [ColumnConfigurationController::class, 'store'])
+        ->name('prospectos.columns.store');
+
+    // Actualizar una configuración de columna específica
+    Route::put('/{id}', [ColumnConfigurationController::class, 'update'])
+        ->name('prospectos.columns.update');
+
+    // Eliminar una configuración de columna específica
+    Route::delete('/{id}', [ColumnConfigurationController::class, 'destroy'])
+        ->name('prospectos.columns.destroy');
+});
+
+// Rutas públicas para la importación de prospectos (sin autenticación)
+Route::middleware('auth:sanctum')->group(function () {
+    // Ruta protegida para la importación de prospectos
+    Route::post('/import', [ProspectosImportController::class, 'uploadExcel'])->name('prospectos.import');
+});
+
+
+Route::post('/enviar-correo', [CorreoController::class, 'enviar']);
+
