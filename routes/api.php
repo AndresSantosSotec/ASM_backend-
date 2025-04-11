@@ -16,6 +16,8 @@ use App\Http\Controllers\Api\UserPermisosController;
 use App\Http\Controllers\Api\ColumnConfigurationController;
 use App\Http\Controllers\Api\ProspectosImportController;
 use App\Http\Controllers\Api\CorreoController;
+use App\Http\Controllers\Api\TareasAsesorController;
+use App\Http\Controllers\Api\TareasGen;
 
 
 // Rutas generales
@@ -136,6 +138,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/import', [ProspectosImportController::class, 'uploadExcel'])->name('prospectos.import');
 });
 
-
+//enviar correo
 Route::post('/enviar-correo', [CorreoController::class, 'enviar']);
+
+
+//routes Protegidas de las tareas de los asesores   
+Route::middleware('auth:sanctum')->group(function () {
+    // Ruta protegida para la importación de prospectos
+
+});
+
+//routes para tareas genericas
+Route::middleware('auth:sanctum')->group(function () {
+    // Ruta protegida para la importación de prospectos
+    
+});
 
