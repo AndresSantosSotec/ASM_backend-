@@ -8,6 +8,8 @@ $baseDir = dirname($vendorDir);
 return array(
     'App\\Console\\Kernel' => $baseDir . '/app/Console/Kernel.php',
     'App\\Exceptions\\Handler' => $baseDir . '/app/Exceptions/Handler.php',
+    'App\\Exports\\UserEscport' => $baseDir . '/app/Exports/UserEscport.php',
+    'App\\Exports\\UserExport' => $baseDir . '/app/Exports/UserExport.php',
     'App\\Http\\Controllers\\Api\\DepartamentoController' => $baseDir . '/app/Http/Controllers/Api/DepartamentoController.php',
     'App\\Http\\Controllers\\Api\\LoginController' => $baseDir . '/app/Http/Controllers/Api/LoginController.php',
     'App\\Http\\Controllers\\Api\\ModulesController' => $baseDir . '/app/Http/Controllers/Api/ModulesController.php',
@@ -35,6 +37,7 @@ return array(
     'App\\Http\\Middleware\\TrustProxies' => $baseDir . '/app/Http/Middleware/TrustProxies.php',
     'App\\Http\\Middleware\\ValidateSignature' => $baseDir . '/app/Http/Middleware/ValidateSignature.php',
     'App\\Http\\Middleware\\VerifyCsrfToken' => $baseDir . '/app/Http/Middleware/VerifyCsrfToken.php',
+    'App\\Imports\\UserImport' => $baseDir . '/app/Imports/UserImport.php',
     'App\\Models\\AuditLog' => $baseDir . '/app/Models/AuditLog.php',
     'App\\Models\\Departamento' => $baseDir . '/app/Models/Departamento.php',
     'App\\Models\\Modules' => $baseDir . '/app/Models/Modules.php',
