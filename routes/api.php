@@ -16,12 +16,13 @@ use App\Http\Controllers\Api\UserPermisosController;
 use App\Http\Controllers\Api\ColumnConfigurationController;
 use App\Http\Controllers\Api\ProspectosImportController;
 use App\Http\Controllers\Api\CorreoController;
-use App\Http\Controllers\Api\TareasAsesorController;
-use App\Http\Controllers\Api\TareasGen;
-
+//Controller de actividades
 use App\Http\Controllers\Api\ActividadesController;
 use App\Http\Controllers\Api\CitasController;
 use App\Http\Controllers\Api\InteraccionesController;
+//Controller de tareas genericas
+use App\Http\Controllers\Api\TareasGenController;
+
 
 // Rutas generales
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
@@ -43,6 +44,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/prospectos/{id}', [ProspectoController::class, 'update']);
     Route::put('/prospectos/{id}/status', [ProspectoController::class, 'updateStatus']);
     Route::delete('/prospectos/{id}', [ProspectoController::class, 'destroy']);
+    Route::put('/prospectos/bulk‑assign', [ProspectoController::class, 'bulkAssign']);
 });
 
 // Rutas para programas
@@ -183,4 +185,13 @@ Route::middleware('auth:sanctum')->prefix('interacciones')->group(function () {
     Route::post('/', [InteraccionesController::class, 'store']); // Create a new interaccion
     Route::put('/{id}', [InteraccionesController::class, 'update']); // Update an existing interaccion
     Route::delete('/{id}', [InteraccionesController::class, 'destroy']); // Delete an interaccion
+});
+
+// Rutas para el controller de Tareas
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('tareas', [TareasGenController::class, 'index']);        // Listar todas las tareas (con filtro opcional)
+    Route::get('tareas/{id}', [TareasGenController::class, 'show']);      // Mostrar una tarea específica
+    Route::post('tareas', [TareasGenController::class, 'store']);         // Crear una nueva tarea
+    Route::put('tareas/{id}', [TareasGenController::class, 'update']);      // Actualizar una tarea existente
+    Route::delete('tareas/{id}', [TareasGenController::class, 'destroy']);  // Eliminar una tarea
 });
