@@ -22,12 +22,32 @@ use App\Http\Controllers\Api\CitasController;
 use App\Http\Controllers\Api\InteraccionesController;
 //Controller de tareas genericas
 use App\Http\Controllers\Api\TareasGenController;
+use App\Http\Controllers\PriceController;
+use App\Http\Controllers\Api\KardexPagoController;
+
+use App\Http\Controllers\Api\ProspectosDocumentoController;
+use App\Http\Controllers\Api\ConvenioController;
+
+use App\Http\Controllers\Api\KardexController;
+use App\Http\Controllers\Api\ProspectoProgramaController;
+use App\Http\Controllers\Api\EstudianteProgramaController;
+use App\Http\Controllers\Api\ProspectoConvenioController;
+use App\Http\Controllers\Api\ProspectoCuotaEstudianteController;
+use App\Http\Controllers\Api\PlanPagosController;
+
+use App\Http\Controllers\InscripcionController;
+
+
 
 
 // Rutas generales
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
+
+Route::post('/plan-pagos/generar', [PlanPagosController::class, 'generar']);
+
+Route::post('/inscripciones/finalizar', [InscripcionController::class, 'finalizar']);
 
 Route::get('/ping', function () {
     return response()->json(['message' => 'pong!']);
@@ -45,6 +65,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/prospectos/{id}/status', [ProspectoController::class, 'updateStatus']);
     Route::delete('/prospectos/{id}', [ProspectoController::class, 'destroy']);
     Route::put('/prospectos/bulk‑assign', [ProspectoController::class, 'bulkAssign']);
+    Route::get('/prospectos/status/{status}', [ProspectoController::class, 'filterByStatus']);
+   // Enviar contrato firmado por email
+   Route::post('/prospectos/{id}/enviar-contrato', [ProspectoController::class, 'enviarContrato']);
 });
 
 // Rutas para programas
@@ -137,28 +160,20 @@ Route::prefix('/columns')->group(function () {
         ->name('prospectos.columns.destroy');
 });
 
+
+
 // Rutas públicas para la importación de prospectos (sin autenticación)
 Route::middleware('auth:sanctum')->group(function () {
     // Ruta protegida para la importación de prospectos
     Route::post('/import', [ProspectosImportController::class, 'uploadExcel'])->name('prospectos.import');
 });
+//estudante programa controller 
+Route::prefix('estudiante-programa')->group(function () {
+    Route::post('/', [EstudianteProgramaController::class, 'store']);
+});
 
 //enviar correo
 Route::post('/enviar-correo', [CorreoController::class, 'enviar']);
-
-
-//routes Protegidas de las tareas de los asesores   
-Route::middleware('auth:sanctum')->group(function () {
-    // Ruta protegida para la importación de prospectos
-
-});
-
-//routes para tareas genericas
-Route::middleware('auth:sanctum')->group(function () {
-    // Ruta protegida para la importación de prospectos
-    
-});
-
 
 //Estas son las rutas para controlador de Actividades
 Route::prefix('actividades')->group(function () {
@@ -167,6 +182,16 @@ Route::prefix('actividades')->group(function () {
     Route::post('/', [ActividadesController::class, 'store']); // Crear una nueva actividad
     Route::put('/{id}', [ActividadesController::class, 'update']); // Actualizar una actividad existente
     Route::delete('/{id}', [ActividadesController::class, 'destroy']); // Eliminar una actividad
+});
+
+
+//rutas dedicadas unicamente a la creaciond documentos en la bd 
+Route::prefix('documentos')->group(function () {
+    Route::get('/', [ProspectosDocumentoController::class, 'index']); // Listar todos los documentos
+    Route::post('/', [ProspectosDocumentoController::class, 'store']); // Subir un nuevo documento
+    Route::get('/{id}', [ProspectosDocumentoController::class, 'show']); // Obtener un documento específico
+    Route::put('/{id}', [ProspectosDocumentoController::class, 'update']); // Actualizar un documento existente
+    Route::delete('/{id}', [ProspectosDocumentoController::class, 'destroy']); // Eliminar un documento
 });
 
 // Rutas protegidas para el controlador de Citas
@@ -195,3 +220,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('tareas/{id}', [TareasGenController::class, 'update']);      // Actualizar una tarea existente
     Route::delete('tareas/{id}', [TareasGenController::class, 'destroy']);  // Eliminar una tarea
 });
+
+Route::get('precios/programa/{programa}',      [PriceController::class, 'porPrograma']);
+Route::get('precios/convenio/{convenio}/{programa}', [PriceController::class, 'porConvenio']);
+
+Route::apiResource('convenios', ConvenioController::class);
+
+
+

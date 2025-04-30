@@ -10,10 +10,12 @@ return [
         'http://localhost:3000',
         'http://127.0.0.1:3000',
         'http://192.168.1.205:3000', // Este cubre también subrutas, ej: http://192.168.1.205:3000/captura
+        'https://www.systemamericanschool.com',
+        'https://systemamericanschool.com',
+        'https://api.systemamericanschool.com',
     ],
-
     'allowed_origins_patterns' => [],
-
+    
     'allowed_headers' => ['*'],
 
     'exposed_headers' => [],

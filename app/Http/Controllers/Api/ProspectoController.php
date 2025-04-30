@@ -5,15 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Prospecto;
 use Illuminate\Http\Request;
+use Barryvdh\DomPDF\Facade\Pdf as PDF;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\SendContractPdf;
 
 class ProspectoController extends Controller
 {
-    /**
-     * Listar prospectos.
-     * - Si es administrador, devuelve todos.
-     * - Si no, solo los creados por el propio usuario.
-     * Cada prospecto incluye la relación `creator`.
-     */
     public function index(Request $request)
     {
         $user = auth()->user();
@@ -22,139 +19,212 @@ class ProspectoController extends Controller
         }
 
         $isAdmin = strtolower($user->rol) === 'administrador';
-
         $query = Prospecto::with('creator');
-        if (! $isAdmin) {
+
+        if (!$isAdmin) {
             $query->where('created_by', $user->id);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
         }
 
         $prospectos = $query->get();
 
         return response()->json([
             'message' => 'Datos de prospectos obtenidos con éxito',
-            'data'    => $prospectos,
+            'data' => $prospectos,
         ]);
     }
 
-    /**
-     * Crear un prospecto y asignar `created_by` al usuario autenticado.
-     */
+    public function filterByStatus($status)
+    {
+        $prospectos = Prospecto::with('creator')
+            ->where('status', $status)
+            ->get();
+
+        return response()->json([
+            'message' => "Prospectos en estado “{$status}” obtenidos",
+            'data' => $prospectos,
+        ]);
+    }
+
     public function store(Request $request)
     {
         $user = auth()->user();
-        if (! $user) {
+        if (!$user) {
             return response()->json(['error' => 'Usuario no autenticado'], 401);
         }
 
         $v = $request->validate([
-            'fecha'                         => 'required|date',
-            'nombreCompleto'                => 'required|string',
-            'telefono'                      => 'required|string',
-            'correoElectronico'             => 'required|email',
-            'genero'                        => 'required|string',
+            'fecha' => 'required|date',
+            'nombreCompleto' => 'required|string',
+            'telefono' => 'required|string',
+            'correoElectronico' => 'required|email',
+            'genero' => 'required|string',
             'empresaDondeLaboraActualmente' => 'nullable|string',
-            'puesto'                        => 'nullable|string',
-            'notasGenerales'                => 'nullable|string',
-            'observaciones'                 => 'nullable|string',
-            'interes'                       => 'nullable|string',
-            'status'                        => 'nullable|string',
-            'nota1'                         => 'nullable|string',
-            'nota2'                         => 'nullable|string',
-            'nota3'                         => 'nullable|string',
-            'cierre'                        => 'nullable|string',
-            'departamento'                  => 'required|string',
-            'municipio'                     => 'required|string',
+            'puesto' => 'nullable|string',
+            'notasGenerales' => 'nullable|string',
+            'observaciones' => 'nullable|string',
+            'interes' => 'nullable|string',
+            'status' => 'nullable|string',
+            'nota1' => 'nullable|string',
+            'nota2' => 'nullable|string',
+            'nota3' => 'nullable|string',
+            'cierre' => 'nullable|string',
+            'departamento' => 'required|string',
+            'municipio' => 'required|string',
+            'correoCorporativo' => 'nullable|email',
+            'numeroIdentificacion' => 'nullable|string|max:20',
+            'fechaNacimiento' => 'nullable|date',
+            'direccionResidencia' => 'nullable|string',
+            'telefonoCorporativo' => 'nullable|string',
+            'direccionEmpresa' => 'nullable|string',
+            'ultimoTituloObtenido' => 'nullable|string',
+            'institucionTitulo' => 'nullable|string',
+            'anioGraduacion' => 'nullable|integer',
+            'cantidadCursosAprobados' => 'nullable|integer',
+            'modalidad' => 'nullable|string',
+            'fechaInicioEspecifica' => 'nullable|date',
+            'fechaTallerReduccion' => 'nullable|date',
+            'fechaTallerIntegracion' => 'nullable|date',
+            'medioConocimientoInstitucion' => 'nullable|string',
+            'metodoPago' => 'nullable|string',
+            'diaEstudio' => 'nullable|string|max:20',
         ]);
 
         $prospecto = Prospecto::create([
-            'fecha'                            => $v['fecha'],
-            'nombre_completo'                  => $v['nombreCompleto'],
-            'telefono'                         => $v['telefono'],
-            'correo_electronico'               => $v['correoElectronico'],
-            'genero'                           => $v['genero'],
+            'fecha' => $v['fecha'],
+            'nombre_completo' => $v['nombreCompleto'],
+            'telefono' => $v['telefono'],
+            'correo_electronico' => $v['correoElectronico'],
+            'genero' => $v['genero'],
             'empresa_donde_labora_actualmente' => $v['empresaDondeLaboraActualmente'] ?? null,
-            'puesto'                           => $v['puesto'] ?? null,
-            'notas_generales'                  => $v['notasGenerales'] ?? null,
-            'observaciones'                    => $v['observaciones'] ?? null,
-            'interes'                          => $v['interes'] ?? null,
-            'status'                           => $v['status'] ?? 'En seguimiento',
-            'nota1'                            => $v['nota1'] ?? null,
-            'nota2'                            => $v['nota2'] ?? null,
-            'nota3'                            => $v['nota3'] ?? null,
-            'cierre'                           => $v['cierre'] ?? null,
-            'departamento'                     => $v['departamento'],
-            'municipio'                        => $v['municipio'],
-            'created_by'                       => $user->id,
+            'puesto' => $v['puesto'] ?? null,
+            'notas_generales' => $v['notasGenerales'] ?? null,
+            'observaciones' => $v['observaciones'] ?? null,
+            'interes' => $v['interes'] ?? null,
+            'status' => $v['status'] ?? 'En seguimiento',
+            'nota1' => $v['nota1'] ?? null,
+            'nota2' => $v['nota2'] ?? null,
+            'nota3' => $v['nota3'] ?? null,
+            'cierre' => $v['cierre'] ?? null,
+            'departamento' => $v['departamento'],
+            'municipio' => $v['municipio'],
+            'correo_corporativo' => $v['correoCorporativo'] ?? null,
+            'numero_identificacion' => $v['numeroIdentificacion'] ?? null,
+            'fecha_nacimiento' => $v['fechaNacimiento'] ?? null,
+            'direccion_residencia' => $v['direccionResidencia'] ?? null,
+            'telefono_corporativo' => $v['telefonoCorporativo'] ?? null,
+            'direccion_empresa' => $v['direccionEmpresa'] ?? null,
+            'ultimo_titulo_obtenido' => $v['ultimoTituloObtenido'] ?? null,
+            'institucion_titulo' => $v['institucionTitulo'] ?? null,
+            'anio_graduacion' => $v['anioGraduacion'] ?? null,
+            'cantidad_cursos_aprobados' => $v['cantidadCursosAprobados'] ?? null,
+            'modalidad' => $v['modalidad'] ?? null,
+            'fecha_inicio_especifica' => $v['fechaInicioEspecifica'] ?? null,
+            'fecha_taller_reduccion' => $v['fechaTallerReduccion'] ?? null,
+            'fecha_taller_integracion' => $v['fechaTallerIntegracion'] ?? null,
+            'medio_conocimiento_institucion' => $v['medioConocimientoInstitucion'] ?? null,
+            'metodo_pago' => $v['metodoPago'] ?? null,
+            'dia_estudio' => $v['diaEstudio'] ?? null,
+            'created_by' => $user->id,
         ]);
 
-        // Cargamos la relación antes de devolver
         $prospecto->load('creator');
 
         return response()->json([
             'message' => 'Prospecto guardado con éxito',
-            'data'    => $prospecto,
+            'data' => $prospecto,
         ], 201);
     }
 
-    /**
-     * Mostrar un prospecto con su creador.
-     */
     public function show($id)
     {
         $prospecto = Prospecto::with('creator')->find($id);
 
-        if (! $prospecto) {
+        if (!$prospecto) {
             return response()->json(['message' => 'Prospecto no encontrado'], 404);
         }
 
         return response()->json([
             'message' => 'Prospecto obtenido con éxito',
-            'data'    => $prospecto,
+            'data' => $prospecto,
         ]);
     }
 
-    /**
-     * Actualizar un prospecto.
-     * Mapeamos camelCase → snake_case y asignamos `updated_by`.
-     */
     public function update(Request $request, $id)
     {
         $user = auth()->user();
-        if (! $user) {
+        if (!$user) {
             return response()->json(['error' => 'Usuario no autenticado'], 401);
         }
 
         $prospecto = Prospecto::find($id);
-        if (! $prospecto) {
+        if (!$prospecto) {
             return response()->json(['message' => 'Prospecto no encontrado'], 404);
         }
 
         $v = $request->validate([
-            'fecha'                         => 'nullable|date',
-            'nombreCompleto'                => 'nullable|string',
-            'telefono'                      => 'nullable|string',
-            'correoElectronico'             => 'nullable|email',
-            'genero'                        => 'nullable|string',
+            'fecha' => 'nullable|date',
+            'nombreCompleto' => 'nullable|string',
+            'telefono' => 'nullable|string',
+            'correoElectronico' => 'nullable|email',
+            'genero' => 'nullable|string',
             'empresaDondeLaboraActualmente' => 'nullable|string',
-            'puesto'                        => 'nullable|string',
-            'notasGenerales'                => 'nullable|string',
-            'observaciones'                 => 'nullable|string',
-            'interes'                       => 'nullable|string',
-            'status'                        => 'nullable|string',
-            'nota1'                         => 'nullable|string',
-            'nota2'                         => 'nullable|string',
-            'nota3'                         => 'nullable|string',
-            'cierre'                        => 'nullable|string',
-            'departamento'                  => 'nullable|string',
-            'municipio'                     => 'nullable|string',
+            'puesto' => 'nullable|string',
+            'notasGenerales' => 'nullable|string',
+            'observaciones' => 'nullable|string',
+            'interes' => 'nullable|string',
+            'status' => 'nullable|string',
+            'nota1' => 'nullable|string',
+            'nota2' => 'nullable|string',
+            'nota3' => 'nullable|string',
+            'cierre' => 'nullable|string',
+            'departamento' => 'nullable|string',
+            'municipio' => 'nullable|string',
+            'correoCorporativo' => 'nullable|email',
+            'numeroIdentificacion' => 'nullable|string|max:20',
+            'fechaNacimiento' => 'nullable|date',
+            'direccionResidencia' => 'nullable|string',
+            'telefonoCorporativo' => 'nullable|string',
+            'direccionEmpresa' => 'nullable|string',
+            'ultimoTituloObtenido' => 'nullable|string',
+            'institucionTitulo' => 'nullable|string',
+            'anioGraduacion' => 'nullable|integer',
+            'cantidadCursosAprobados' => 'nullable|integer',
+            'modalidad' => 'nullable|string',
+            'fechaInicioEspecifica' => 'nullable|date',
+            'fechaTallerReduccion' => 'nullable|date',
+            'fechaTallerIntegracion' => 'nullable|date',
+            'medioConocimientoInstitucion' => 'nullable|string',
+            'metodoPago' => 'nullable|string',
+            'diaEstudio' => 'nullable|string|max:20',
         ]);
 
         foreach ($v as $field => $value) {
             $attr = match ($field) {
-                'nombreCompleto'                => 'nombre_completo',
-                'correoElectronico'             => 'correo_electronico',
+                'nombreCompleto' => 'nombre_completo',
+                'correoElectronico' => 'correo_electronico',
                 'empresaDondeLaboraActualmente' => 'empresa_donde_labora_actualmente',
-                default                         => $field,
+                'correoCorporativo' => 'correo_corporativo',
+                'numeroIdentificacion' => 'numero_identificacion',
+                'fechaNacimiento' => 'fecha_nacimiento',
+                'direccionResidencia' => 'direccion_residencia',
+                'telefonoCorporativo' => 'telefono_corporativo',
+                'direccionEmpresa' => 'direccion_empresa',
+                'ultimoTituloObtenido' => 'ultimo_titulo_obtenido',
+                'institucionTitulo' => 'institucion_titulo',
+                'anioGraduacion' => 'anio_graduacion',
+                'cantidadCursosAprobados' => 'cantidad_cursos_aprobados',
+                'modalidad' => 'modalidad',
+                'fechaInicioEspecifica' => 'fecha_inicio_especifica',
+                'fechaTallerReduccion' => 'fecha_taller_reduccion',
+                'fechaTallerIntegracion' => 'fecha_taller_integracion',
+                'medioConocimientoInstitucion' => 'medio_conocimiento_institucion',
+                'metodoPago' => 'metodo_pago',
+                'diaEstudio' => 'dia_estudio',
+                default => $field,
             };
             $prospecto->$attr = $value;
         }
@@ -165,17 +235,14 @@ class ProspectoController extends Controller
 
         return response()->json([
             'message' => 'Prospecto actualizado con éxito',
-            'data'    => $prospecto,
+            'data' => $prospecto,
         ]);
     }
 
-    /**
-     * Soft‑delete de prospecto.
-     */
     public function destroy($id)
     {
         $prospecto = Prospecto::find($id);
-        if (! $prospecto) {
+        if (!$prospecto) {
             return response()->json(['message' => 'Prospecto no encontrado'], 404);
         }
         $prospecto->delete();
@@ -183,13 +250,10 @@ class ProspectoController extends Controller
         return response()->json(['message' => 'Prospecto eliminado con éxito']);
     }
 
-    /**
-     * Actualizar solo el estado de un prospecto.
-     */
     public function updateStatus(Request $request, $id)
     {
         $user = auth()->user();
-        if (! $user) {
+        if (!$user) {
             return response()->json(['error' => 'Usuario no autenticado'], 401);
         }
 
@@ -198,30 +262,26 @@ class ProspectoController extends Controller
         ]);
 
         $prospecto = Prospecto::find($id);
-        if (! $prospecto) {
+        if (!$prospecto) {
             return response()->json(['message' => 'Prospecto no encontrado'], 404);
         }
 
-        $prospecto->status     = $v['status'];
+        $prospecto->status = $v['status'];
         $prospecto->updated_by = $user->id;
         $prospecto->save();
 
         return response()->json([
             'message' => 'Estado del prospecto actualizado con éxito',
-            'data'    => $prospecto,
+            'data' => $prospecto,
         ]);
     }
 
-    /**
-     * Reasignación masiva:
-     * Actualiza `created_by` (el “asesor asignado”) en lote.
-     */
     public function bulkAssign(Request $request)
     {
         $data = $request->validate([
-            'prospecto_ids'   => 'required|array',
+            'prospecto_ids' => 'required|array',
             'prospecto_ids.*' => 'integer|exists:prospectos,id',
-            'created_by'      => 'required|integer|exists:users,id',
+            'created_by' => 'required|integer|exists:users,id',
         ]);
 
         Prospecto::whereIn('id', $data['prospecto_ids'])
@@ -231,5 +291,27 @@ class ProspectoController extends Controller
             ]);
 
         return response()->json(['message' => 'Prospectos reasignados correctamente']);
+    }
+
+    public function enviarContrato(Request $request, $id)
+    {
+        $request->validate([
+            'signature' => 'required|string',
+        ]);
+
+        $prospecto = Prospecto::findOrFail($id);
+        $pdf = PDF::loadView('pdf.contrato', [
+            'student' => $prospecto,
+            'signature' => $request->signature,
+        ]);
+
+        $pdfData = $pdf->output();
+
+        Mail::to($prospecto->correo_electronico)
+            ->send(new SendContractPdf($prospecto, $pdfData));
+
+        return response()->json([
+            'message' => 'Contrato enviado correctamente a ' . $prospecto->correo_electronico,
+        ]);
     }
 }

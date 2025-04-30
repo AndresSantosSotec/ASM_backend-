@@ -1,5 +1,5 @@
 <?php
-// 2) Modelo Eloquent: app/Models/ProspectosDocumento.php
+
 
 namespace App\Models;
 
