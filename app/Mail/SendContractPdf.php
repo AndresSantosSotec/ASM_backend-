@@ -38,15 +38,15 @@ class SendContractPdf extends Mailable
     /**
      * Le decimos qué vista usar y qué datos pasarle.
      */
+    // En App\Mail\SendContractPdf
     public function content(): Content
     {
         return new Content(
-            view: 'emails.contract_ready',     // tu Blade con el HTML/CSS
-            with: [
-                'student' => $this->student,
-            ]
+            view: 'emails.confidencialidad', // <— aquí busca resources/views/emails/contract_ready.blade.php
+            with: ['student' => $this->student]
         );
     }
+
 
     /**
      * Adjuntamos el PDF recién generado.
@@ -58,9 +58,9 @@ class SendContractPdf extends Mailable
                 // Closure que devuelve el string binario
                 fn() => $this->pdfData,
                 // Nombre de archivo dinámico
-                'Contrato_Confidencialidad_'.$this->student->nombre_completo.'.pdf'
+                'Contrato_Confidencialidad_' . $this->student->nombre_completo . '.pdf'
             )
-            ->withMime('application/pdf'),
+                ->withMime('application/pdf'),
         ];
     }
 }

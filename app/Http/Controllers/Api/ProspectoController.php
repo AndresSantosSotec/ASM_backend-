@@ -8,6 +8,8 @@ use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf as PDF;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\SendContractPdf;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ProspectoController extends Controller
 {
@@ -55,12 +57,12 @@ class ProspectoController extends Controller
         if (!$user) {
             return response()->json(['error' => 'Usuario no autenticado'], 401);
         }
-
+    
         $v = $request->validate([
             'fecha' => 'required|date',
             'nombreCompleto' => 'required|string',
             'telefono' => 'required|string',
-            'correoElectronico' => 'required|email',
+            'correoElectronico' => 'required|email|unique:prospectos,correo_electronico', // Agregada validación unique
             'genero' => 'required|string',
             'empresaDondeLaboraActualmente' => 'nullable|string',
             'puesto' => 'nullable|string',
@@ -92,7 +94,7 @@ class ProspectoController extends Controller
             'metodoPago' => 'nullable|string',
             'diaEstudio' => 'nullable|string|max:20',
         ]);
-
+    
         $prospecto = Prospecto::create([
             'fecha' => $v['fecha'],
             'nombre_completo' => $v['nombreCompleto'],
@@ -130,15 +132,15 @@ class ProspectoController extends Controller
             'dia_estudio' => $v['diaEstudio'] ?? null,
             'created_by' => $user->id,
         ]);
-
+    
         $prospecto->load('creator');
-
+    
         return response()->json([
             'message' => 'Prospecto guardado con éxito',
             'data' => $prospecto,
         ], 201);
     }
-
+    
     public function show($id)
     {
         $prospecto = Prospecto::with('creator')->find($id);
@@ -276,6 +278,46 @@ class ProspectoController extends Controller
         ]);
     }
 
+
+    public function assignOne(Request $request, $id)
+    {
+        $user = auth()->user();
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no autenticado'], 401);
+        }
+    
+        $data = $request->validate([
+            'created_by' => 'required|integer|exists:users,id',
+        ]);
+    
+        try {
+            $prospecto = Prospecto::findOrFail($id);
+            $prospecto->update([
+                'created_by' => $data['created_by'],
+                'updated_by' => $user->id,
+            ]);
+    
+            $prospecto->load('creator');
+    
+            return response()->json([
+                'message' => 'Prospecto reasignado correctamente',
+                'data'    => $prospecto,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error reasignando prospecto: ' . $e->getMessage(), [
+                'prospecto_id' => $id,
+                'user_id'      => $user->id,
+                'input'        => $request->all(),
+                'stack'        => $e->getTraceAsString()
+            ]);
+    
+            return response()->json([
+                'error'   => 'Ocurrió un error al reasignar el prospecto.',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function bulkAssign(Request $request)
     {
         $data = $request->validate([
@@ -293,25 +335,104 @@ class ProspectoController extends Controller
         return response()->json(['message' => 'Prospectos reasignados correctamente']);
     }
 
+    public function bulkUpdateStatus(Request $request)
+    {
+        $data = $request->validate([
+            'prospecto_ids' => 'required|array',
+            'prospecto_ids.*' => 'integer|exists:prospectos,id',
+            'status' => 'required|string',
+        ]);
+
+        Prospecto::whereIn('id', $data['prospecto_ids'])
+            ->update([
+                'status' => $data['status'],
+                'updated_by' => auth()->id(),
+            ]);
+
+        return response()->json(['message' => 'Estado de prospectos actualizado correctamente']);
+    }
+
+    public function bulkDelete(Request $request)
+    {
+        $data = $request->validate([
+            'prospecto_ids' => 'required|array',
+            'prospecto_ids.*' => 'integer|exists:prospectos,id',
+        ]);
+
+        Prospecto::whereIn('id', $data['prospecto_ids'])->delete();
+
+        return response()->json(['message' => 'Prospectos eliminados correctamente']);
+    }
+
     public function enviarContrato(Request $request, $id)
     {
-        $request->validate([
-            'signature' => 'required|string',
-        ]);
-
-        $prospecto = Prospecto::findOrFail($id);
-        $pdf = PDF::loadView('pdf.contrato', [
-            'student' => $prospecto,
-            'signature' => $request->signature,
-        ]);
-
-        $pdfData = $pdf->output();
-
-        Mail::to($prospecto->correo_electronico)
-            ->send(new SendContractPdf($prospecto, $pdfData));
-
-        return response()->json([
-            'message' => 'Contrato enviado correctamente a ' . $prospecto->correo_electronico,
-        ]);
+        try {
+            $request->validate([
+                'signature' => 'required|string',
+            ]);
+    
+            $prospecto = Prospecto::findOrFail($id);
+    
+            $pdf = PDF::loadView('pdf.contrato', [
+                'student'   => $prospecto,
+                'signature' => $request->signature,
+            ]);
+            $pdfData = $pdf->output();
+    
+            Mail::to($prospecto->correo_electronico)
+                ->send(new SendContractPdf($prospecto, $pdfData));
+    
+            return response()->json([
+                'message' => 'Contrato enviado correctamente a ' . $prospecto->correo_electronico,
+            ], 200);
+    
+        } catch (\Exception $e) {
+            Log::error('Error en enviarContrato: '.$e->getMessage(), [
+                'stack' => $e->getTraceAsString(),
+                'id'    => $id,
+                'input' => $request->all(),
+            ]);
+    
+            return response()->json([
+                'error'   => 'No se pudo enviar el contrato.',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
     }
+    
+
+    public function pendientesAprobacion()
+    {
+        Log::info("⇨ ProspectoController@pendientesAprobacion — inicio");
+    
+        $subquery = DB::table('estudiante_programa')
+            ->select('prospecto_id', DB::raw('MAX(id) as max_id'))
+            ->groupBy('prospecto_id');
+    
+        Log::info("⇨ pendientesAprobacion — subquery preparado");
+    
+        $prospectos = DB::table('prospectos AS p')
+            ->joinSub($subquery, 'latest_ep', function ($join) {
+                $join->on('p.id', '=', 'latest_ep.prospecto_id');
+            })
+            ->join('estudiante_programa AS ep', 'ep.id', '=', 'latest_ep.max_id')
+            ->join('tb_programas AS pr', 'ep.programa_id', '=', 'pr.id')
+            ->select(
+                'p.id',
+                'p.nombre_completo',
+                'p.telefono',
+                'p.correo_electronico',
+                'p.departamento',
+                'p.status',
+                'pr.nombre_del_programa AS nombre_programa',
+                DB::raw('(SELECT COUNT(*) FROM estudiante_programa WHERE prospecto_id = p.id) AS cantidad_programas')
+            )
+            ->where('p.status', 'Pendiente Aprobacion')
+            ->get();
+    
+        Log::info("⇨ pendientesAprobacion — encontrados: {$prospectos->count()} prospectos");
+    
+        return response()->json(['data' => $prospectos]);
+    }
+    
 }

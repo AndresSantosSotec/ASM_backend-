@@ -8,7 +8,10 @@
       font-size: 12px;
       margin: 0;
       padding: 0;
+      /* Texto en negro por defecto */
+      color: #000;
     }
+  
     .header {
       background: linear-gradient(90deg, #1e264d 0%, #26335b 100%);
       padding: 20px;
@@ -18,43 +21,63 @@
     .header img {
       max-height: 40px;
     }
+  
     .gold-line {
       height: 4px;
       background: #b08b4f;
     }
+  
     .content {
       padding: 30px;
       line-height: 1.4;
+      /* Justificar todo el bloque de contenido */
+      text-align: justify;
     }
+  
+    /* Aseguramos que párrafos, encabezados y listas también sean negros y estén justificados */
+    .content h2,
+    .content p,
+    .content ul,
+    .content li {
+      color: #000;
+      text-align: justify;
+    }
+  
     .title {
       text-align: center;
       font-weight: bold;
       margin-bottom: 10px;
     }
+  
     .sub {
       text-align: center;
       font-size: 10px;
       color: #666;
       margin-bottom: 20px;
     }
+  
     .signature-block {
       margin-top: 40px;
       display: flex;
       justify-content: space-between;
     }
+  
     .sig {
       width: 45%;
       text-align: center;
     }
+  
     .sig-line {
       border-top: 1px solid #000;
       margin: 60px 0 10px;
     }
+  
     .sig-label {
       font-size: 10px;
       color: #666;
     }
   </style>
+  
 </head>
 <body>
 

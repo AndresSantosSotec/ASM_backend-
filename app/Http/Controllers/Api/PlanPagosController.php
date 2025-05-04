@@ -4,11 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use App\Models\EstudiantePrograma;
 use App\Models\CuotaProgramaEstudiante;
-use App\Models\KardexPago;
 use Carbon\Carbon;
 
 class PlanPagosController extends Controller
@@ -33,15 +31,17 @@ class PlanPagosController extends Controller
                 $fechaCuota = $fechaInicio->copy()->addMonths($i);
                 $cuota = CuotaProgramaEstudiante::create([
                     'estudiante_programa_id' => $est->id,
-                    'mes' => $fechaCuota->month,
-                    'anio' => $fechaCuota->year,
-                    'fecha_vencimiento' => $fechaCuota->copy()->day(5),
-                    'monto_cuota' => $est->cuota_mensual,
-                    'estado' => 'pendiente',
-                    'created_by' => Auth::id(),
+                    'numero_cuota'           => $i + 1,
+                    'mes'                    => $fechaCuota->month,
+                    'anio'                   => $fechaCuota->year,
+                    'fecha_vencimiento'      => $fechaCuota->copy()->day(5),
+                    'monto'                  => $est->cuota_mensual, // 👈 corrección aquí
+                    'estado'                 => 'pendiente',
                 ]);
+                
                 $cuotas[] = $cuota;
             }
+
 
             DB::commit();
 
@@ -49,7 +49,6 @@ class PlanPagosController extends Controller
                 'message' => 'Plan de pagos generado correctamente.',
                 'cuotas' => $cuotas,
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollback();
             return response()->json([

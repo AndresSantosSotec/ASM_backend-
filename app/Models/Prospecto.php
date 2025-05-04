@@ -96,4 +96,9 @@ class Prospecto extends Model
     {
         return $this->hasMany(EstudiantePrograma::class, 'prospecto_id');
     }
+
+    public function asesor()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
 }

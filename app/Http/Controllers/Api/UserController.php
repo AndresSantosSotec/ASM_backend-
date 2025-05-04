@@ -223,4 +223,24 @@ class UserController extends Controller
             'updated_count' => $updated,
         ]);
     }
+
+    public function getUsersByRole(Request $request, $roleId)
+    {
+        // Obtener usuarios cuyo rol sea el indicado
+        $users = User::with('userRole.role')
+            ->whereHas('userRole', function ($query) use ($roleId) {
+                $query->where('role_id', $roleId);
+            })
+            ->get();
+    
+        // Agregar el atributo 'rol' a cada usuario
+        $users->transform(function ($user) {
+            $user->setAttribute('rol', $user->userRole && $user->userRole->role
+                ? $user->userRole->role->name
+                : "");
+            return $user;
+        });
+    
+        return response()->json($users);
+    }
 }

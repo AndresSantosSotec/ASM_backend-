@@ -12,14 +12,14 @@ class InscripcionController extends Controller
     public function finalizar(Request $request)
     {
         Log::info('Datos recibidos en inscripción:', $request->all());
-    
+
         $data = $request->validate([
             'personales'  => 'required|array',
             'laborales'   => 'required|array',
             'academicos'  => 'required|array',
             'financieros' => 'required|array',
         ]);
-    
+
         DB::beginTransaction();
         try {
             // Validar que venga el ID del prospecto
@@ -28,15 +28,15 @@ class InscripcionController extends Controller
                     'error' => 'Debes seleccionar un prospecto existente.',
                 ], 422);
             }
-    
+
             $prospecto = Prospecto::find($data['personales']['id']);
-    
+
             if (!$prospecto) {
                 return response()->json([
                     'error' => 'Prospecto no encontrado.',
                 ], 404);
             }
-    
+
             // Actualiza el prospecto
             $prospecto->update([
                 'nombre_completo' => $data['personales']['nombre'],
@@ -65,13 +65,14 @@ class InscripcionController extends Controller
                 'metodo_pago' => $data['financieros']['formaPago'],
                 'convenio_pago_id' => $data['financieros']['convenioId'] ?? null,
                 'monto_inscripcion' => $data['financieros']['inscripcion'],
+                'status' => 'Pendiente Aprobacion', // 👈 AÑADIDO AQUÍ
             ]);
-    
+
             // Insertar programas
             foreach ([1, 2, 3] as $i) {
                 $programaId = $data['academicos']["titulo{$i}"] ?? null;
                 $duracion   = $data['academicos']["titulo{$i}_duracion"] ?? null;
-    
+
                 if ($programaId && $duracion) {
                     EstudiantePrograma::create([
                         'prospecto_id' => $prospecto->id,
@@ -86,23 +87,23 @@ class InscripcionController extends Controller
                     ]);
                 }
             }
-    
+
             DB::commit();
-    
+
             return response()->json([
                 'message' => 'Inscripción finalizada correctamente',
                 'prospecto_id' => $prospecto->id,
+                'programas' => EstudiantePrograma::where('prospecto_id', $prospecto->id)->get(['id']),
             ]);
-    
         } catch (\Exception $e) {
             DB::rollBack();
-    
+
             Log::error('Error al guardar inscripción', [
                 'message' => $e->getMessage(),
                 'trace'   => $e->getTraceAsString(),
                 'input'   => $data,
             ]);
-    
+
             return response()->json([
                 'error' => 'Error al guardar la inscripción',
                 'message' => $e->getMessage(),
@@ -110,5 +111,65 @@ class InscripcionController extends Controller
             ], 500);
         }
     }
-    
+
+    // app/Http/Controllers/InscripcionController.php
+    public function show($id)
+    {
+        Log::info("⇨ InscripcionController@show — id recibido: {$id}");
+        $prospecto = Prospecto::with('programas')->find($id);
+        if (! $prospecto) {
+            Log::warning("⇨ show — Prospecto no existe: {$id}");
+            return response()->json(['error' => 'Ficha no encontrada'], 404);
+        }
+
+
+        // Estructuramos la respuesta en secciones
+        return response()->json([
+            'personales' => [
+                'nombre'       => $prospecto->nombre_completo,
+                'paisOrigen'   => $prospecto->pais_origen,
+                'paisResidencia' => $prospecto->pais_residencia,
+                'telefono'     => $prospecto->telefono,
+                'dpi'          => $prospecto->numero_identificacion,
+                'emailPersonal'=> $prospecto->correo_electronico,
+                'emailCorporativo' => $prospecto->correo_corporativo,
+                'fechaNacimiento'  => $prospecto->fecha_nacimiento,
+                'direccion'    => $prospecto->direccion_residencia,
+            ],
+            'laborales' => [
+                'empresa'             => $prospecto->empresa_donde_labora_actualmente,
+                'puesto'              => $prospecto->puesto,
+                'telefonoCorporativo' => $prospecto->telefono_corporativo,
+                'departamento'        => $prospecto->departamento,
+                'direccionEmpresa'    => $prospecto->direccion_empresa,
+            ],
+            'academicos' => [
+                'modalidad'             => $prospecto->modalidad,
+                'fechaInicioEspecifica' => $prospecto->fecha_inicio_especifica,
+                'fechaTallerInduccion'  => $prospecto->fecha_taller_reduccion,
+                'fechaTallerIntegracion'=> $prospecto->fecha_taller_integracion,
+                'institucionAnterior'   => $prospecto->institucion_titulo,
+                'añoGraduacion'         => $prospecto->anio_graduacion,
+                'medioConocio'          => $prospecto->medio_conocimiento_institucion,
+                'cursosAprobados'       => $prospecto->cantidad_cursos_aprobados,
+                'diaEstudio'            => $prospecto->dia_estudio,
+            ],
+            'financieros' => [
+                'formaPago'        => $prospecto->metodo_pago,
+                'convenioId'       => $prospecto->convenio_pago_id,
+                'inscripcion'      => $prospecto->monto_inscripcion,
+                'cuotaMensual'     => optional($prospecto->programas->first())->cuota_mensual,
+                'inversionTotal'   => optional($prospecto->programas->first())->inversion_total,
+            ],
+            'programas' => $prospecto->programas->map(fn($p) => [
+                'id'             => $p->programa_id,
+                'fecha_inicio'   => $p->fecha_inicio,
+                'fecha_fin'      => $p->fecha_fin,
+                'duracion_meses' => $p->duracion_meses,
+                'inscripcion'    => $p->inscripcion,
+                'cuota_mensual'  => $p->cuota_mensual,
+                'inversion_total'=> $p->inversion_total,
+            ]),
+        ]);
+    }
 }
