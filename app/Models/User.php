@@ -109,4 +109,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(\App\Models\AuditLog::class, 'user_id');
     }
+
+    public function commissionRates()
+    {
+        return $this->hasOne(AdvisorCommissionRate::class, 'user_id');
+    }
+
+    public function commissions()
+    {
+        return $this->hasMany(Commission::class, 'user_id');
+    }
 }

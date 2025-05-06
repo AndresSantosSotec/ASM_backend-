@@ -33,6 +33,9 @@ use App\Http\Controllers\Api\ProspectoCuotaEstudianteController;
 use App\Http\Controllers\Api\PlanPagosController;
 use App\Http\Controllers\InscripcionController;
 use App\Http\Controllers\Api\DuplicateRecordController;
+use App\Http\Controllers\Api\CommissionConfigController;
+use App\Http\Controllers\Api\AdvisorCommissionRateController;
+use App\Http\Controllers\Api\CommissionController;
 
 /**
  * Rutas Públicas
@@ -146,7 +149,47 @@ Route::middleware('auth:sanctum')->group(function () {
             '/{duplicate}/action',
             [DuplicateRecordController::class, 'action']
         )
-        ->where('duplicate', '[0-9]+');
+            ->where('duplicate', '[0-9]+');
+    });
+
+    Route::prefix('commissions')->group(function () {
+        //
+        // 1) Configuración global de comisiones (singleton)
+        //
+        // GET  /api/commissions/config   → CommissionConfigController@index
+        // POST /api/commissions/config   → CommissionConfigController@store
+        // PUT  /api/commissions/config   → CommissionConfigController@update
+        Route::get('/config', [CommissionConfigController::class, 'index']);
+        Route::post('/config', [CommissionConfigController::class, 'store']);
+        Route::put('/config', [CommissionConfigController::class, 'update']);
+
+        //
+        // 2) Tasas personalizadas por asesor
+        //
+        // GET  /api/commissions/rates/{userId}  → AdvisorCommissionRateController@show
+        // PUT  /api/commissions/rates/{userId}  → AdvisorCommissionRateController@update
+        // Get commission rate for an advisor
+        Route::get('/rates/{userId}', [AdvisorCommissionRateController::class, 'show']);
+
+        // Store (create) commission rate for an advisor
+        Route::post('/rates', [AdvisorCommissionRateController::class, 'store']);
+
+        // Update commission rate for an advisor
+        Route::put('/rates/{userId}', [AdvisorCommissionRateController::class, 'update']);
+        //
+        // 3) Comisiones / histórico
+        //
+        // GET  /api/commissions         → CommissionController@index
+        // POST /api/commissions         → CommissionController@store
+        // GET  /api/commissions/{id}    → CommissionController@show
+        // DELETE /api/commissions/{id}  → CommissionController@destroy
+        // (opcional) GET /api/commissions/report → CommissionController@report
+        Route::get('/',         [CommissionController::class, 'index']);
+        Route::post('/',         [CommissionController::class, 'store']);
+        Route::get('/{id}',     [CommissionController::class, 'show']);
+        Route::put('/{id}',     [CommissionController::class, 'update']);
+        Route::delete('/{id}',     [CommissionController::class, 'destroy']);
+        Route::get('/report',   [CommissionController::class, 'report']);
     });
 });
 

@@ -14,6 +14,10 @@ class Kernel extends ConsoleKernel
     {
         // $schedule->command('inspire')->hourly();
         $schedule->command('duplicates:detect')->dailyAt('02:00');
+          // mensual
+         $schedule->command('commissions:compute --period=monthly')->monthlyOn(1, '00:00');
+         // trimestral
+         $schedule->command('commissions:compute --period=quarterly')->quarterly();
     }
 
     /**
