@@ -258,6 +258,7 @@ Route::prefix('userpermissions')->group(function () {
     Route::post('/', [UserPermisosController::class, 'store']);
     Route::put('/{id}', [UserPermisosController::class, 'update']);
     Route::delete('/{id}', [UserPermisosController::class, 'destroy']);
+    Route::get('/{user_id}', [UserPermisosController::class, 'getPermissionsByUserId']);
 });
 
 // ----------------------

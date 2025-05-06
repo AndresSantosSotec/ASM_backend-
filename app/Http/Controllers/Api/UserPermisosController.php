@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\UserPermisos;
+use App\Models\ModulesViews;
+use App\Models\Modules;
 use Illuminate\Support\Facades\DB;
 
 class UserPermisosController extends Controller
@@ -23,11 +25,12 @@ class UserPermisosController extends Controller
                 'message' => 'El parámetro user_id es requerido.'
             ], 400);
         }
-        
-        $permissions = UserPermisos::with('permission')
+
+        // Obtener los permisos asignados con la relación de la vista
+        $permissions = UserPermisos::with('permission.module.views') // Cargar las vistas relacionadas
             ->where('user_id', $user_id)
             ->get();
-            
+
         return response()->json([
             'success' => true,
             'message' => 'Permisos cargados correctamente.',
@@ -51,7 +54,7 @@ class UserPermisosController extends Controller
             'permissions'   => 'required|array',
             'permissions.*' => 'exists:moduleviews,id'
         ]);
-    
+
         DB::beginTransaction();
         try {
             // Elimina todos los permisos previos para el usuario
@@ -68,16 +71,16 @@ class UserPermisosController extends Controller
                     'scope'         => 'self' // Valor permitido según la restricción CHECK
                 ];
             }
-            
+
             // Inserción en lote
             UserPermisos::insert($data);
             DB::commit();
-            
+
             // Cargar los permisos asignados para actualizar la interfaz del frontend
-            $updatedPermissions = UserPermisos::with('permission')
+            $updatedPermissions = UserPermisos::with('permission.module.views') // Incluir vistas relacionadas
                 ->where('user_id', $validated['user_id'])
                 ->get();
-            
+
             return response()->json([
                 'success' => true,
                 'message' => 'Permisos actualizados correctamente.',
@@ -129,6 +132,4 @@ class UserPermisosController extends Controller
             'message' => 'Permiso eliminado correctamente.'
         ], 200);
     }
-
-    
 }

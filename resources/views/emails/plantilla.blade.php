@@ -60,7 +60,7 @@
 </style>
 
 <div class="header">
-    <img src="{{ asset('images/logo-asm.png') }}" alt="American School of Management" style="max-height: 70px;">
+    <!-- Imagen removida -->
 </div>
 
 <div class="content">

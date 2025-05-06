@@ -12,13 +12,12 @@ class CorreoMailable extends Mailable
 {
     use Queueable, SerializesModels;
 
-    // Propiedad para almacenar los datos dinámicos (asunto y mensaje)
     public $data;
 
     /**
      * Crea una nueva instancia del mensaje.
      *
-     * @param array $data  Se espera un arreglo con keys 'asunto' y 'mensaje'
+     * @param array $data  Se espera un arreglo con keys 'asunto', 'mensaje' y opcionalmente 'bcc'
      */
     public function __construct(array $data)
     {
@@ -31,7 +30,8 @@ class CorreoMailable extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: $this->data['asunto'] ?? 'Correo Mailable'
+            subject: $this->data['asunto'] ?? 'Correo Mailable',
+            bcc: $this->data['bcc'] ?? []  // Se envían los BCC si existen
         );
     }
 
