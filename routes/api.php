@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\ProspectoConvenioController;
 use App\Http\Controllers\Api\ProspectoCuotaEstudianteController;
 use App\Http\Controllers\Api\PlanPagosController;
 use App\Http\Controllers\InscripcionController;
+use App\Http\Controllers\Api\DuplicateRecordController;
 
 /**
  * Rutas Públicas
@@ -133,6 +134,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [TareasGenController::class, 'store']);
         Route::put('/{id}', [TareasGenController::class, 'update']);
         Route::delete('/{id}', [TareasGenController::class, 'destroy']);
+    });
+
+    Route::prefix('duplicates')->group(function () {
+        // 1) Listar duplicados (GET  /api/duplicates)
+        Route::get('/', [DuplicateRecordController::class, 'index']);
+        // 2) Disparar detección (POST /api/duplicates/detect)
+        Route::post('/detect', [DuplicateRecordController::class, 'detect']);
+        // 3) Acción sobre un duplicado (POST /api/duplicates/{id}/action)
+        Route::post(
+            '/{duplicate}/action',
+            [DuplicateRecordController::class, 'action']
+        )
+        ->where('duplicate', '[0-9]+');
     });
 });
 
