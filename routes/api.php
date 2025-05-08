@@ -319,3 +319,7 @@ Route::prefix('estudiante-programa')->group(function () {
 // ----------------------
 Route::get('precios/programa/{programa}', [PriceController::class, 'porPrograma']);
 Route::get('precios/convenio/{convenio}/{programa}', [PriceController::class, 'porConvenio']);
+
+
+
+Route::get('/prospectos/fichas/pendientes-public', [ProspectoController::class, 'pendientesAprobacion']);
