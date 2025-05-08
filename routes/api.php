@@ -76,12 +76,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // CRUD básico
         Route::get('/', [ProspectoController::class, 'index']);
         Route::post('/', [ProspectoController::class, 'store']);
-
         // Funciones adicionales fijas
         Route::put('/bulk-assign', [ProspectoController::class, 'bulkAssign']);
         Route::put('/bulk-update-status', [ProspectoController::class, 'bulkUpdateStatus']);
         Route::delete('/bulk-delete', [ProspectoController::class, 'bulkDelete']);
-
         // Luego las rutas que usan el parámetro {id} (agregando restricción para que se acepten solo números)
         Route::get('/{id}', [ProspectoController::class, 'show'])->where('id', '[0-9]+');
         Route::put('/{id}', [ProspectoController::class, 'update'])->where('id', '[0-9]+');
@@ -91,6 +89,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{id}/enviar-contrato', [ProspectoController::class, 'enviarContrato'])->where('id', '[0-9]+');
         Route::get('/status/{status}', [ProspectoController::class, 'filterByStatus']);
         Route::get('/fichas/pendientes', [ProspectoController::class, 'pendientesAprobacion']);
+        //new route 
+        Route::put('/prospectos/bulk-update-status', [ProspectoController::class, 'bulkUpdateStatus']);
     });
 
     // Importación de prospectos

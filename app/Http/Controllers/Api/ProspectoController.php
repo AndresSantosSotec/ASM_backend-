@@ -58,7 +58,7 @@ class ProspectoController extends Controller
         if (!$user) {
             return response()->json(['error' => 'Usuario no autenticado'], 401);
         }
-    
+
         $v = $request->validate([
             'fecha' => 'required|date',
             'nombreCompleto' => 'required|string',
@@ -95,7 +95,7 @@ class ProspectoController extends Controller
             'metodoPago' => 'nullable|string',
             'diaEstudio' => 'nullable|string|max:20',
         ]);
-    
+
         $prospecto = Prospecto::create([
             'fecha' => $v['fecha'],
             'nombre_completo' => $v['nombreCompleto'],
@@ -133,15 +133,15 @@ class ProspectoController extends Controller
             'dia_estudio' => $v['diaEstudio'] ?? null,
             'created_by' => $user->id,
         ]);
-    
+
         $prospecto->load('creator');
-    
+
         return response()->json([
             'message' => 'Prospecto guardado con éxito',
             'data' => $prospecto,
         ], 201);
     }
-    
+
     public function show($id)
     {
         $prospecto = Prospecto::with('creator')->find($id);
@@ -286,20 +286,20 @@ class ProspectoController extends Controller
         if (!$user) {
             return response()->json(['error' => 'Usuario no autenticado'], 401);
         }
-    
+
         $data = $request->validate([
             'created_by' => 'required|integer|exists:users,id',
         ]);
-    
+
         try {
             $prospecto = Prospecto::findOrFail($id);
             $prospecto->update([
                 'created_by' => $data['created_by'],
                 'updated_by' => $user->id,
             ]);
-    
+
             $prospecto->load('creator');
-    
+
             return response()->json([
                 'message' => 'Prospecto reasignado correctamente',
                 'data'    => $prospecto,
@@ -311,7 +311,7 @@ class ProspectoController extends Controller
                 'input'        => $request->all(),
                 'stack'        => $e->getTraceAsString()
             ]);
-    
+
             return response()->json([
                 'error'   => 'Ocurrió un error al reasignar el prospecto.',
                 'message' => $e->getMessage(),
@@ -371,47 +371,46 @@ class ProspectoController extends Controller
             $request->validate([
                 'signature' => 'required|string',
             ]);
-    
+
             $prospecto = Prospecto::findOrFail($id);
-    
+
             $pdf = PDF::loadView('pdf.contrato', [
                 'student'   => $prospecto,
                 'signature' => $request->signature,
             ]);
             $pdfData = $pdf->output();
-    
+
             Mail::to($prospecto->correo_electronico)
                 ->send(new SendContractPdf($prospecto, $pdfData));
-    
+
             return response()->json([
                 'message' => 'Contrato enviado correctamente a ' . $prospecto->correo_electronico,
             ], 200);
-    
         } catch (\Exception $e) {
-            Log::error('Error en enviarContrato: '.$e->getMessage(), [
+            Log::error('Error en enviarContrato: ' . $e->getMessage(), [
                 'stack' => $e->getTraceAsString(),
                 'id'    => $id,
                 'input' => $request->all(),
             ]);
-    
+
             return response()->json([
                 'error'   => 'No se pudo enviar el contrato.',
                 'message' => $e->getMessage(),
             ], 500);
         }
     }
-    
+
 
     public function pendientesAprobacion()
     {
         Log::info("⇨ ProspectoController@pendientesAprobacion — inicio");
-    
+
         $subquery = DB::table('estudiante_programa')
             ->select('prospecto_id', DB::raw('MAX(id) as max_id'))
             ->groupBy('prospecto_id');
-    
+
         Log::info("⇨ pendientesAprobacion — subquery preparado");
-    
+
         $prospectos = DB::table('prospectos AS p')
             ->joinSub($subquery, 'latest_ep', function ($join) {
                 $join->on('p.id', '=', 'latest_ep.prospecto_id');
@@ -430,10 +429,11 @@ class ProspectoController extends Controller
             )
             ->where('p.status', 'Pendiente Aprobacion')
             ->get();
-    
+
         Log::info("⇨ pendientesAprobacion — encontrados: {$prospectos->count()} prospectos");
-    
+
         return response()->json(['data' => $prospectos]);
     }
-    
+
+
 }
