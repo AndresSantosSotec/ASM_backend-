@@ -365,40 +365,68 @@ class ProspectoController extends Controller
         return response()->json(['message' => 'Prospectos eliminados correctamente']);
     }
 
-    public function enviarContrato(Request $request, $id)
-    {
-        try {
-            $request->validate([
-                'signature' => 'required|string',
-            ]);
+public function enviarContrato(Request $request, $id)
+{
+    try {
+        $request->validate([
+            'signature' => 'required|string',
+        ]);
 
-            $prospecto = Prospecto::findOrFail($id);
+        // Prospecto y su programa
+        $prospecto = Prospecto::findOrFail($id);
+        $estProg   = $prospecto->programas()
+            ->whereNull('deleted_at')
+            ->latest('created_at')
+            ->with('programa')
+            ->firstOrFail();
 
-            $pdf = PDF::loadView('pdf.contrato', [
-                'student'   => $prospecto,
-                'signature' => $request->signature,
-            ]);
-            $pdfData = $pdf->output();
+        // Fecha de hoy en español
+        $fecha = now()
+            ->locale('es_GT')
+            ->isoFormat('dddd, D [de] MMMM [de] YYYY');
+        $fecha = ucfirst($fecha);
 
-            Mail::to($prospecto->correo_electronico)
-                ->send(new SendContractPdf($prospecto, $pdfData));
+        // Nombre del asesor autenticado
+        $advisor = $request->user(); // o Auth::user()
+        $advisorName = "{$advisor->first_name} {$advisor->last_name}";
 
-            return response()->json([
-                'message' => 'Contrato enviado correctamente a ' . $prospecto->correo_electronico,
-            ], 200);
-        } catch (\Exception $e) {
-            Log::error('Error en enviarContrato: ' . $e->getMessage(), [
-                'stack' => $e->getTraceAsString(),
-                'id'    => $id,
-                'input' => $request->all(),
-            ]);
+        // Generar PDF
+        $pdf = PDF::loadView('pdf.contrato', [
+            'student'      => $prospecto,
+            'programa'     => $estProg->programa,
+            'inscripcion'  => $estProg->inscripcion,
+            'mensualidad'  => $estProg->cuota_mensual,
+            'convenio_id'  => $estProg->convenio_id,
+            'fecha'        => $fecha,
+            'signature'    => $request->signature,
+            'advisorName'  => $advisorName,    // <— aquí
+        ]);
+        $pdfData = $pdf->output();
 
-            return response()->json([
-                'error'   => 'No se pudo enviar el contrato.',
-                'message' => $e->getMessage(),
-            ], 500);
-        }
+        // Enviar correo
+        Mail::to($prospecto->correo_electronico)
+            ->send(new SendContractPdf(
+                $prospecto,
+                $pdfData,
+                $fecha,
+                $estProg->programa,
+                $estProg->inscripcion,
+                $estProg->cuota_mensual,
+                $estProg->convenio_id,
+                $advisorName                     // <— y aquí
+            ));
+
+        return response()->json([
+            'message' => "Contrato enviado a {$prospecto->correo_electronico}",
+        ], 200);
+    } catch (\Exception $e) {
+        Log::error('Error en enviarContrato: '.$e->getMessage(), [
+            'id'=>$id,'input'=>$request->all(),'stack'=>$e->getTraceAsString()
+        ]);
+        return response()->json(['error'=>'No se pudo enviar el contrato.','message'=>$e->getMessage()], 500);
     }
+}
+
 
 
     public function pendientesAprobacion()
@@ -435,5 +463,18 @@ class ProspectoController extends Controller
         return response()->json(['data' => $prospectos]);
     }
 
+    // app/Http/Controllers/Api/ProspectoController.php
 
+    public function pendientesConDocs()
+    {
+        // sólo status = Pendiente Aprobacion
+        $prospectos = Prospecto::with('documentos')
+            ->where('status', 'Pendiente Aprobacion')
+            ->get();
+
+        return response()->json([
+            'message' => 'Prospectos pendientes con sus documentos',
+            'data'    => $prospectos
+        ]);
+    }
 }

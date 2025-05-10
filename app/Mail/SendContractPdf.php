@@ -15,19 +15,30 @@ class SendContractPdf extends Mailable
 
     public $student;
     public $pdfData;
+    public $fecha;
+    public $programa;
+    public $inscripcion;
+    public $mensualidad;
+    public $convenio_id;
 
-    /**
-     * Recibimos aquí el prospecto y el PDF en memoria.
-     */
-    public function __construct($student, $pdfData)
-    {
-        $this->student = $student;
-        $this->pdfData  = $pdfData;
+    public function __construct(
+        $student,
+        $pdfData,
+        $fecha,
+        $programa,
+        $inscripcion,
+        $mensualidad,
+        $convenio_id
+    ) {
+        $this->student     = $student;
+        $this->pdfData     = $pdfData;
+        $this->fecha       = $fecha;
+        $this->programa    = $programa;
+        $this->inscripcion = $inscripcion;
+        $this->mensualidad = $mensualidad;
+        $this->convenio_id = $convenio_id;
     }
 
-    /**
-     * Configuramos asunto, remitente, etc.
-     */
     public function envelope(): Envelope
     {
         return new Envelope(
@@ -35,32 +46,29 @@ class SendContractPdf extends Mailable
         );
     }
 
-    /**
-     * Le decimos qué vista usar y qué datos pasarle.
-     */
-    // En App\Mail\SendContractPdf
     public function content(): Content
     {
         return new Content(
-            view: 'emails.confidencialidad', // <— aquí busca resources/views/emails/contract_ready.blade.php
-            with: ['student' => $this->student]
+            view: 'emails.confidencialidad',
+            with: [
+                'student'      => $this->student,
+                'fecha'        => $this->fecha,
+                'programa'     => $this->programa,
+                'inscripcion'  => $this->inscripcion,
+                'mensualidad'  => $this->mensualidad,
+                'convenio_id'  => $this->convenio_id,
+                'signature'    => $this->signature ?? null,
+            ]
         );
     }
 
-
-    /**
-     * Adjuntamos el PDF recién generado.
-     */
     public function attachments(): array
     {
         return [
             Attachment::fromData(
-                // Closure que devuelve el string binario
                 fn() => $this->pdfData,
-                // Nombre de archivo dinámico
                 'Contrato_Confidencialidad_' . $this->student->nombre_completo . '.pdf'
-            )
-                ->withMime('application/pdf'),
+            )->withMime('application/pdf'),
         ];
     }
 }

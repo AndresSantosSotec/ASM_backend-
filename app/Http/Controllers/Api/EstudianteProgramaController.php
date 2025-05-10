@@ -54,7 +54,6 @@ class EstudianteProgramaController extends Controller
                 'message'   => 'Programas asignados correctamente.',
                 'programas' => $registros,
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollback();
             return response()->json([
@@ -62,5 +61,82 @@ class EstudianteProgramaController extends Controller
                 'error'   => $e->getMessage(),
             ], 500);
         }
+    }
+
+    public function show($id)
+    {
+        $programas = EstudiantePrograma::where('prospecto_id', $id)->with('programa')->get();
+
+        if ($programas->isEmpty()) {
+            return response()->json(['message' => 'No se encontraron programas para este prospecto.'], 404);
+        }
+
+        return response()->json($programas, 200);
+    }
+
+    public function destroy($id)
+    {
+        $programa = EstudiantePrograma::find($id);
+
+        if (!$programa) {
+            return response()->json(['message' => 'Programa no encontrado.'], 404);
+        }
+
+        $programa->delete();
+
+        return response()->json(['message' => 'Programa eliminado correctamente.'], 200);
+    }
+    /** Actualizar  */
+    public function update(Request $request, $id)
+    {
+        $data = $request->validate([
+            'programa_id'     => 'required|exists:tb_programas,id',
+            'duracion_meses'  => 'required|integer|min:1',
+            'fecha_inicio'    => 'required|date',
+            'fecha_fin'       => 'required|date|after_or_equal:fecha_inicio',
+            'inscripcion'     => 'required|numeric|min:0',
+            'cuota_mensual'   => 'required|numeric|min:0',
+            'inversion_total' => 'required|numeric|min:0',
+            'convenio_id'     => 'nullable|exists:tb_convenio,id', // opcional
+        ]);
+
+        $programa = EstudiantePrograma::find($id);
+
+        if (!$programa) {
+            return response()->json(['message' => 'Programa no encontrado.'], 404);
+        }
+
+        $programa->update($data);
+
+        return response()->json(['message' => 'Programa actualizado correctamente.', 'programa' => $programa], 200);
+    }
+    //obtner todos los programas de cada prospecto
+    public function getProgramasProspecto(Request $request)
+    {
+        $prospectoId = $request->input('prospecto_id');
+
+        if (!$prospectoId) {
+            return response()->json(['message' => 'El ID del prospecto es requerido.'], 400);
+        }
+
+        $programas = EstudiantePrograma::where('prospecto_id', $prospectoId)->with('programa')->get();
+
+        if ($programas->isEmpty()) {
+            return response()->json(['message' => 'No se encontraron programas para este prospecto.'], 404);
+        }
+
+        return response()->json($programas, 200);
+    }
+
+    //get programas 
+    public function getProgramas()
+    {
+        $programas = EstudiantePrograma::with('programa')->get();
+
+        if ($programas->isEmpty()) {
+            return response()->json(['message' => 'No se encontraron programas.'], 404);
+        }
+
+        return response()->json($programas, 200);
     }
 }

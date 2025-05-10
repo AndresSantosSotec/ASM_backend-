@@ -91,6 +91,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/fichas/pendientes', [ProspectoController::class, 'pendientesAprobacion']);
         //new route 
         Route::put('/prospectos/bulk-update-status', [ProspectoController::class, 'bulkUpdateStatus']);
+
+        Route::get('pendientes-con-docs', [ProspectoController::class, 'pendientesConDocs']);
     });
 
     // Importación de prospectos
@@ -311,8 +313,25 @@ Route::apiResource('convenios', ConvenioController::class);
 // Estudiante Programa
 // ----------------------
 Route::prefix('estudiante-programa')->group(function () {
-    Route::post('/', [EstudianteProgramaController::class, 'store']);
+    // 1️⃣ Primero la estática:
+    Route::get('/all', [EstudianteProgramaController::class, 'getProgramas']);
+
+    // 2️⃣ Luego la dinámica, ahora restringida a IDs numéricos:
+    Route::get('/{id}', [EstudianteProgramaController::class, 'show'])
+         ->whereNumber('id');
+
+    Route::post('/',    [EstudianteProgramaController::class, 'store']);
+    Route::put('/{id}', [EstudianteProgramaController::class, 'update'])
+         ->whereNumber('id');
+    Route::delete('/{id}', [EstudianteProgramaController::class, 'destroy'])
+         ->whereNumber('id');
+
+    // Si quieres seguir con la versión que lee query param:
+    // puedes usar GET /estudiante-programa?prospecto_id=123
+    // y en el controlador leer $request->input('prospecto_id'):
+    Route::get('/', [EstudianteProgramaController::class, 'getProgramasProspecto']);
 });
+
 
 // ----------------------
 // Precios

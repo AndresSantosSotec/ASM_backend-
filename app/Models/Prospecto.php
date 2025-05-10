@@ -101,4 +101,9 @@ class Prospecto extends Model
     {
         return $this->belongsTo(User::class, 'created_by');
     }
+
+        public function documentos()
+    {
+        return $this->hasMany(ProspectosDocumento::class, 'prospecto_id');
+    }
 }
