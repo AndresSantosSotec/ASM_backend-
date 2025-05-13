@@ -1,11 +1,14 @@
 <?php
 
 namespace App\Http\Controllers\Api;
+
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\ProspectosDocumento;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+
 
 class ProspectosDocumentoController extends Controller
 {
@@ -28,7 +31,7 @@ class ProspectosDocumentoController extends Controller
 
         // Guardar archivo en disco 'public'
         $path = $request->file('file')
-                        ->store('prospectos/'.$data['prospecto_id'], 'public');
+            ->store('prospectos/' . $data['prospecto_id'], 'public');
 
         // Crear registro
         $doc = ProspectosDocumento::create([
@@ -49,6 +52,22 @@ class ProspectosDocumentoController extends Controller
         );
     }
 
+    public function download($id): BinaryFileResponse
+    {
+        $doc = ProspectosDocumento::findOrFail($id);
+
+        // Ruta absoluta en disco
+        $fullPath = storage_path('app/public/' . $doc->ruta_archivo);
+
+        // Si no existe, lanzamos 404
+        if (!file_exists($fullPath)) {
+            abort(404, 'Archivo no encontrado');
+        }
+
+        // Devolvemos como inline para que se vea en el navegador
+        return response()->file($fullPath);
+    }
+
     public function update(Request $request, $id)
     {
         $doc = ProspectosDocumento::findOrFail($id);
@@ -56,18 +75,21 @@ class ProspectosDocumentoController extends Controller
         $data = $request->validate([
             'tipo_documento' => 'sometimes|string|max:100',
             'file'           => 'sometimes|file|mimes:pdf,jpg,png|max:5120',
+            'estado'         => 'sometimes|in:pendiente,aprobado,rechazado', // ← agregado
         ]);
 
-        // Si hay nuevo archivo, borra el anterior y guarda el nuevo
         if ($request->hasFile('file')) {
             Storage::disk('public')->delete($doc->ruta_archivo);
             $doc->ruta_archivo = $request->file('file')
-                                        ->store('prospectos/'.$doc->prospecto_id, 'public');
+                ->store('prospectos/' . $doc->prospecto_id, 'public');
         }
 
-        // Actualiza tipo si llegó
         if (isset($data['tipo_documento'])) {
             $doc->tipo_documento = $data['tipo_documento'];
+        }
+
+        if (isset($data['estado'])) {
+            $doc->estado = $data['estado'];  // ← guardamos el estado
         }
 
         $doc->updated_by = Auth::id();
@@ -75,6 +97,7 @@ class ProspectosDocumentoController extends Controller
 
         return response()->json($doc);
     }
+
 
     public function destroy($id)
     {

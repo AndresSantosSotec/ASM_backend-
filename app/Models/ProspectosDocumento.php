@@ -1,6 +1,5 @@
 <?php
 
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
@@ -15,29 +14,27 @@ class ProspectosDocumento extends Model
     public    $incrementing = true;
     protected $keyType    = 'int';
 
-    // Laravel llena created_at / updated_at automáticamente
     public $timestamps = true;
 
-    // Campos que se pueden asignar en masa
     protected $fillable = [
         'prospecto_id',
         'tipo_documento',
         'ruta_archivo',
         'subida_at',
+        'estado',          // ← agregado
         'created_by',
         'updated_by',
         'deleted_by',
     ];
 
-    // Fechas para mutadores
-    protected $dates = [
-        'subida_at',
-        'created_at',
-        'updated_at',
-        'deleted_at',
+    protected $casts = [
+      'subida_at'  => 'datetime',
+      'created_at' => 'datetime',
+      'updated_at' => 'datetime',
+      'deleted_at' => 'datetime',
+      'estado'     => 'string',  // opcional
     ];
 
-    // Relación al prospecto
     public function prospecto()
     {
         return $this->belongsTo(Prospecto::class, 'prospecto_id');

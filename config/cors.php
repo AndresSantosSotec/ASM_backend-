@@ -19,12 +19,7 @@ return [
 
     // Orígenes permitidos (ajustado a tu frontend)
     'allowed_origins' => [
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'http://192.168.1.205:3000',
-        'https://www.systemamericanschool.com',
-        'https://systemamericanschool.com',
-        'https://api.systemamericanschool.com',
+        '*'
     ],
 
     // Patrónes de orígenes permitidos (vacío aquí)

@@ -11,6 +11,8 @@ use App\Mail\SendContractPdf;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use App\Models\ContactoEnviado;
+
 
 class ProspectoController extends Controller
 {
@@ -365,68 +367,83 @@ class ProspectoController extends Controller
         return response()->json(['message' => 'Prospectos eliminados correctamente']);
     }
 
-public function enviarContrato(Request $request, $id)
-{
-    try {
-        $request->validate([
-            'signature' => 'required|string',
-        ]);
+    public function enviarContrato(Request $request, $id)
+    {
+        try {
+            $request->validate([
+                'signature' => 'required|string',
+            ]);
 
-        // Prospecto y su programa
-        $prospecto = Prospecto::findOrFail($id);
-        $estProg   = $prospecto->programas()
-            ->whereNull('deleted_at')
-            ->latest('created_at')
-            ->with('programa')
-            ->firstOrFail();
+            // Prospecto y programa
+            $prospecto = Prospecto::findOrFail($id);
+            $estProg   = $prospecto->programas()
+                ->whereNull('deleted_at')
+                ->latest('created_at')
+                ->with('programa')
+                ->firstOrFail();
 
-        // Fecha de hoy en español
-        $fecha = now()
-            ->locale('es_GT')
-            ->isoFormat('dddd, D [de] MMMM [de] YYYY');
-        $fecha = ucfirst($fecha);
+            // Fecha formateada
+            $fecha = now()
+                ->locale('es_GT')
+                ->isoFormat('dddd, D [de] MMMM [de] YYYY');
+            $fecha = ucfirst($fecha);
 
-        // Nombre del asesor autenticado
-        $advisor = $request->user(); // o Auth::user()
-        $advisorName = "{$advisor->first_name} {$advisor->last_name}";
+            // Asesor autenticado
+            $advisor = $request->user();
+            $advisorName = "{$advisor->first_name} {$advisor->last_name}";
 
-        // Generar PDF
-        $pdf = PDF::loadView('pdf.contrato', [
-            'student'      => $prospecto,
-            'programa'     => $estProg->programa,
-            'inscripcion'  => $estProg->inscripcion,
-            'mensualidad'  => $estProg->cuota_mensual,
-            'convenio_id'  => $estProg->convenio_id,
-            'fecha'        => $fecha,
-            'signature'    => $request->signature,
-            'advisorName'  => $advisorName,    // <— aquí
-        ]);
-        $pdfData = $pdf->output();
+            // Generar PDF
+            $pdf = PDF::loadView('pdf.contrato', [
+                'student'      => $prospecto,
+                'programa'     => $estProg->programa,
+                'inscripcion'  => $estProg->inscripcion,
+                'mensualidad'  => $estProg->cuota_mensual,
+                'convenio_id'  => $estProg->convenio_id,
+                'fecha'        => $fecha,
+                'signature'    => $request->signature,
+                'advisorName'  => $advisorName,
+            ]);
+            $pdfData = $pdf->output();
 
-        // Enviar correo
-        Mail::to($prospecto->correo_electronico)
-            ->send(new SendContractPdf(
-                $prospecto,
-                $pdfData,
-                $fecha,
-                $estProg->programa,
-                $estProg->inscripcion,
-                $estProg->cuota_mensual,
-                $estProg->convenio_id,
-                $advisorName                     // <— y aquí
-            ));
+            // Enviar correo
+            Mail::to($prospecto->correo_electronico)
+                ->send(new SendContractPdf(
+                    $prospecto,
+                    $pdfData,
+                    $fecha,
+                    $estProg->programa,
+                    $estProg->inscripcion,
+                    $estProg->cuota_mensual,
+                    $estProg->convenio_id,
+                    $advisorName
+                ));
 
-        return response()->json([
-            'message' => "Contrato enviado a {$prospecto->correo_electronico}",
-        ], 200);
-    } catch (\Exception $e) {
-        Log::error('Error en enviarContrato: '.$e->getMessage(), [
-            'id'=>$id,'input'=>$request->all(),'stack'=>$e->getTraceAsString()
-        ]);
-        return response()->json(['error'=>'No se pudo enviar el contrato.','message'=>$e->getMessage()], 500);
+            // ——— Aquí guardamos el registro en contactos_enviados ———
+            ContactoEnviado::create([
+                'prospecto_id'   => $prospecto->id,
+                'canal'          => 'email',
+                'tipo_contacto'  => 'enviar-contrato',
+                'fecha_envio'    => now(),
+                'resultado'      => 'enviado',
+                'observaciones'  => null,
+                'creado_por'     => $advisor->id,
+            ]);
+
+            return response()->json([
+                'message' => "Contrato enviado a {$prospecto->correo_electronico}",
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error en enviarContrato: ' . $e->getMessage(), [
+                'id'    => $id,
+                'input' => $request->all(),
+                'stack' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'error'   => 'No se pudo enviar el contrato.',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
-}
-
 
 
     public function pendientesAprobacion()
@@ -463,8 +480,6 @@ public function enviarContrato(Request $request, $id)
         return response()->json(['data' => $prospectos]);
     }
 
-    // app/Http/Controllers/Api/ProspectoController.php
-
     public function pendientesConDocs()
     {
         // sólo status = Pendiente Aprobacion
@@ -476,5 +491,15 @@ public function enviarContrato(Request $request, $id)
             'message' => 'Prospectos pendientes con sus documentos',
             'data'    => $prospectos
         ]);
+    }
+
+    public function downloadContrato($id)
+    {
+        $prospecto = Prospecto::findOrFail($id);
+        // Genera o recupera el PDF tal como en enviarContrato…
+        $pdf = PDF::loadView('pdf.contrato', [/* … mismos datos … */]);
+        return response($pdf->output(), 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'attachment; filename="Contrato.pdf"');
     }
 }

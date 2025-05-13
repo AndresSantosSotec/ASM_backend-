@@ -22,20 +22,16 @@ use App\Http\Controllers\Api\CitasController;
 use App\Http\Controllers\Api\InteraccionesController;
 use App\Http\Controllers\Api\TareasGenController;
 use App\Http\Controllers\PriceController;
-use App\Http\Controllers\Api\KardexPagoController;
 use App\Http\Controllers\Api\ProspectosDocumentoController;
 use App\Http\Controllers\Api\ConvenioController;
-use App\Http\Controllers\Api\KardexController;
-use App\Http\Controllers\Api\ProspectoProgramaController;
 use App\Http\Controllers\Api\EstudianteProgramaController;
-use App\Http\Controllers\Api\ProspectoConvenioController;
-use App\Http\Controllers\Api\ProspectoCuotaEstudianteController;
 use App\Http\Controllers\Api\PlanPagosController;
 use App\Http\Controllers\InscripcionController;
 use App\Http\Controllers\Api\DuplicateRecordController;
 use App\Http\Controllers\Api\CommissionConfigController;
 use App\Http\Controllers\Api\AdvisorCommissionRateController;
 use App\Http\Controllers\Api\CommissionController;
+use App\Http\Controllers\Api\ContactoEnviadoController;
 
 /**
  * Rutas Públicas
@@ -93,6 +89,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/prospectos/bulk-update-status', [ProspectoController::class, 'bulkUpdateStatus']);
 
         Route::get('pendientes-con-docs', [ProspectoController::class, 'pendientesConDocs']);
+        Route::get('prospectos/{id}/download-contrato', [ProspectoController::class, 'downloadContrato']);
     });
 
     // Importación de prospectos
@@ -194,7 +191,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/report',   [CommissionController::class, 'report']);
     });
 });
-
+Route::apiResource('contactos-enviados', ContactoEnviadoController::class);
+Route::get('prospectos/{prospecto}/contactos-enviados', [ContactoEnviadoController::class, 'byProspecto']);
 /**
  * Rutas Públicas (sin auth)
  */
@@ -302,6 +300,8 @@ Route::prefix('documentos')->group(function () {
     Route::get('/{id}', [ProspectosDocumentoController::class, 'show']);
     Route::put('/{id}', [ProspectosDocumentoController::class, 'update']);
     Route::delete('/{id}', [ProspectosDocumentoController::class, 'destroy']);
+    // routes/api.php
+    Route::get('/documentos/{id}/file', [ProspectosDocumentoController::class, 'download']);
 });
 
 // ----------------------
@@ -318,13 +318,13 @@ Route::prefix('estudiante-programa')->group(function () {
 
     // 2️⃣ Luego la dinámica, ahora restringida a IDs numéricos:
     Route::get('/{id}', [EstudianteProgramaController::class, 'show'])
-         ->whereNumber('id');
+        ->whereNumber('id');
 
     Route::post('/',    [EstudianteProgramaController::class, 'store']);
     Route::put('/{id}', [EstudianteProgramaController::class, 'update'])
-         ->whereNumber('id');
+        ->whereNumber('id');
     Route::delete('/{id}', [EstudianteProgramaController::class, 'destroy'])
-         ->whereNumber('id');
+        ->whereNumber('id');
 
     // Si quieres seguir con la versión que lee query param:
     // puedes usar GET /estudiante-programa?prospecto_id=123
@@ -342,3 +342,9 @@ Route::get('precios/convenio/{convenio}/{programa}', [PriceController::class, 'p
 
 
 Route::get('/prospectos/fichas/pendientes-public', [ProspectoController::class, 'pendientesAprobacion']);
+Route::get('contactos-enviados/{id}/download-contrato', [ContactoEnviadoController::class, 'downloadContrato']);
+
+Route::get(
+    '/contactos-enviados/today',
+    [ContactoEnviadoController::class, 'today']
+);
