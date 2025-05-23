@@ -195,19 +195,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}',     [CommissionController::class, 'destroy']);
         Route::get('/report',   [CommissionController::class, 'report']);
     });
-
-
 });
-    Route::apiResource('periodos', PeriodoInscripcionController::class);
+Route::apiResource('periodos', PeriodoInscripcionController::class);
 
-    Route::apiResource('periodos.inscripciones', InscripcionPeriodoController::class)
-        ->shallow();
+Route::apiResource('periodos.inscripciones', InscripcionPeriodoController::class)
+    ->shallow();
 
 Route::apiResource('contactos-enviados', ContactoEnviadoController::class);
 Route::get('prospectos/{prospecto}/contactos-enviados', [ContactoEnviadoController::class, 'byProspecto']);
-/**
- * Rutas Públicas (sin auth)
- */
+
 // ----------------------
 // Programas y Ubicación
 // ----------------------
@@ -314,6 +310,10 @@ Route::prefix('documentos')->group(function () {
     Route::delete('/{id}', [ProspectosDocumentoController::class, 'destroy']);
     // routes/api.php
     Route::get('/documentos/{id}/file', [ProspectosDocumentoController::class, 'download']);
+
+    Route::get('/prospecto/{prospectoId}', [ProspectosDocumentoController::class,'documentosPorProspecto']);
+
+    //Obtener documentos por prospecto
 });
 
 // ----------------------
@@ -363,15 +363,15 @@ Route::get(
 
 
 Route::prefix('approval-flows')->group(function () {
-    Route::get('/',           [ApprovalFlowController::class,'index']);
-    Route::post('/',          [ApprovalFlowController::class,'store']);
-    Route::get('{flow}',      [ApprovalFlowController::class,'show']);
-    Route::put('{flow}',      [ApprovalFlowController::class,'update']);
-    Route::delete('{flow}',   [ApprovalFlowController::class,'destroy']);
-    Route::post('{flow}/toggle', [ApprovalFlowController::class,'toggle']);
+    Route::get('/',           [ApprovalFlowController::class, 'index']);
+    Route::post('/',          [ApprovalFlowController::class, 'store']);
+    Route::get('{flow}',      [ApprovalFlowController::class, 'show']);
+    Route::put('{flow}',      [ApprovalFlowController::class, 'update']);
+    Route::delete('{flow}',   [ApprovalFlowController::class, 'destroy']);
+    Route::post('{flow}/toggle', [ApprovalFlowController::class, 'toggle']);
 
     // Etapas anidadas
-    Route::post('{flow}/stages',    [ApprovalStageController::class,'store']);
-    Route::put('stages/{stage}',    [ApprovalStageController::class,'update']);
-    Route::delete('stages/{stage}', [ApprovalStageController::class,'destroy']);
+    Route::post('{flow}/stages',    [ApprovalStageController::class, 'store']);
+    Route::put('stages/{stage}',    [ApprovalStageController::class, 'update']);
+    Route::delete('stages/{stage}', [ApprovalStageController::class, 'destroy']);
 });

@@ -108,4 +108,13 @@ class ProspectosDocumentoController extends Controller
 
         return response()->noContent();
     }
+
+    public function documentosPorProspecto($prospectoId)
+    {
+        $docs = ProspectosDocumento::with('prospecto')
+            ->where('prospecto_id', $prospectoId)
+            ->get();
+
+        return response()->json($docs);
+    }
 }
