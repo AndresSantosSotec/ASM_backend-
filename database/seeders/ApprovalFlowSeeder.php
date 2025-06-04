@@ -12,13 +12,7 @@ class ApprovalFlowSeeder extends Seeder
 {
     public function run(): void
     {
-        /* ====== 1. Asegúrate de tener los programas mínimos ======
-           ─ id 1: Todos     (genérico)
-           ─ id 2: Maestrías  (abreviatura: MSTR)
-           ─ id 3: Diplomados (abreviatura: DIPL)
-           ─ id 4: Cursos     (abreviatura: COUR)
-           Si tu catálogo real ya tiene estos programas, elimina
-           este bloque o ajústalo a tu tabla tb_programas.         */
+
         $dummyPrograms = [
             ['id'=>1,'abreviatura'=>'GEN','nombre_del_programa'=>'Genérico'],
             ['id'=>2,'abreviatura'=>'MSTR','nombre_del_programa'=>'Maestría Demo'],

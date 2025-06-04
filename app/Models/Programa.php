@@ -32,10 +32,8 @@ class Programa extends Model
         'activo',
     ];
 
-    // Si necesitas definir relaciones, puedes hacerlo aquí
-    // Ejemplo: Un programa tiene muchos estudiantes
-    // public function estudiantes()
-    // {
-    //     return $this->hasMany(Estudiante::class);
-    // }
+    public function precios()
+    {
+        return $this->hasOne(PrecioPrograma::class, 'programa_id');
+    }
 }

@@ -207,7 +207,23 @@ Route::get('prospectos/{prospecto}/contactos-enviados', [ContactoEnviadoControll
 // ----------------------
 // Programas y Ubicación
 // ----------------------
-Route::get('/programas', [ProgramaController::class, 'ObtenerProgramas']);
+Route::prefix('programas')->group(function () {
+    // Obtener todos los programas (ya existe)
+    Route::get('/', [ProgramaController::class, 'ObtenerProgramas']);
+
+    // Crear nuevo programa con precios
+    Route::post('/', [ProgramaController::class, 'CretatePrograma']);
+
+    // Actualizar programa y sus precios
+    Route::put('/{id}', [ProgramaController::class, 'UpdatePrograma']);
+
+    // Eliminar programa (y sus precios en cascada)
+    Route::delete('/{id}', [ProgramaController::class, 'deletePrograma']);
+
+    // Rutas específicas para precios
+    Route::get('/{programaId}/precios', [ProgramaController::class, 'obtenerPreciosPrograma']);
+    Route::put('/{programaId}/precios', [ProgramaController::class, 'actualizarPrecioPrograma']);
+});
 Route::get('/ubicacion/{paisId}', [UbicacionController::class, 'getUbicacionByPais']);
 
 // ----------------------
@@ -311,7 +327,7 @@ Route::prefix('documentos')->group(function () {
     // routes/api.php
     Route::get('/documentos/{id}/file', [ProspectosDocumentoController::class, 'download']);
 
-    Route::get('/prospecto/{prospectoId}', [ProspectosDocumentoController::class,'documentosPorProspecto']);
+    Route::get('/prospecto/{prospectoId}', [ProspectosDocumentoController::class, 'documentosPorProspecto']);
 
     //Obtener documentos por prospecto
 });
