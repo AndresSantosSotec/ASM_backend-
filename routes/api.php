@@ -370,6 +370,7 @@ Route::get('precios/convenio/{convenio}/{programa}', [PriceController::class, 'p
 
 
 Route::get('/prospectos/fichas/pendientes-public', [ProspectoController::class, 'pendientesAprobacion']);
+
 Route::get('contactos-enviados/{id}/download-contrato', [ContactoEnviadoController::class, 'downloadContrato']);
 
 Route::get(
