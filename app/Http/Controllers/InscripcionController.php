@@ -6,6 +6,7 @@ use App\Models\{Prospecto, EstudiantePrograma};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 
 class InscripcionController extends Controller
 {
@@ -79,7 +80,7 @@ class InscripcionController extends Controller
                         'programa_id' => $programaId,
                         'convenio_id' => $data['financieros']['convenioId'] ?? null,
                         'fecha_inicio' => $data['academicos']['fechaInicioEspecifica'],
-                        'fecha_fin' => now()->parse($data['academicos']['fechaInicioEspecifica'])->addMonths((int) $duracion),
+                        'fecha_fin' => Carbon::parse($data['academicos']['fechaInicioEspecifica'])->addMonths((int) $duracion),
                         'duracion_meses' => $duracion,
                         'inscripcion' => $data['financieros']['inscripcion'],
                         'cuota_mensual' => $data['financieros']['cuotaMensual'],
