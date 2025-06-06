@@ -106,4 +106,15 @@ class Prospecto extends Model
     {
         return $this->hasMany(ProspectosDocumento::class, 'prospecto_id');
     }
+
+        public function courses()
+    {
+        return $this->belongsToMany(
+            Course::class,
+            'curso_prospecto',    // nombre de la tabla pivote
+            'prospecto_id',       // FK en la tabla pivote que apunta a prospectos.id
+            'course_id'           // FK en la tabla pivote que apunta a courses.id
+        )->withTimestamps();
+    }
+    
 }

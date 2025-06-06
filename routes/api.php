@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\PeriodoInscripcionController;
 use App\Http\Controllers\Api\InscripcionPeriodoController;
 use App\Http\Controllers\Api\ApprovalFlowController;
 use App\Http\Controllers\Api\ApprovalStageController;
+use App\Http\Controllers\Api\CourseController;
 
 
 /**
@@ -196,6 +197,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/report',   [CommissionController::class, 'report']);
     });
 });
+
 Route::apiResource('periodos', PeriodoInscripcionController::class);
 
 Route::apiResource('periodos.inscripciones', InscripcionPeriodoController::class)
@@ -391,4 +393,22 @@ Route::prefix('approval-flows')->group(function () {
     Route::post('{flow}/stages',    [ApprovalStageController::class, 'store']);
     Route::put('stages/{stage}',    [ApprovalStageController::class, 'update']);
     Route::delete('stages/{stage}', [ApprovalStageController::class, 'destroy']);
+});
+
+//Rutas para la crearion de los cursos 
+Route::prefix('courses')->group(function () {
+    Route::get('/', [CourseController::class, 'index']);
+    Route::post('/', [CourseController::class, 'store']);
+    Route::get('/{course}', [CourseController::class, 'show']);
+    Route::put('/{course}', [CourseController::class, 'update']);
+    Route::delete('/{course}', [CourseController::class, 'destroy']);
+
+    // Rutas adicionales
+    Route::post('/{course}/approve', [CourseController::class, 'approve']);
+    Route::post('/{course}/sync-moodle', [CourseController::class, 'syncToMoodle']);
+    Route::post('/{course}/assign-facilitator', [CourseController::class, 'assignFacilitator']);
+
+    //Rutas de Asignaciond e Cursos 
+    Route::post('/courses/assign', [CourseController::class, 'assignCourses']);
+    Route::post('/courses/unassign', [CourseController::class, 'unassignCourses']);
 });

@@ -24,7 +24,15 @@ class ProspectoController extends Controller
         }
 
         $isAdmin = strtolower($user->rol) === 'administrador';
-        $query = Prospecto::with('creator');
+
+        // ◀ Aquí agregamos, además de 'creator', el eager loading de:
+        //    – ‘programas.programa’ para traer en cada EstudiantePrograma su Programa
+        //    – ‘courses’ para traer los cursos asociados (vía pivote curso_prospecto)
+        $query = Prospecto::with([
+            'creator',
+            'programas.programa',
+            'courses'
+        ]);
 
         if (!$isAdmin) {
             $query->where('created_by', $user->id);
@@ -38,9 +46,10 @@ class ProspectoController extends Controller
 
         return response()->json([
             'message' => 'Datos de prospectos obtenidos con éxito',
-            'data' => $prospectos,
+            'data'    => $prospectos,
         ]);
     }
+
 
     public function filterByStatus($status)
     {
@@ -146,7 +155,12 @@ class ProspectoController extends Controller
 
     public function show($id)
     {
-        $prospecto = Prospecto::with('creator')->find($id);
+        // Al obtener un solo prospecto, también cargamos las mismas relaciones
+        $prospecto = Prospecto::with([
+            'creator',
+            'programas.programa',
+            'courses'
+        ])->find($id);
 
         if (!$prospecto) {
             return response()->json(['message' => 'Prospecto no encontrado'], 404);
@@ -154,7 +168,7 @@ class ProspectoController extends Controller
 
         return response()->json([
             'message' => 'Prospecto obtenido con éxito',
-            'data' => $prospecto,
+            'data'    => $prospecto,
         ]);
     }
 
@@ -280,7 +294,6 @@ class ProspectoController extends Controller
             'data' => $prospecto,
         ]);
     }
-
 
     public function assignOne(Request $request, $id)
     {
