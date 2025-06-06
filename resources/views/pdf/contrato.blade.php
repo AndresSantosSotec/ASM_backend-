@@ -186,7 +186,7 @@
     <div class="signature-block">
       <div class="sig">
         <div class="sig-line"></div>
-        <div class="sig-label">{{ $student->name }}</div>
+        <div class="sig-label">{{ $student->nombre_completo }}</div>
       </div>
       <div class="sig">
         <div class="sig-line"></div>
