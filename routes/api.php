@@ -46,7 +46,7 @@ use App\Http\Controllers\Api\CourseController;
 Route::get('/ping', fn() => response()->json(['message' => 'pong!']));
 
 // Rutas de autenticación
-Route::post('/login', [LoginController::class, 'login']);
+Route::post('/login', [LoginController::class, 'login'])->name('login');
 Route::post('/logout', [LoginController::class, 'logout'])->middleware('auth:sanctum');
 
 // Inscripciones y generación de plan de pagos
@@ -91,7 +91,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{id}/enviar-contrato', [ProspectoController::class, 'enviarContrato'])->where('id', '[0-9]+');
         Route::get('/status/{status}', [ProspectoController::class, 'filterByStatus']);
         Route::get('/fichas/pendientes', [ProspectoController::class, 'pendientesAprobacion']);
-        //new route 
+        //new route
         Route::put('/prospectos/bulk-update-status', [ProspectoController::class, 'bulkUpdateStatus']);
 
         Route::get('pendientes-con-docs', [ProspectoController::class, 'pendientesConDocs']);
@@ -395,7 +395,7 @@ Route::prefix('approval-flows')->group(function () {
     Route::delete('stages/{stage}', [ApprovalStageController::class, 'destroy']);
 });
 
-//Rutas para la crearion de los cursos 
+//Rutas para la crearion de los cursos
 Route::prefix('courses')->group(function () {
     Route::get('/', [CourseController::class, 'index']);
     Route::post('/', [CourseController::class, 'store']);
@@ -408,7 +408,7 @@ Route::prefix('courses')->group(function () {
     Route::post('/{course}/sync-moodle', [CourseController::class, 'syncToMoodle']);
     Route::post('/{course}/assign-facilitator', [CourseController::class, 'assignFacilitator']);
 
-    //Rutas de Asignaciond e Cursos 
+    //Rutas de Asignaciond e Cursos
     Route::post('/courses/assign', [CourseController::class, 'assignCourses']);
     Route::post('/courses/unassign', [CourseController::class, 'unassignCourses']);
 });
