@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Programa;
 
 class Course extends Model
 {
@@ -34,6 +35,12 @@ class Course extends Model
     public function facilitator()
     {
         return $this->belongsTo(User::class, 'facilitator_id');
+    }
+
+    // Relación con el programa al que pertenece el curso
+    public function program()
+    {
+        return $this->belongsTo(Programa::class, 'carrera');
     }
 
     public function prospectos()
