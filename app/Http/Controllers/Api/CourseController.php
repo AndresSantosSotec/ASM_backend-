@@ -44,7 +44,13 @@ class CourseController extends Controller
      */
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $payload = $request->all();
+        // Permitir alias `programId` proveniente del frontend
+        if (!isset($payload['carrera']) && isset($payload['programId'])) {
+            $payload['carrera'] = $payload['programId'];
+        }
+
+        $validator = Validator::make($payload, [
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50|unique:courses',
             'area' => 'required|in:common,specialty',
@@ -82,7 +88,13 @@ class CourseController extends Controller
     {
         $course = Course::findOrFail($id);
 
-        $validator = Validator::make($request->all(), [
+        $payload = $request->all();
+        // Permitir alias `programId` proveniente del frontend
+        if (!isset($payload['carrera']) && isset($payload['programId'])) {
+            $payload['carrera'] = $payload['programId'];
+        }
+
+        $validator = Validator::make($payload, [
             'name' => 'sometimes|required|string|max:255',
             'code' => 'sometimes|required|string|max:50|unique:courses,code,' . $course->id,
             'area' => 'sometimes|required|in:common,specialty',
