@@ -15,7 +15,7 @@ class CourseController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Course::with('facilitator');
+        $query = Course::with(['facilitator', 'program']);
 
         // Filtros
         if ($request->has('search')) {
@@ -44,7 +44,17 @@ class CourseController extends Controller
      */
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $payload = $request->all();
+        // Permitir alias provenientes del frontend
+        if (!isset($payload['carrera'])) {
+            if (isset($payload['programId'])) {
+                $payload['carrera'] = $payload['programId'];
+            } elseif (isset($payload['program_id'])) {
+                $payload['carrera'] = $payload['program_id'];
+            }
+        }
+
+        $validator = Validator::make($payload, [
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50|unique:courses',
             'area' => 'required|in:common,specialty',
@@ -54,8 +64,7 @@ class CourseController extends Controller
             'schedule' => 'required|string|max:255',
             'duration' => 'required|string|max:100',
             'facilitator_id' => 'nullable|exists:users,id',
-            'carrera' => 'nullable|string|max:255', // Si es string
-            // 'carrera' => 'nullable|exists:programas,id', // Si es id de programa
+            'carrera' => 'nullable|exists:tb_programas,id',
         ]);
 
         if ($validator->fails()) {
@@ -72,7 +81,7 @@ class CourseController extends Controller
      */
     public function show(string $id)
     {
-        $course = Course::with('facilitator')->findOrFail($id);
+        $course = Course::with(['facilitator', 'program'])->findOrFail($id);
         return response()->json($course);
     }
 
@@ -83,7 +92,17 @@ class CourseController extends Controller
     {
         $course = Course::findOrFail($id);
 
-        $validator = Validator::make($request->all(), [
+        $payload = $request->all();
+        // Permitir alias provenientes del frontend
+        if (!isset($payload['carrera'])) {
+            if (isset($payload['programId'])) {
+                $payload['carrera'] = $payload['programId'];
+            } elseif (isset($payload['program_id'])) {
+                $payload['carrera'] = $payload['program_id'];
+            }
+        }
+
+        $validator = Validator::make($payload, [
             'name' => 'sometimes|required|string|max:255',
             'code' => 'sometimes|required|string|max:50|unique:courses,code,' . $course->id,
             'area' => 'sometimes|required|in:common,specialty',
@@ -94,8 +113,7 @@ class CourseController extends Controller
             'duration' => 'sometimes|required|string|max:100',
             'facilitator_id' => 'nullable|exists:users,id',
             'status' => 'sometimes|in:draft,approved,synced',
-            'carrera' => 'nullable|string|max:255', // Si es string
-            // 'carrera' => 'nullable|exists:programas,id', // Si es id de programa
+            'carrera' => 'nullable|exists:tb_programas,id',
         ]);
 
         if ($validator->fails()) {
