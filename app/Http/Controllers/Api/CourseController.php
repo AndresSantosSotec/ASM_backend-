@@ -22,7 +22,7 @@ class CourseController extends Controller
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('code', 'like', "%{$search}%");
+                  ->orWhere('code', 'like', "%{$search}%");
             });
         }
 
@@ -45,7 +45,8 @@ class CourseController extends Controller
     public function store(Request $request)
     {
         $payload = $request->all();
-        // Permitir alias provenientes del frontend
+
+        // Alias para programa: primero programId, luego program_id
         if (!isset($payload['carrera'])) {
             if (isset($payload['programId'])) {
                 $payload['carrera'] = $payload['programId'];
@@ -55,16 +56,16 @@ class CourseController extends Controller
         }
 
         $validator = Validator::make($payload, [
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50|unique:courses',
-            'area' => 'required|in:common,specialty',
-            'credits' => 'required|integer|min:1|max:10',
-            'start_date' => 'required|date',
-            'end_date' => 'required|date|after_or_equal:start_date',
-            'schedule' => 'required|string|max:255',
-            'duration' => 'required|string|max:100',
+            'name'           => 'required|string|max:255',
+            'code'           => 'required|string|max:50|unique:courses',
+            'area'           => 'required|in:common,specialty',
+            'credits'        => 'required|integer|min:1|max:10',
+            'start_date'     => 'required|date',
+            'end_date'       => 'required|date|after_or_equal:start_date',
+            'schedule'       => 'required|string|max:255',
+            'duration'       => 'required|string|max:100',
             'facilitator_id' => 'nullable|exists:users,id',
-            'carrera' => 'nullable|exists:tb_programas,id',
+            'carrera'        => 'nullable|exists:tb_programas,id',
         ]);
 
         if ($validator->fails()) {
@@ -93,7 +94,8 @@ class CourseController extends Controller
         $course = Course::findOrFail($id);
 
         $payload = $request->all();
-        // Permitir alias provenientes del frontend
+
+        // Alias para programa en edición también
         if (!isset($payload['carrera'])) {
             if (isset($payload['programId'])) {
                 $payload['carrera'] = $payload['programId'];
@@ -103,17 +105,17 @@ class CourseController extends Controller
         }
 
         $validator = Validator::make($payload, [
-            'name' => 'sometimes|required|string|max:255',
-            'code' => 'sometimes|required|string|max:50|unique:courses,code,' . $course->id,
-            'area' => 'sometimes|required|in:common,specialty',
-            'credits' => 'sometimes|required|integer|min:1|max:10',
-            'start_date' => 'sometimes|required|date',
-            'end_date' => 'sometimes|required|date|after_or_equal:start_date',
-            'schedule' => 'sometimes|required|string|max:255',
-            'duration' => 'sometimes|required|string|max:100',
+            'name'           => 'sometimes|required|string|max:255',
+            'code'           => 'sometimes|required|string|max:50|unique:courses,code,' . $course->id,
+            'area'           => 'sometimes|required|in:common,specialty',
+            'credits'        => 'sometimes|required|integer|min:1|max:10',
+            'start_date'     => 'sometimes|required|date',
+            'end_date'       => 'sometimes|required|date|after_or_equal:start_date',
+            'schedule'       => 'sometimes|required|string|max:255',
+            'duration'       => 'sometimes|required|string|max:100',
             'facilitator_id' => 'nullable|exists:users,id',
-            'status' => 'sometimes|in:draft,approved,synced',
-            'carrera' => 'nullable|exists:tb_programas,id',
+            'status'         => 'sometimes|in:draft,approved,synced',
+            'carrera'        => 'nullable|exists:tb_programas,id',
         ]);
 
         if ($validator->fails()) {
@@ -163,9 +165,7 @@ class CourseController extends Controller
             return response()->json(['message' => 'Solo se pueden sincronizar cursos aprobados'], 422);
         }
 
-        // Aquí iría la lógica real de sincronización con Moodle
-        // Por ahora simulamos la sincronización
-
+        // Lógica de sincronización con Moodle (simulada por ahora)
         $course->update(['status' => 'synced']);
 
         return response()->json($course);
@@ -190,19 +190,20 @@ class CourseController extends Controller
         return response()->json($course);
     }
 
+    /**
+     * Bulk assign courses to prospectos
+     */
     public function assignCourses(Request $request)
     {
         $payload = $request->validate([
-            'prospecto_ids' => 'required|array',
+            'prospecto_ids'   => 'required|array',
             'prospecto_ids.*' => 'exists:prospectos,id',
-            'course_ids'    => 'required|array',
-            'course_ids.*'  => 'exists:courses,id',
+            'course_ids'      => 'required|array',
+            'course_ids.*'    => 'exists:courses,id',
         ]);
 
-        // Por cada prospecto, sincronizamos (o adjuntamos) los cursos:
         foreach ($payload['prospecto_ids'] as $prospectoId) {
             $prospecto = Prospecto::findOrFail($prospectoId);
-            // attach() agregará nuevos registros en curso_prospecto; si quieres reemplazar, usar sync():
             $prospecto->courses()->syncWithoutDetaching($payload['course_ids']);
         }
 

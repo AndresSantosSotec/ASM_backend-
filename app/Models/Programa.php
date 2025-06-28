@@ -36,4 +36,10 @@ class Programa extends Model
     {
         return $this->hasOne(PrecioPrograma::class, 'programa_id');
     }
+
+    public function cursos()
+    {
+        return $this->hasMany(Course::class, 'carrera');
+    }
+
 }
