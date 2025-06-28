@@ -70,9 +70,9 @@ class DuplicateRecordController extends Controller
         DuplicateRecord::truncate();
 
         // 2) Chunk para no saturar memoria
-        Prospecto::select('id','nombre_completo','correo_electronico','telefono')
+        Prospecto::select('id', 'nombre_completo', 'correo_electronico', 'telefono')
             ->orderBy('id')
-            ->chunkById(200, function($prospects) {
+            ->chunkById(200, function ($prospects) {
                 $arr   = $prospects->all();
                 $count = count($arr);
 
@@ -139,5 +139,43 @@ class DuplicateRecordController extends Controller
         $dup->save();
 
         return response()->json(['message' => 'Acción ejecutada'], 200);
+    }
+
+
+    public function bulkAction(Request $request)
+    {
+        $request->validate([
+            'ids' => 'required|array',
+            'ids.*' => 'integer|exists:duplicate_records,id',
+            'action' => 'required|in:keep_original,keep_duplicate,delete_duplicate,mark_reviewed'
+        ]);
+
+        $affected = 0;
+
+        foreach ($request->ids as $id) {
+            $dup = DuplicateRecord::find($id);
+            if (!$dup) continue;
+
+            switch ($request->action) {
+                case 'keep_original':
+                case 'delete_duplicate':
+                    Prospecto::find($dup->duplicate_prospect_id)?->delete();
+                    $dup->status = 'resolved';
+                    break;
+                case 'keep_duplicate':
+                    Prospecto::find($dup->original_prospect_id)?->delete();
+                    $dup->status = 'resolved';
+                    break;
+                case 'mark_reviewed':
+                    $dup->status = 'resolved';
+                    break;
+            }
+            $dup->save();
+            $affected++;
+        }
+
+        return response()->json([
+            'message' => "Acción ejecutada sobre $affected duplicados."
+        ]);
     }
 }

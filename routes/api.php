@@ -155,6 +155,8 @@ Route::middleware('auth:sanctum')->group(function () {
             [DuplicateRecordController::class, 'action']
         )
             ->where('duplicate', '[0-9]+');
+
+        Route::post('/bulk-action', [DuplicateRecordController::class, 'bulkAction']);
     });
 
     Route::prefix('commissions')->group(function () {

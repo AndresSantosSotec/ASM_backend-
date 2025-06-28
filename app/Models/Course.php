@@ -21,7 +21,8 @@ class Course extends Model
         'duration',
         'facilitator_id',
         'status',
-        'students'
+        'students',
+        'carrera',
     ];
 
     protected $casts = [
@@ -35,7 +36,7 @@ class Course extends Model
         return $this->belongsTo(User::class, 'facilitator_id');
     }
 
-        public function prospectos()
+    public function prospectos()
     {
         return $this->belongsToMany(
             Prospecto::class,
