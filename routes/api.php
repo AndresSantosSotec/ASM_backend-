@@ -329,7 +329,8 @@ Route::prefix('documentos')->group(function () {
     Route::put('/{id}', [ProspectosDocumentoController::class, 'update']);
     Route::delete('/{id}', [ProspectosDocumentoController::class, 'destroy']);
     // routes/api.php
-    Route::get('/documentos/{id}/file', [ProspectosDocumentoController::class, 'download']);
+    // Endpoint para descargar el archivo asociado a un documento
+    Route::get('/{id}/file', [ProspectosDocumentoController::class, 'download']);
 
     Route::get('/prospecto/{prospectoId}', [ProspectosDocumentoController::class, 'documentosPorProspecto']);
 
