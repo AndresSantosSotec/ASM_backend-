@@ -3,7 +3,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-class CreateProgramaCoursePivotTable extends Migration
+return new class extends Migration
 {
     public function up()
     {
@@ -15,7 +15,6 @@ class CreateProgramaCoursePivotTable extends Migration
             $table->foreignId('course_id')
                   ->constrained('courses')
                   ->onDelete('cascade');
-            // evita duplicados en la misma pareja programa-curso
             $table->unique(['programa_id', 'course_id']);
             $table->timestamps();
         });
@@ -25,4 +24,4 @@ class CreateProgramaCoursePivotTable extends Migration
     {
         Schema::dropIfExists('programa_course');
     }
-}
+};

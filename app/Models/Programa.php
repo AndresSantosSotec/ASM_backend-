@@ -9,37 +9,30 @@ class Programa extends Model
 {
     use HasFactory;
 
-    // Especifica la tabla asociada al modelo
     protected $table = 'tb_programas';
-
-    // Si no usas timestamps (created_at, updated_at), desactívalos
     public $timestamps = false;
 
-    // Define los campos que se pueden llenar masivamente
     protected $fillable = [
-        'abreviatura',
-        'nombre_del_programa',
-        'meses',
-        'area_comun',
-        'cursos_de_bba',
-        'area_de_especialidad',
-        'seminario_de_gerencia',
-        'capstone_project',
-        'escritura_de_casos',
-        'certificacion_internacional',
-        'total_cursos',
-        'fecha_creacion',
-        'activo',
+        'abreviatura','nombre_del_programa','meses',
+        'area_comun','cursos_de_bba','area_de_especialidad',
+        'seminario_de_gerencia','capstone_project',
+        'escritura_de_casos','certificacion_internacional',
+        'total_cursos','fecha_creacion','activo',
     ];
 
     public function precios()
     {
-        return $this->hasOne(PrecioPrograma::class, 'programa_id');
+        return $this->hasOne(PrecioPrograma::class,'programa_id');
     }
 
-    public function cursos()
+    // relación N-N con Course
+    public function courses()
     {
-        return $this->hasMany(Course::class, 'carrera');
+        return $this->belongsToMany(
+            Course::class,
+            'programa_course',
+            'programa_id',
+            'course_id'
+        )->withTimestamps();
     }
-
 }

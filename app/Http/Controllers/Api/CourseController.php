@@ -15,26 +15,16 @@ class CourseController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Course::with(['facilitator', 'program']);
-
-        // Filtros
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('code', 'like', "%{$search}%");
-            });
-        }
-
-        if ($request->has('area') && in_array($request->area, ['common', 'specialty'])) {
-            $query->where('area', $request->area);
-        }
-
-        if ($request->has('status') && in_array($request->status, ['draft', 'approved', 'synced'])) {
-            $query->where('status', $request->status);
-        }
-
-        $courses = $query->get();
+        $courses = Course::with(['facilitator', 'programas'])
+            ->when($request->search, fn($q) => $q->where(fn($q) => $q
+                ->where('name', 'like', "%{$request->search}%")
+                ->orWhere('code', 'like', "%{$request->search}%")
+            ))
+            ->when(in_array($request->area, ['common', 'specialty']),
+                  fn($q) => $q->where('area', $request->area))
+            ->when(in_array($request->status, ['draft', 'approved', 'synced']),
+                  fn($q) => $q->where('status', $request->status))
+            ->get();
 
         return response()->json($courses);
     }
@@ -44,18 +34,9 @@ class CourseController extends Controller
      */
     public function store(Request $request)
     {
-        $payload = $request->all();
+        $data = $request->all();
 
-        // Alias para programa: primero programId, luego program_id
-        if (!isset($payload['carrera'])) {
-            if (isset($payload['programId'])) {
-                $payload['carrera'] = $payload['programId'];
-            } elseif (isset($payload['program_id'])) {
-                $payload['carrera'] = $payload['program_id'];
-            }
-        }
-
-        $validator = Validator::make($payload, [
+        $validator = Validator::make($data, [
             'name'           => 'required|string|max:255',
             'code'           => 'required|string|max:50|unique:courses',
             'area'           => 'required|in:common,specialty',
@@ -65,14 +46,24 @@ class CourseController extends Controller
             'schedule'       => 'required|string|max:255',
             'duration'       => 'required|string|max:100',
             'facilitator_id' => 'nullable|exists:users,id',
-            'carrera'        => 'nullable|exists:tb_programas,id',
+            'program_ids'    => 'nullable|array',
+            'program_ids.*'  => 'exists:tb_programas,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json($validator->errors(), 422);
         }
 
+        // Creamos el curso
         $course = Course::create($validator->validated());
+
+        // Sincronizamos la pivote programa_course
+        if (!empty($data['program_ids'])) {
+            $course->programas()->sync($data['program_ids']);
+        }
+
+        // Cargamos relaciones para la respuesta
+        $course->load(['programas', 'facilitator']);
 
         return response()->json($course, 201);
     }
@@ -82,7 +73,7 @@ class CourseController extends Controller
      */
     public function show(string $id)
     {
-        $course = Course::with(['facilitator', 'program'])->findOrFail($id);
+        $course = Course::with(['facilitator', 'programas'])->findOrFail($id);
         return response()->json($course);
     }
 
@@ -92,21 +83,11 @@ class CourseController extends Controller
     public function update(Request $request, string $id)
     {
         $course = Course::findOrFail($id);
+        $data   = $request->all();
 
-        $payload = $request->all();
-
-        // Alias para programa en edición también
-        if (!isset($payload['carrera'])) {
-            if (isset($payload['programId'])) {
-                $payload['carrera'] = $payload['programId'];
-            } elseif (isset($payload['program_id'])) {
-                $payload['carrera'] = $payload['program_id'];
-            }
-        }
-
-        $validator = Validator::make($payload, [
+        $validator = Validator::make($data, [
             'name'           => 'sometimes|required|string|max:255',
-            'code'           => 'sometimes|required|string|max:50|unique:courses,code,' . $course->id,
+            'code'           => "sometimes|required|string|max:50|unique:courses,code,{$course->id}",
             'area'           => 'sometimes|required|in:common,specialty',
             'credits'        => 'sometimes|required|integer|min:1|max:10',
             'start_date'     => 'sometimes|required|date',
@@ -115,14 +96,24 @@ class CourseController extends Controller
             'duration'       => 'sometimes|required|string|max:100',
             'facilitator_id' => 'nullable|exists:users,id',
             'status'         => 'sometimes|in:draft,approved,synced',
-            'carrera'        => 'nullable|exists:tb_programas,id',
+            'program_ids'    => 'nullable|array',
+            'program_ids.*'  => 'exists:tb_programas,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json($validator->errors(), 422);
         }
 
+        // Actualizamos datos básicos
         $course->update($validator->validated());
+
+        // Si mandan program_ids, sincronizamos; si mandan vacío, desvincula todos
+        if (array_key_exists('program_ids', $data)) {
+            $course->programas()->sync($data['program_ids'] ?? []);
+        }
+
+        // Cargamos relaciones
+        $course->load(['programas', 'facilitator']);
 
         return response()->json($course);
     }
@@ -134,7 +125,6 @@ class CourseController extends Controller
     {
         $course = Course::findOrFail($id);
         $course->delete();
-
         return response()->json(null, 204);
     }
 
@@ -146,11 +136,12 @@ class CourseController extends Controller
         $course = Course::findOrFail($id);
 
         if (!$course->facilitator_id) {
-            return response()->json(['message' => 'No se puede aprobar un curso sin facilitador asignado'], 422);
+            return response()->json([
+                'message' => 'No se puede aprobar un curso sin facilitador asignado'
+            ], 422);
         }
 
         $course->update(['status' => 'approved']);
-
         return response()->json($course);
     }
 
@@ -162,12 +153,12 @@ class CourseController extends Controller
         $course = Course::findOrFail($id);
 
         if ($course->status !== 'approved') {
-            return response()->json(['message' => 'Solo se pueden sincronizar cursos aprobados'], 422);
+            return response()->json([
+                'message' => 'Solo se pueden sincronizar cursos aprobados'
+            ], 422);
         }
 
-        // Lógica de sincronización con Moodle (simulada por ahora)
         $course->update(['status' => 'synced']);
-
         return response()->json($course);
     }
 
@@ -186,7 +177,6 @@ class CourseController extends Controller
 
         $course = Course::findOrFail($id);
         $course->update(['facilitator_id' => $request->facilitator_id]);
-
         return response()->json($course);
     }
 
