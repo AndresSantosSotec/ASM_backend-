@@ -415,7 +415,7 @@ Route::prefix('courses')->group(function () {
     Route::post('/{course}/sync-moodle', [CourseController::class, 'syncToMoodle']);
     Route::post('/{course}/assign-facilitator', [CourseController::class, 'assignFacilitator']);
 
-    //Rutas de Asignaciond e Cursos
-    Route::post('/courses/assign', [CourseController::class, 'assignCourses']);
-    Route::post('/courses/unassign', [CourseController::class, 'unassignCourses']);
+    // Rutas de asignación de cursos a prospectos
+    Route::post('/assign', [CourseController::class, 'assignCourses']);
+    Route::post('/unassign', [CourseController::class, 'unassignCourses']);
 });

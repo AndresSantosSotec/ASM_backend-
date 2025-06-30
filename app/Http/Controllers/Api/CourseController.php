@@ -199,4 +199,24 @@ class CourseController extends Controller
 
         return response()->json(['message' => 'Cursos asignados correctamente']);
     }
+
+    /**
+     * Bulk unassign courses from prospectos
+     */
+    public function unassignCourses(Request $request)
+    {
+        $payload = $request->validate([
+            'prospecto_ids'   => 'required|array',
+            'prospecto_ids.*' => 'exists:prospectos,id',
+            'course_ids'      => 'required|array',
+            'course_ids.*'    => 'exists:courses,id',
+        ]);
+
+        foreach ($payload['prospecto_ids'] as $prospectoId) {
+            $prospecto = Prospecto::findOrFail($prospectoId);
+            $prospecto->courses()->detach($payload['course_ids']);
+        }
+
+        return response()->json(['message' => 'Cursos desasignados correctamente']);
+    }
 }
