@@ -143,7 +143,7 @@ class EstudianteProgramaController extends Controller
     // obtener programas con sus cursos para un prospecto
     public function getProgramasConCursos($prospectoId)
     {
-        $programas = EstudiantePrograma::with('programa.courses')
+        $programas = EstudiantePrograma::with(['prospecto', 'programa.courses'])
             ->where('prospecto_id', $prospectoId)
             ->get();
 
