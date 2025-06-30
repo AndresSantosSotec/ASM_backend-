@@ -272,7 +272,8 @@ class ProspectoController extends Controller
             foreach ($prospecto->documentos as $doc) {
                 $doc->deleted_by = $userId;
                 $doc->save();
-                $doc->delete();
+                // Eliminar definitivamente para evitar violaciones de FK
+                $doc->forceDelete();
             }
 
             $prospecto->deleted_by = $userId;
@@ -394,7 +395,8 @@ class ProspectoController extends Controller
         DB::transaction(function () use ($data, $userId) {
             $docs = ProspectosDocumento::whereIn('prospecto_id', $data['prospecto_ids']);
             $docs->update(['deleted_by' => $userId]);
-            $docs->delete();
+            // Eliminación definitiva de documentos para evitar violaciones de FK
+            $docs->forceDelete();
 
             Prospecto::whereIn('id', $data['prospecto_ids'])
                 ->update(['deleted_by' => $userId]);
@@ -528,6 +530,22 @@ class ProspectoController extends Controller
         return response()->json([
             'message' => 'Prospectos pendientes con sus documentos',
             'data'    => $prospectos
+        ]);
+    }
+
+    /**
+     * Obtener prospectos inscritos con sus programas y cursos asociados
+     */
+    public function inscritosConCursos()
+    {
+        $prospectos = Prospecto::with('programas.programa.courses')
+            ->where('status', 'Inscrito')
+            ->whereHas('programas')
+            ->get();
+
+        return response()->json([
+            'message' => 'Prospectos inscritos con programas y cursos',
+            'data'    => $prospectos,
         ]);
     }
 

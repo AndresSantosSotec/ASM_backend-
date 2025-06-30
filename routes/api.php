@@ -96,6 +96,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('pendientes-con-docs', [ProspectoController::class, 'pendientesConDocs']);
         Route::get('prospectos/{id}/download-contrato', [ProspectoController::class, 'downloadContrato']);
+        // Prospectos inscritos con sus programas y cursos
+        Route::get('inscritos-with-courses', [ProspectoController::class, 'inscritosConCursos']);
     });
 
     // Importación de prospectos
