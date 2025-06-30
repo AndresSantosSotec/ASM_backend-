@@ -352,6 +352,9 @@ Route::prefix('estudiante-programa')->group(function () {
     Route::get('/{id}', [EstudianteProgramaController::class, 'show'])
         ->whereNumber('id');
 
+    Route::get('/{id}/with-courses', [EstudianteProgramaController::class, 'getProgramasConCursos'])
+        ->whereNumber('id');
+
     Route::post('/',    [EstudianteProgramaController::class, 'store']);
     Route::put('/{id}', [EstudianteProgramaController::class, 'update'])
         ->whereNumber('id');
