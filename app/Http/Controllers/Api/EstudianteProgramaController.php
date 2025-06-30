@@ -128,13 +128,27 @@ class EstudianteProgramaController extends Controller
         return response()->json($programas, 200);
     }
 
-    //get programas 
+    //get programas
     public function getProgramas()
     {
         $programas = EstudiantePrograma::with('programa')->get();
 
         if ($programas->isEmpty()) {
             return response()->json(['message' => 'No se encontraron programas.'], 404);
+        }
+
+        return response()->json($programas, 200);
+    }
+
+    // obtener programas con sus cursos para un prospecto
+    public function getProgramasConCursos($prospectoId)
+    {
+        $programas = EstudiantePrograma::with('programa.courses')
+            ->where('prospecto_id', $prospectoId)
+            ->get();
+
+        if ($programas->isEmpty()) {
+            return response()->json(['message' => 'No se encontraron programas para este prospecto.'], 404);
         }
 
         return response()->json($programas, 200);

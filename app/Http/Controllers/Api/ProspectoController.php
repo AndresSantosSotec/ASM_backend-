@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Prospecto;
+use App\Models\ProspectosDocumento;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf as PDF;
 use Illuminate\Support\Facades\Mail;
@@ -260,11 +261,24 @@ class ProspectoController extends Controller
 
     public function destroy($id)
     {
-        $prospecto = Prospecto::find($id);
+        $prospecto = Prospecto::with('documentos')->find($id);
         if (!$prospecto) {
             return response()->json(['message' => 'Prospecto no encontrado'], 404);
         }
-        $prospecto->delete();
+
+        $userId = auth()->id();
+
+        DB::transaction(function () use ($prospecto, $userId) {
+            foreach ($prospecto->documentos as $doc) {
+                $doc->deleted_by = $userId;
+                $doc->save();
+                $doc->delete();
+            }
+
+            $prospecto->deleted_by = $userId;
+            $prospecto->save();
+            $prospecto->delete();
+        });
 
         return response()->json(['message' => 'Prospecto eliminado con éxito']);
     }
@@ -375,7 +389,18 @@ class ProspectoController extends Controller
             'prospecto_ids.*' => 'integer|exists:prospectos,id',
         ]);
 
-        Prospecto::whereIn('id', $data['prospecto_ids'])->delete();
+        $userId = auth()->id();
+
+        DB::transaction(function () use ($data, $userId) {
+            $docs = ProspectosDocumento::whereIn('prospecto_id', $data['prospecto_ids']);
+            $docs->update(['deleted_by' => $userId]);
+            $docs->delete();
+
+            Prospecto::whereIn('id', $data['prospecto_ids'])
+                ->update(['deleted_by' => $userId]);
+
+            Prospecto::whereIn('id', $data['prospecto_ids'])->delete();
+        });
 
         return response()->json(['message' => 'Prospectos eliminados correctamente']);
     }
