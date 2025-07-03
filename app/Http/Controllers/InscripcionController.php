@@ -173,4 +173,37 @@ class InscripcionController extends Controller
             ]),
         ]);
     }
+
+    public function destroy($id)
+    {
+        Log::info("⇨ InscripcionController@destroy — id recibido: {$id}");
+        $prospecto = Prospecto::find($id);
+        if (!$prospecto) {
+            Log::warning("⇨ destroy — Prospecto no existe: {$id}");
+            return response()->json(['error' => 'Ficha no encontrada'], 404);
+        }
+
+        // Eliminar programas asociados
+        $prospecto->programas()->delete();
+
+        // Eliminar el prospecto
+        $prospecto->delete();
+
+        Log::info("⇨ destroy — Prospecto eliminado: {$id}");
+        return response()->json(['message' => 'Ficha eliminada correctamente'], 200);
+    }
+
+    public function Loader()
+    {
+        Log::info('⇨ InscripcionController@Loader — Cargando datos de inscripción');
+
+        $prospectos = Prospecto::with('programas')->get();
+
+        if ($prospectos->isEmpty()) {
+            Log::warning('⇨ Loader — No se encontraron prospectos');
+            return response()->json(['message' => 'No hay prospectos registrados'], 404);
+        }
+
+        return response()->json($prospectos, 200);
+    }
 }
