@@ -4,6 +4,9 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Inscripcion;
+use App\Models\GpaHist;
+use App\Models\Achievement;
 
 class Prospecto extends Model
 {
@@ -107,7 +110,7 @@ class Prospecto extends Model
         return $this->hasMany(ProspectosDocumento::class, 'prospecto_id');
     }
 
-        public function courses()
+    public function courses()
     {
         return $this->belongsToMany(
             Course::class,
@@ -115,6 +118,21 @@ class Prospecto extends Model
             'prospecto_id',       // FK en la tabla pivote que apunta a prospectos.id
             'course_id'           // FK en la tabla pivote que apunta a courses.id
         )->withTimestamps();
+    }
+
+    public function inscripciones()
+    {
+        return $this->hasMany(Inscripcion::class);
+    }
+
+    public function gpaHist()
+    {
+        return $this->hasMany(GpaHist::class);
+    }
+
+    public function achievements()
+    {
+        return $this->hasMany(Achievement::class);
     }
     
 }

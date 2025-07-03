@@ -37,6 +37,9 @@ use App\Http\Controllers\Api\InscripcionPeriodoController;
 use App\Http\Controllers\Api\ApprovalFlowController;
 use App\Http\Controllers\Api\ApprovalStageController;
 use App\Http\Controllers\Api\CourseController;
+use App\Http\Controllers\Api\RankingController;
+use App\Http\Controllers\Api\CoursePerformanceController;
+use App\Http\Controllers\Api\StudentController;
 
 
 /**
@@ -419,3 +422,8 @@ Route::prefix('courses')->group(function () {
     Route::post('/assign', [CourseController::class, 'assignCourses']);
     Route::post('/unassign', [CourseController::class, 'unassignCourses']);
 });
+
+// Ranking y rendimiento
+Route::get('/ranking/students', [RankingController::class, 'index'])->middleware('auth:sanctum');
+Route::get('/ranking/courses', [CoursePerformanceController::class, 'index'])->middleware('auth:sanctum');
+Route::get('/students/{id}', [StudentController::class, 'show'])->middleware('auth:sanctum');
