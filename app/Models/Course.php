@@ -4,6 +4,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Inscripcion;
 
 class Course extends Model
 {
@@ -44,5 +45,10 @@ class Course extends Model
             'course_id',
             'prospecto_id'
         )->withTimestamps();
+    }
+
+    public function inscripciones()
+    {
+        return $this->hasMany(Inscripcion::class);
     }
 }
