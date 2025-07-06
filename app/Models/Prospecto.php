@@ -12,8 +12,7 @@ use App\Models\Payment;
 use App\Models\PaymentPlan;
 use App\Models\CollectionLog;
 use App\Models\ReconciliationRecord;
-use App\Models\CuotaProgramaEstudiante;
-use App\Models\KardexPago;
+
 
 class Prospecto extends Model
 {
@@ -153,6 +152,7 @@ class Prospecto extends Model
         return $this->hasMany(Payment::class);
     }
 
+
     /** Planes y pagos reales */
     public function cuotas()
     {
@@ -174,6 +174,7 @@ class Prospecto extends Model
         );
     }
 
+
     public function paymentPlans()
     {
         return $this->hasMany(PaymentPlan::class);
@@ -191,16 +192,20 @@ class Prospecto extends Model
 
     public function getBalance(): float
     {
+
         $deuda = $this->cuotas()->sum('monto');
         $pagos = $this->kardexPagos()->sum('monto_pagado');
         return (float) ($deuda - $pagos);
+
     }
 
     public function isBlocked(): bool
     {
+
         return $this->cuotas()
             ->where('estado', '!=', 'pagado')
             ->whereDate('fecha_vencimiento', '<', now())
+
             ->exists();
     }
     
