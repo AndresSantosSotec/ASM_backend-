@@ -441,4 +441,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
+
+
+    // Planes de pago reales
+    Route::get('/prospectos/{id}/cuotas', [\App\Http\Controllers\Api\CuotaController::class, 'byProspecto']);
+    Route::get('/estudiante-programa/{id}/cuotas', [\App\Http\Controllers\Api\CuotaController::class, 'byPrograma']);
+
+    Route::get('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'index']);
+    Route::post('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'store']);
+
 });

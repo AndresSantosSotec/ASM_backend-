@@ -13,6 +13,7 @@ use App\Models\PaymentPlan;
 use App\Models\CollectionLog;
 use App\Models\ReconciliationRecord;
 
+
 class Prospecto extends Model
 {
     use HasFactory;
@@ -151,6 +152,29 @@ class Prospecto extends Model
         return $this->hasMany(Payment::class);
     }
 
+
+    /** Planes y pagos reales */
+    public function cuotas()
+    {
+        return $this->hasManyThrough(
+            CuotaProgramaEstudiante::class,
+            EstudiantePrograma::class,
+            'prospecto_id',
+            'estudiante_programa_id'
+        );
+    }
+
+    public function kardexPagos()
+    {
+        return $this->hasManyThrough(
+            KardexPago::class,
+            EstudiantePrograma::class,
+            'prospecto_id',
+            'estudiante_programa_id'
+        );
+    }
+
+
     public function paymentPlans()
     {
         return $this->hasMany(PaymentPlan::class);
@@ -168,15 +192,20 @@ class Prospecto extends Model
 
     public function getBalance(): float
     {
-        $invoices = $this->invoices()->sum('amount');
-        $payments = $this->payments()->where('status', 'aprobado')->sum('amount');
-        return (float) ($invoices - $payments);
+
+        $deuda = $this->cuotas()->sum('monto');
+        $pagos = $this->kardexPagos()->sum('monto_pagado');
+        return (float) ($deuda - $pagos);
+
     }
 
     public function isBlocked(): bool
     {
-        return $this->invoices()
-            ->where('status', 'vencido')
+
+        return $this->cuotas()
+            ->where('estado', '!=', 'pagado')
+            ->whereDate('fecha_vencimiento', '<', now())
+
             ->exists();
     }
     
