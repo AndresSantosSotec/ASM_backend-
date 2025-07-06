@@ -40,6 +40,8 @@ use App\Http\Controllers\Api\CourseController;
 use App\Http\Controllers\Api\RankingController;
 use App\Http\Controllers\Api\CoursePerformanceController;
 use App\Http\Controllers\Api\StudentController;
+use App\Http\Controllers\Api\InvoiceController;
+use App\Http\Controllers\Api\PaymentController;
 
 
 /**
@@ -427,3 +429,16 @@ Route::prefix('courses')->group(function () {
 Route::get('/ranking/students', [RankingController::class, 'index'])->middleware('auth:sanctum');
 Route::get('/ranking/courses', [CoursePerformanceController::class, 'index'])->middleware('auth:sanctum');
 Route::get('/students/{id}', [StudentController::class, 'show'])->middleware('auth:sanctum');
+
+// ----------------------
+// Finanzas y Pagos
+// ----------------------
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/invoices', [InvoiceController::class, 'index']);
+    Route::post('/invoices', [InvoiceController::class, 'store']);
+    Route::put('/invoices/{invoice}', [InvoiceController::class, 'update']);
+    Route::delete('/invoices/{invoice}', [InvoiceController::class, 'destroy']);
+
+    Route::get('/payments', [PaymentController::class, 'index']);
+    Route::post('/payments', [PaymentController::class, 'store']);
+});

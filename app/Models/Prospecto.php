@@ -7,6 +7,11 @@ use Illuminate\Database\Eloquent\Model;
 use App\Models\Inscripcion;
 use App\Models\GpaHist;
 use App\Models\Achievement;
+use App\Models\Invoice;
+use App\Models\Payment;
+use App\Models\PaymentPlan;
+use App\Models\CollectionLog;
+use App\Models\ReconciliationRecord;
 
 class Prospecto extends Model
 {
@@ -133,6 +138,46 @@ class Prospecto extends Model
     public function achievements()
     {
         return $this->hasMany(Achievement::class);
+    }
+
+    /** Finanzas */
+    public function invoices()
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
+    public function payments()
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    public function paymentPlans()
+    {
+        return $this->hasMany(PaymentPlan::class);
+    }
+
+    public function collectionLogs()
+    {
+        return $this->hasMany(CollectionLog::class);
+    }
+
+    public function reconciliationRecords()
+    {
+        return $this->hasMany(ReconciliationRecord::class);
+    }
+
+    public function getBalance(): float
+    {
+        $invoices = $this->invoices()->sum('amount');
+        $payments = $this->payments()->where('status', 'aprobado')->sum('amount');
+        return (float) ($invoices - $payments);
+    }
+
+    public function isBlocked(): bool
+    {
+        return $this->invoices()
+            ->where('status', 'vencido')
+            ->exists();
     }
     
 }
