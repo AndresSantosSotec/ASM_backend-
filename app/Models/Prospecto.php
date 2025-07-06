@@ -7,6 +7,13 @@ use Illuminate\Database\Eloquent\Model;
 use App\Models\Inscripcion;
 use App\Models\GpaHist;
 use App\Models\Achievement;
+use App\Models\Invoice;
+use App\Models\Payment;
+use App\Models\PaymentPlan;
+use App\Models\CollectionLog;
+use App\Models\ReconciliationRecord;
+use App\Models\CuotaProgramaEstudiante;
+use App\Models\KardexPago;
 
 class Prospecto extends Model
 {
@@ -133,6 +140,68 @@ class Prospecto extends Model
     public function achievements()
     {
         return $this->hasMany(Achievement::class);
+    }
+
+    /** Finanzas */
+    public function invoices()
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
+    public function payments()
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    /** Planes y pagos reales */
+    public function cuotas()
+    {
+        return $this->hasManyThrough(
+            CuotaProgramaEstudiante::class,
+            EstudiantePrograma::class,
+            'prospecto_id',
+            'estudiante_programa_id'
+        );
+    }
+
+    public function kardexPagos()
+    {
+        return $this->hasManyThrough(
+            KardexPago::class,
+            EstudiantePrograma::class,
+            'prospecto_id',
+            'estudiante_programa_id'
+        );
+    }
+
+    public function paymentPlans()
+    {
+        return $this->hasMany(PaymentPlan::class);
+    }
+
+    public function collectionLogs()
+    {
+        return $this->hasMany(CollectionLog::class);
+    }
+
+    public function reconciliationRecords()
+    {
+        return $this->hasMany(ReconciliationRecord::class);
+    }
+
+    public function getBalance(): float
+    {
+        $deuda = $this->cuotas()->sum('monto');
+        $pagos = $this->kardexPagos()->sum('monto_pagado');
+        return (float) ($deuda - $pagos);
+    }
+
+    public function isBlocked(): bool
+    {
+        return $this->cuotas()
+            ->where('estado', '!=', 'pagado')
+            ->whereDate('fecha_vencimiento', '<', now())
+            ->exists();
     }
     
 }
