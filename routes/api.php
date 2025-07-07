@@ -48,6 +48,7 @@ use App\Http\Controllers\Api\ReconciliationController;
 
 use App\Http\Controllers\Api\RuleController;
 use App\Http\Controllers\Api\CollectionLogController;
+use App\Http\Controllers\Api\PaymentRuleNotificationController;
 
 
 
@@ -467,6 +468,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/payment-rules', [RuleController::class, 'index']);
     Route::put('/payment-rules/{rule}', [RuleController::class, 'update']);
+
+    Route::post('/payment-rules/{rule}/notifications', [PaymentRuleNotificationController::class, 'store']);
+    Route::put('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'update']);
+    Route::delete('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'destroy']);
 
 
 
