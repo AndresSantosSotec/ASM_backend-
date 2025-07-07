@@ -42,6 +42,7 @@ use App\Http\Controllers\Api\CoursePerformanceController;
 use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\ReportsController;
 
 
 /**
@@ -449,5 +450,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'index']);
     Route::post('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'store']);
+
+    Route::get('/reports/summary', [ReportsController::class, 'summary']);
+    Route::get('/reports/export', [ReportsController::class, 'export']);
 
 });
