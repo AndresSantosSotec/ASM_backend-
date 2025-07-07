@@ -449,8 +449,24 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
 
+
+    Route::prefix('payment-plans')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'store']);
+        Route::get('/{paymentPlan}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'show']);
+        Route::put('/{paymentPlan}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'update']);
+        Route::delete('/{paymentPlan}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'destroy']);
+
+        Route::get('/{paymentPlan}/installments', [\App\Http\Controllers\Api\PaymentPlanController::class, 'indexInstallments']);
+        Route::post('/{paymentPlan}/installments', [\App\Http\Controllers\Api\PaymentPlanController::class, 'storeInstallment']);
+        Route::get('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'showInstallment']);
+        Route::put('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'updateInstallment']);
+        Route::delete('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'destroyInstallment']);
+    });
+
     Route::get('/payment-rules', [RuleController::class, 'index']);
     Route::put('/payment-rules/{rule}', [RuleController::class, 'update']);
+
 
 
     // Planes de pago reales
