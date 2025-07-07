@@ -42,6 +42,7 @@ use App\Http\Controllers\Api\CoursePerformanceController;
 use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\RuleController;
 
 
 /**
@@ -441,6 +442,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
+
+    Route::get('/payment-rules', [RuleController::class, 'index']);
+    Route::put('/payment-rules/{rule}', [RuleController::class, 'update']);
 
 
     // Planes de pago reales
