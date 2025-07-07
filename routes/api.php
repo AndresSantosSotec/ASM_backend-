@@ -42,7 +42,8 @@ use App\Http\Controllers\Api\CoursePerformanceController;
 use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PaymentController;
-use App\Http\Controllers\Api\ReportsController;
+use App\Http\Controllers\Api\CollectionLogController;
+
 
 
 /**
@@ -451,7 +452,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'index']);
     Route::post('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'store']);
 
-    Route::get('/reports/summary', [ReportsController::class, 'summary']);
-    Route::get('/reports/export', [ReportsController::class, 'export']);
+
+    // Collection Logs
+    Route::get('/collection-logs', [CollectionLogController::class, 'index']);
+    Route::post('/collection-logs', [CollectionLogController::class, 'store']);
+    Route::get('/collection-logs/{id}', [CollectionLogController::class, 'show']);
+    Route::put('/collection-logs/{id}', [CollectionLogController::class, 'update']);
+    Route::delete('/collection-logs/{id}', [CollectionLogController::class, 'destroy']);
+
 
 });
