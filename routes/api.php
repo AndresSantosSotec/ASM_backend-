@@ -43,6 +43,13 @@ use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PaymentController;
 
+use App\Http\Controllers\Api\ReconciliationController;
+
+use App\Http\Controllers\Api\RuleController;
+use App\Http\Controllers\Api\CollectionLogController;
+
+
+
 
 /**
  * Rutas Públicas
@@ -442,6 +449,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
 
+
     Route::prefix('payment-plans')->group(function () {
         Route::get('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'index']);
         Route::post('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'store']);
@@ -456,6 +464,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'destroyInstallment']);
     });
 
+    Route::get('/payment-rules', [RuleController::class, 'index']);
+    Route::put('/payment-rules/{rule}', [RuleController::class, 'update']);
+
+
 
     // Planes de pago reales
     Route::get('/prospectos/{id}/cuotas', [\App\Http\Controllers\Api\CuotaController::class, 'byProspecto']);
@@ -463,5 +475,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'index']);
     Route::post('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'store']);
+    Route::post('/reconciliation/upload', [ReconciliationController::class, 'upload']);
+    Route::get('/reconciliation/pending', [ReconciliationController::class, 'pending']);
+    Route::post('/reconciliation/process', [ReconciliationController::class, 'process']);
+
+
+    // Collection Logs
+    Route::get('/collection-logs', [CollectionLogController::class, 'index']);
+    Route::post('/collection-logs', [CollectionLogController::class, 'store']);
+    Route::get('/collection-logs/{id}', [CollectionLogController::class, 'show']);
+    Route::put('/collection-logs/{id}', [CollectionLogController::class, 'update']);
+    Route::delete('/collection-logs/{id}', [CollectionLogController::class, 'destroy']);
+
 
 });

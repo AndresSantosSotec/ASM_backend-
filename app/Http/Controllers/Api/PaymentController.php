@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\KardexPago;
 use App\Models\CuotaProgramaEstudiante;
 use Illuminate\Http\Request;
+use App\Http\Requests\StorePaymentRequest;
 use Illuminate\Support\Facades\Auth;
 
 
@@ -29,18 +30,9 @@ class PaymentController extends Controller
         return response()->json(['data' => $query->get()]);
     }
 
-    public function store(Request $request)
+    public function store(StorePaymentRequest $request)
     {
-        $data = $request->validate([
-
-            'estudiante_programa_id' => 'required|exists:estudiante_programa,id',
-            'cuota_id' => 'nullable|exists:cuotas_programa_estudiante,id',
-            'fecha_pago' => 'required|date',
-            'monto_pagado' => 'required|numeric',
-            'metodo_pago' => 'nullable|string',
-            'observaciones' => 'nullable|string',
-        ]);
-
+        $data = $request->validated();
         $data['created_by'] = Auth::id();
         $payment = KardexPago::create($data);
 
