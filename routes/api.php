@@ -42,6 +42,7 @@ use App\Http\Controllers\Api\CoursePerformanceController;
 use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\ReportsController;
 
 use App\Http\Controllers\Api\ReconciliationController;
 
@@ -478,6 +479,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/reconciliation/upload', [ReconciliationController::class, 'upload']);
     Route::get('/reconciliation/pending', [ReconciliationController::class, 'pending']);
     Route::post('/reconciliation/process', [ReconciliationController::class, 'process']);
+
+    // Financial reports
+    Route::get('/reports/summary', [ReportsController::class, 'summary']);
+    Route::get('/reports/export', [ReportsController::class, 'export']);
 
 
     // Collection Logs
