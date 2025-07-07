@@ -472,6 +472,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
     Route::post('/payment-rules', [RuleController::class, 'store']);
+
+    Route::post('/payment-rules/{rule}/notifications', [PaymentRuleNotificationController::class, 'store']);
     Route::put('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'update']);
     Route::delete('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'destroy']);
 

@@ -20,9 +20,9 @@ class DatabaseSeeder extends Seeder
         // ]);
         // $this->call(ApprovalFlowSeeder::class);
         $this->call([
-            ProgramasSeeder::class,
-            PrecioProgramasSeeder::class,
-            CoursesSeeder::class,
+            // ProgramasSeeder::class,
+            // PrecioProgramasSeeder::class,
+            // CoursesSeeder::class,
             RankingDemoSeeder::class,
         ]);
     }
