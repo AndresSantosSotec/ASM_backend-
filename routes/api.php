@@ -42,8 +42,12 @@ use App\Http\Controllers\Api\CoursePerformanceController;
 use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PaymentController;
+
+use App\Http\Controllers\Api\ReconciliationController;
+
 use App\Http\Controllers\Api\RuleController;
 use App\Http\Controllers\Api\CollectionLogController;
+
 
 
 
@@ -455,6 +459,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'index']);
     Route::post('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'store']);
+    Route::post('/reconciliation/upload', [ReconciliationController::class, 'upload']);
+    Route::get('/reconciliation/pending', [ReconciliationController::class, 'pending']);
+    Route::post('/reconciliation/process', [ReconciliationController::class, 'process']);
 
 
     // Collection Logs
