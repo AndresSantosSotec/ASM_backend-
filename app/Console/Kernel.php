@@ -16,8 +16,12 @@ class Kernel extends ConsoleKernel
         $schedule->command('duplicates:detect')->dailyAt('02:00');
           // mensual
          $schedule->command('commissions:compute --period=monthly')->monthlyOn(1, '00:00');
-         // trimestral
+          // trimestral
          $schedule->command('commissions:compute --period=quarterly')->quarterly();
+        $schedule->command('late-fees:apply')->daily();
+        $schedule->command('accounts:block-overdue')->daily();
+        $schedule->command('payments:send-reminders')->daily();
+        $schedule->command('reconciliations:process-pending')->daily();
     }
 
     /**
