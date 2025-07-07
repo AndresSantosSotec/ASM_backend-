@@ -42,8 +42,13 @@ use App\Http\Controllers\Api\CoursePerformanceController;
 use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\ReportsController;
+
+use App\Http\Controllers\Api\ReconciliationController;
+
 use App\Http\Controllers\Api\RuleController;
 use App\Http\Controllers\Api\CollectionLogController;
+
 
 
 
@@ -445,8 +450,24 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
 
+
+    Route::prefix('payment-plans')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'store']);
+        Route::get('/{paymentPlan}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'show']);
+        Route::put('/{paymentPlan}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'update']);
+        Route::delete('/{paymentPlan}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'destroy']);
+
+        Route::get('/{paymentPlan}/installments', [\App\Http\Controllers\Api\PaymentPlanController::class, 'indexInstallments']);
+        Route::post('/{paymentPlan}/installments', [\App\Http\Controllers\Api\PaymentPlanController::class, 'storeInstallment']);
+        Route::get('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'showInstallment']);
+        Route::put('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'updateInstallment']);
+        Route::delete('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'destroyInstallment']);
+    });
+
     Route::get('/payment-rules', [RuleController::class, 'index']);
     Route::put('/payment-rules/{rule}', [RuleController::class, 'update']);
+
 
 
     // Planes de pago reales
@@ -455,6 +476,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'index']);
     Route::post('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'store']);
+    Route::post('/reconciliation/upload', [ReconciliationController::class, 'upload']);
+    Route::get('/reconciliation/pending', [ReconciliationController::class, 'pending']);
+    Route::post('/reconciliation/process', [ReconciliationController::class, 'process']);
+
+    // Financial reports
+    Route::get('/reports/summary', [ReportsController::class, 'summary']);
+    Route::get('/reports/export', [ReportsController::class, 'export']);
 
 
     // Collection Logs
