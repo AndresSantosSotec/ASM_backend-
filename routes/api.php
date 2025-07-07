@@ -467,9 +467,11 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::get('/payment-rules', [RuleController::class, 'index']);
+    Route::post('/payment-rules', [RuleController::class, 'store']);
     Route::put('/payment-rules/{rule}', [RuleController::class, 'update']);
 
-    Route::post('/payment-rules/{rule}/notifications', [PaymentRuleNotificationController::class, 'store']);
+
+    Route::post('/payment-rules', [RuleController::class, 'store']);
     Route::put('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'update']);
     Route::delete('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'destroy']);
 
@@ -497,3 +499,5 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/collection-logs/{id}', [CollectionLogController::class, 'update']);
     Route::delete('/collection-logs/{id}', [CollectionLogController::class, 'destroy']);
 });
+
+Route::apiResource('rules', RuleController::class);
