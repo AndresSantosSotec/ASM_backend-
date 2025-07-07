@@ -23,6 +23,7 @@ class DatabaseSeeder extends Seeder
             ProgramasSeeder::class,
             PrecioProgramasSeeder::class,
             CoursesSeeder::class,
+            RankingDemoSeeder::class,
         ]);
     }
 }
