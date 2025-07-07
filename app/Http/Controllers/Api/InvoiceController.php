@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Invoice;
 use Illuminate\Http\Request;
+use App\Http\Requests\StoreInvoiceRequest;
 
 class InvoiceController extends Controller
 {
@@ -22,17 +23,9 @@ class InvoiceController extends Controller
         return response()->json(['data' => $query->get()]);
     }
 
-    public function store(Request $request)
+    public function store(StoreInvoiceRequest $request)
     {
-        $data = $request->validate([
-            'prospecto_id' => 'required|exists:prospectos,id',
-            'amount' => 'required|numeric',
-            'due_date' => 'required|date',
-            'status' => 'required|string',
-            'description' => 'nullable|string',
-        ]);
-
-        $invoice = Invoice::create($data);
+        $invoice = Invoice::create($request->validated());
 
         return response()->json(['data' => $invoice], 201);
     }
