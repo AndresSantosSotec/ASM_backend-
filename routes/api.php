@@ -463,6 +463,4 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/collection-logs/{id}', [CollectionLogController::class, 'show']);
     Route::put('/collection-logs/{id}', [CollectionLogController::class, 'update']);
     Route::delete('/collection-logs/{id}', [CollectionLogController::class, 'destroy']);
-
-
 });
