@@ -22,4 +22,9 @@ class PaymentRule extends Model
         'send_automatic_reminders' => 'boolean',
         'gateway_config' => 'array',
     ];
+
+    public function notifications()
+    {
+        return $this->hasMany(PaymentRuleNotification::class);
+    }
 }
