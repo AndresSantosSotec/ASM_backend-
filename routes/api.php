@@ -439,6 +439,7 @@ Route::get('/ranking/students', [RankingController::class, 'index'])->middleware
 Route::get('/ranking/courses', [CoursePerformanceController::class, 'index'])->middleware('auth:sanctum');
 Route::get('/ranking/report', [RankingController::class, 'report'])->middleware('auth:sanctum');
 Route::get('/students/{id}', [StudentController::class, 'show'])->middleware('auth:sanctum');
+Route::post('/students/{id}/send-credentials', [StudentController::class, 'sendCredentials'])->middleware('auth:sanctum');
 
 // ----------------------
 // Finanzas y Pagos
