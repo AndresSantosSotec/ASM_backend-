@@ -17,6 +17,8 @@ class RankingDemoSeeder extends Seeder
     public function run()
     {
         DB::transaction(function () {
+            // Start prospecto IDs at 3365 so they match expected demo data
+            DB::statement("SELECT setval(pg_get_serial_sequence('prospectos', 'id'), 3364)");
             // Ensure two programs exist with total_cursos set
             $bba = Programa::firstOrCreate(
                 ['abreviatura' => 'BBA'],
