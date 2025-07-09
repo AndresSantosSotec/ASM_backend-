@@ -1,0 +1,174 @@
+# Prospecto y relaciones principales
+
+El modelo **Prospecto** representa a una persona interesada en los programas académicos. Los datos se guardan en la tabla `prospectos` y se pueden llenar masivamente con los campos definidos en el modelo:
+
+```php
+    // Campos que puedes rellenar masivamente
+    protected $fillable = [
+        'fecha',
+        'nombre_completo',
+        'telefono',
+        'correo_electronico',
+        'genero',
+        'empresa_donde_labora_actualmente',
+        'puesto',
+        'notas_generales',
+        'observaciones',
+        'interes',
+        'nota1',
+        'nota2',
+        'nota3',
+        'cierre',
+        'status',
+        'correo_corporativo',
+        'pais_origen',
+        'pais_residencia',
+        'numero_identificacion',
+        'fecha_nacimiento',
+        'modalidad',
+        'fecha_inicio_especifica',
+        'fecha_taller_reduccion',
+        'fecha_taller_integracion',
+        'medio_conocimiento_institucion',
+        'metodo_pago',
+        'departamento',
+        'municipio',
+        'direccion_residencia',
+        'telefono_corporativo',
+        'direccion_empresa',
+        'ultimo_titulo_obtenido',
+        'institucion_titulo',
+        'anio_graduacion',
+        'cantidad_cursos_aprobados',
+        'monto_inscripcion',
+        'convenio_pago_id',
+        'dia_estudio',
+        // auditoría
+        'created_by',
+        'updated_by',
+        'deleted_by',
+    ];
+
+    // Casts para fechas y decimales
+```
+
+## Relaciones definidas en el modelo
+
+El archivo `app/Models/Prospecto.php` incluye varios métodos que enlazan el prospecto con otras tablas:
+
+```php
+
+    /** Convenio corporativo, si existe */
+    public function convenio()
+    {
+        return $this->belongsTo(Convenio::class, 'convenio_pago_id');
+    }
+
+    /** Inscripciones académicas ligadas a este prospecto */
+    public function programas()
+    {
+        return $this->hasMany(EstudiantePrograma::class, 'prospecto_id');
+    }
+
+    public function asesor()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+        public function documentos()
+    {
+        return $this->hasMany(ProspectosDocumento::class, 'prospecto_id');
+    }
+
+    public function courses()
+    {
+        return $this->belongsToMany(
+            Course::class,
+            'curso_prospecto',    // nombre de la tabla pivote
+            'prospecto_id',       // FK en la tabla pivote que apunta a prospectos.id
+            'course_id'           // FK en la tabla pivote que apunta a courses.id
+        )->withTimestamps();
+    }
+
+    public function inscripciones()
+    {
+        return $this->hasMany(Inscripcion::class);
+    }
+
+    public function gpaHist()
+    {
+        return $this->hasMany(GpaHist::class);
+    }
+
+    public function achievements()
+    {
+        return $this->hasMany(Achievement::class);
+    }
+
+    /** Finanzas */
+    public function invoices()
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
+    public function payments()
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+
+    /** Planes y pagos reales */
+    public function cuotas()
+    {
+        return $this->hasManyThrough(
+            CuotaProgramaEstudiante::class,
+            EstudiantePrograma::class,
+            'prospecto_id',
+            'estudiante_programa_id'
+        );
+    }
+
+    public function kardexPagos()
+    {
+        return $this->hasManyThrough(
+            KardexPago::class,
+            EstudiantePrograma::class,
+            'prospecto_id',
+            'estudiante_programa_id'
+        );
+    }
+
+
+    public function paymentPlans()
+    {
+        return $this->hasMany(PaymentPlan::class);
+    }
+
+    public function collectionLogs()
+    {
+        return $this->hasMany(CollectionLog::class);
+    }
+
+    public function reconciliationRecords()
+    {
+        return $this->hasMany(ReconciliationRecord::class);
+    }
+```
+
+### Descripción
+
+- **convenio()** – convenio corporativo asociado (`tb_convenio`).
+- **programas()** – programas inscritos (`estudiante_programa`).
+- **asesor()** – usuario creador del prospecto.
+- **documentos()** – documentos del prospecto (`prospectos_documentos`).
+- **courses()** – cursos relacionados mediante `curso_prospecto`.
+- **inscripciones()** – inscripciones individuales.
+- **gpaHist()** – historial de promedios (`gpa_hist`).
+- **achievements()** – logros académicos.
+- **invoices()** y **payments()** – facturas y pagos.
+- **cuotas()** y **kardexPagos()** – cuotas y pagos de cuotas.
+- **paymentPlans()** – planes de pago.
+- **collectionLogs()** – gestiones de cobro.
+- **reconciliationRecords()** – conciliaciones bancarias.
+
+Estas relaciones facilitan consultar toda la información relacionada con un prospecto y navegar entre tablas.
