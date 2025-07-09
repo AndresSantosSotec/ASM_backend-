@@ -65,7 +65,16 @@ class RankingEndpointsTest extends TestCase
                          [
                              'id',
                              'nombre',
+                             'programa',
+                             'semestre',
                              'gpa',
+                             'credits',
+                             'totalCredits',
+                             'coursesCompleted',
+                             'totalCourses',
+                             'ranking',
+                             'previousRanking',
+                             'badges',
                              'progreso',
                          ]
                      ]
@@ -118,10 +127,14 @@ class RankingEndpointsTest extends TestCase
                  ->assertJsonStructure([
                      'data' => [
                          [
-                             'course_id',
+                             'id',
                              'name',
-                             'promedio',
-                             'tasa_aprobacion',
+                             'code',
+                             'period',
+                             'students',
+                             'averageGrade',
+                             'passingRate',
+                             'topStudent',
                          ]
                      ]
                  ]);
