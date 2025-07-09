@@ -54,15 +54,20 @@ class ProspectoController extends Controller
 
     public function filterByStatus($status)
     {
-        $prospectos = Prospecto::with('creator')
+        $prospectos = Prospecto::with([
+            'creator',
+            'programas.programa',
+            'courses'
+        ])
             ->where('status', $status)
             ->get();
 
         return response()->json([
             'message' => "Prospectos en estado “{$status}” obtenidos",
-            'data' => $prospectos,
+            'data'    => $prospectos,
         ]);
     }
+
 
     public function store(Request $request)
     {
