@@ -18,6 +18,8 @@ class CoursePerformanceController extends Controller
             ->when($request->periodo, fn($q) => $q->where('inscripciones.semestre', $request->periodo))
             ->groupBy('courses.id');
 
+        $query->selectRaw('MAX(inscripciones.semestre) as period');
+        $query->selectRaw('COUNT(DISTINCT inscripciones.prospecto_id) as students');
         $query->selectRaw('AVG(inscripciones.calificacion) as promedio');
         $query->selectRaw('SUM(CASE WHEN inscripciones.calificacion >= ? THEN 1 ELSE 0 END)/NULLIF(COUNT(inscripciones.id),0) as tasa_aprobacion', [$threshold]);
 
@@ -26,6 +28,19 @@ class CoursePerformanceController extends Controller
         $direction = $request->input('direction', 'desc');
 
         $courses = $query->orderBy($sortBy, $direction)->paginate($perPage);
+
+        $courses->getCollection()->each(function ($course) {
+            $top = $course->inscripciones()->orderByDesc('calificacion')->first();
+            if ($top) {
+                $course->top_student = [
+                    'id'    => $top->prospecto_id,
+                    'name'  => optional($top->prospecto)->nombre_completo,
+                    'grade' => $top->calificacion,
+                ];
+            } else {
+                $course->top_student = null;
+            }
+        });
 
         return CoursePerfResource::collection($courses);
     }
