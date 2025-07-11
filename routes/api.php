@@ -417,29 +417,34 @@ Route::prefix('approval-flows')->group(function () {
 });
 
 //Rutas para la crearion de los cursos
+// Rutas para la creación y gestión de cursos
 Route::prefix('courses')->group(function () {
-    Route::get('/', [CourseController::class, 'index']);
-    Route::post('/', [CourseController::class, 'store']);
-    Route::get('/{course}', [CourseController::class, 'show']);
-    Route::put('/{course}', [CourseController::class, 'update']);
-    Route::delete('/{course}', [CourseController::class, 'destroy']);
 
-    // Rutas adicionales
-    Route::post('/{course}/approve', [CourseController::class, 'approve']);
-    Route::post('/{course}/sync-moodle', [CourseController::class, 'syncToMoodle']);
-    Route::post('/{course}/assign-facilitator', [CourseController::class, 'assignFacilitator']);
-
-    // Rutas de asignación de cursos a prospectos
-    Route::post('/assign', [CourseController::class, 'assignCourses']);
-    Route::post('/unassign', [CourseController::class, 'unassignCourses']);
-    Route::post('/bulk-assign', [CourseController::class, 'bulkAssignCourses']);
-
-        // Nueva ruta para obtener cursos disponibles
+    // 1) Rutas estáticas primero
     Route::get('/available-for-students', [CourseController::class, 'getAvailableCourses']);
-    // O si prefieres mantener la que ya tenías:
+    Route::post('/assign',             [CourseController::class, 'assignCourses']);
+    Route::post('/unassign',           [CourseController::class, 'unassignCourses']);
+    Route::post('/bulk-assign',        [CourseController::class, 'bulkAssignCourses']);
 
+    // 2) Listar y crear
+    Route::get('/',   [CourseController::class, 'index']);
+    Route::post('/',  [CourseController::class, 'store']);
 
+    // 3) Rutas de acción sobre un curso existente
+    Route::post('/{course}/approve',             [CourseController::class, 'approve']);
+    Route::post('/{course}/sync-moodle',         [CourseController::class, 'syncToMoodle']);
+    Route::post('/{course}/assign-facilitator',  [CourseController::class, 'assignFacilitator']);
+
+    // 4) Finalmente, las rutas REST estándar show/update/delete
+    //    con restricción whereNumber para que no atrapen `available-for-students`
+    Route::get('/{course}',    [CourseController::class, 'show'])
+         ->whereNumber('course');
+    Route::put('/{course}',    [CourseController::class, 'update'])
+         ->whereNumber('course');
+    Route::delete('/{course}', [CourseController::class, 'destroy'])
+         ->whereNumber('course');
 });
+
 
 // Ranking y rendimiento
 Route::get('/ranking/students', [RankingController::class, 'index'])->middleware('auth:sanctum');
