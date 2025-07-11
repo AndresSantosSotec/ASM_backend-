@@ -432,6 +432,13 @@ Route::prefix('courses')->group(function () {
     // Rutas de asignación de cursos a prospectos
     Route::post('/assign', [CourseController::class, 'assignCourses']);
     Route::post('/unassign', [CourseController::class, 'unassignCourses']);
+    Route::post('/bulk-assign', [CourseController::class, 'bulkAssignCourses']);
+
+        // Nueva ruta para obtener cursos disponibles
+    Route::get('/available-for-students', [CourseController::class, 'getAvailableCourses']);
+    // O si prefieres mantener la que ya tenías:
+
+
 });
 
 // Ranking y rendimiento
@@ -451,6 +458,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
+    //paymatent Edit
+
 
 
     Route::prefix('payment-plans')->group(function () {

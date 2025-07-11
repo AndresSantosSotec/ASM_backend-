@@ -7,6 +7,8 @@ use App\Models\Course;
 use App\Models\Prospecto;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use App\Models\Programa;
+
 
 class CourseController extends Controller
 {
@@ -16,14 +18,19 @@ class CourseController extends Controller
     public function index(Request $request)
     {
         $courses = Course::with(['facilitator', 'programas'])
-            ->when($request->search, fn($q) => $q->where(fn($q) => $q
-                ->where('name', 'like', "%{$request->search}%")
-                ->orWhere('code', 'like', "%{$request->search}%")
+            ->when($request->search, fn($q) => $q->where(
+                fn($q) => $q
+                    ->where('name', 'like', "%{$request->search}%")
+                    ->orWhere('code', 'like', "%{$request->search}%")
             ))
-            ->when(in_array($request->area, ['common', 'specialty']),
-                  fn($q) => $q->where('area', $request->area))
-            ->when(in_array($request->status, ['draft', 'approved', 'synced']),
-                  fn($q) => $q->where('status', $request->status))
+            ->when(
+                in_array($request->area, ['common', 'specialty']),
+                fn($q) => $q->where('area', $request->area)
+            )
+            ->when(
+                in_array($request->status, ['draft', 'approved', 'synced']),
+                fn($q) => $q->where('status', $request->status)
+            )
             ->get();
 
         return response()->json($courses);
@@ -218,5 +225,99 @@ class CourseController extends Controller
         }
 
         return response()->json(['message' => 'Cursos desasignados correctamente']);
+    }
+
+    public function bulkAssignCourses(Request $request)
+    {
+        $payload = $request->validate([
+            'prospecto_ids'   => 'required|array',
+            'prospecto_ids.*' => 'exists:prospectos,id',
+            'course_ids'      => 'required|array',
+            'course_ids.*'    => 'exists:courses,id',
+        ]);
+
+        foreach ($payload['prospecto_ids'] as $prospectoId) {
+            $prospecto = Prospecto::findOrFail($prospectoId);
+            $prospecto->courses()->syncWithoutDetaching($payload['course_ids']);
+        }
+
+        return response()->json(['message' => 'Cursos asignados correctamente']);
+    }
+
+    //traer cursos displnipes por programa, por estudiante que puede llevar
+    // los cursos, y para asiganacion masiva si se seleciona mas de
+    //traer los cursos que se puedan asignar a ambos
+    //por medio de la tabla pivote couse program que es dede donde se resghirtarn esos cursos pro programa
+    /**
+     * Get available courses for students/prospectos
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAvailableCourses(Request $request)
+    {
+        $request->validate([
+            'prospecto_ids' => 'required|array',
+            'prospecto_ids.*' => 'exists:prospectos,id',
+        ]);
+
+        $prospectoIds = $request->prospecto_ids;
+
+        // Si es solo un estudiante
+        if (count($prospectoIds) === 1) {
+            $prospecto = Prospecto::with('programas.programa.courses')->find($prospectoIds[0]);
+
+            // Cursos ya asignados al estudiante
+            $assignedCourseIds = $prospecto->courses()->pluck('courses.id')->toArray();
+
+            // Cursos disponibles según sus programas
+            $availableCourses = collect();
+            foreach ($prospecto->programas as $estudiantePrograma) {
+                if ($estudiantePrograma->programa) {
+                    $availableCourses = $availableCourses->merge($estudiantePrograma->programa->courses);
+                }
+            }
+
+            // Eliminar duplicados y cursos ya asignados
+            $availableCourses = $availableCourses->unique('id')
+                ->whereNotIn('id', $assignedCourseIds)
+                ->values();
+
+            return response()->json($availableCourses);
+        }
+
+        // Para múltiples estudiantes - intersectamos los cursos de sus programas
+        $commonCourses = null;
+
+        foreach ($prospectoIds as $prospectoId) {
+            $prospecto = Prospecto::with('programas.programa.courses')->find($prospectoId);
+
+            $currentCourses = collect();
+            foreach ($prospecto->programas as $estudiantePrograma) {
+                if ($estudiantePrograma->programa) {
+                    $currentCourses = $currentCourses->merge($estudiantePrograma->programa->courses);
+                }
+            }
+
+            $currentCourseIds = $currentCourses->pluck('id')->unique()->toArray();
+
+            if ($commonCourses === null) {
+                $commonCourses = $currentCourseIds;
+            } else {
+                $commonCourses = array_intersect($commonCourses, $currentCourseIds);
+            }
+        }
+
+        // Obtenemos los cursos comunes que no estén asignados a TODOS los estudiantes
+        $assignedToAll = Course::whereHas('prospectos', function ($query) use ($prospectoIds) {
+            $query->whereIn('prospecto_id', $prospectoIds);
+        }, '=', count($prospectoIds))->pluck('id')->toArray();
+
+        $availableCourses = Course::with('programas')
+            ->whereIn('id', $commonCourses)
+            ->whereNotIn('id', $assignedToAll)
+            ->get();
+
+        return response()->json($availableCourses);
     }
 }
