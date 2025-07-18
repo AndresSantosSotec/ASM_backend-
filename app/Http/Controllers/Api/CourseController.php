@@ -136,7 +136,7 @@ class CourseController extends Controller
     }
 
     /**
-     * Approve course
+     * Approve course for the Falilitador module
      */
     public function approve(string $id)
     {
@@ -165,8 +165,28 @@ class CourseController extends Controller
             ], 422);
         }
 
+        if (!$course->programas()->exists()) {
+            return response()->json([
+                'message' => 'El curso debe estar asociado a al menos un programa para sincronizar'
+            ], 422);
+        }
+
+        if (!$course->facilitator_id) {
+            return response()->json([
+                'message' => 'El curso debe tener un facilitador asignado para sincronizar'
+            ], 422);
+        }
+        // Aquí iría la lógica para sincronizar con Moodle
+
+
+
+
         $course->update(['status' => 'synced']);
         return response()->json($course);
+
+        return response()->json([
+            'message' => 'Curso sincronizado correctamente'
+        ]);
     }
 
     /**

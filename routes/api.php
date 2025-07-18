@@ -435,6 +435,8 @@ Route::prefix('courses')->group(function () {
     Route::post('/{course}/sync-moodle',         [CourseController::class, 'syncToMoodle']);
     Route::post('/{course}/assign-facilitator',  [CourseController::class, 'assignFacilitator']);
 
+
+
     // 4) Finalmente, las rutas REST estándar show/update/delete
     //    con restricción whereNumber para que no atrapen `available-for-students`
     Route::get('/{course}',    [CourseController::class, 'show'])
