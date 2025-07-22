@@ -9,6 +9,7 @@ use App\Models\Programa;
 class MoodleService
 {
     protected string $url;
+
     protected string $altUrl;
     protected string $token;
     protected string $format;
@@ -19,10 +20,12 @@ class MoodleService
         $this->altUrl = rtrim(config('services.moodle.alt_url') ?? $this->url, '/');
         $this->token = config('services.moodle.token');
         $this->format = config('services.moodle.format', 'json');
+
     }
 
     public function getCourse(int $id): ?array
     {
+
         $params = [
             'wstoken' => $this->token,
             'wsfunction' => 'core_course_get_courses',
@@ -35,6 +38,7 @@ class MoodleService
         if (!$response->ok() && $this->altUrl !== $this->url) {
             $response = Http::get($this->altUrl . '/webservice/rest/server.php', $params);
         }
+
 
         return $response->ok() ? ($response->json()[0] ?? null) : null;
     }
