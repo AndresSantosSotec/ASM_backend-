@@ -32,8 +32,12 @@ return [
     ],
 
     'moodle' => [
-        'url' => env('MOODLE_URL'),
-        'token' => env('MOODLE_TOKEN'),
+
+        'url' => env('MOODLE_URL', env('NEXT_PUBLIC_MOODLE_URL')),
+        'alt_url' => env('MOODLE_ALT_URL', env('NEXT_PUBLIC_MOODLE_ALT_URL')),
+        'token' => env('MOODLE_TOKEN', env('NEXT_PUBLIC_MOODLE_TOKEN')),
+        'format' => env('MOODLE_FORMAT', env('NEXT_PUBLIC_MOODLE_FORMAT', 'json')),
+
     ],
 
 ];

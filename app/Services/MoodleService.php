@@ -9,22 +9,36 @@ use App\Models\Programa;
 class MoodleService
 {
     protected string $url;
+
+    protected string $altUrl;
     protected string $token;
+    protected string $format;
 
     public function __construct()
     {
-        $this->url = config('services.moodle.url');
+        $this->url = rtrim(config('services.moodle.url'), '/');
+        $this->altUrl = rtrim(config('services.moodle.alt_url') ?? $this->url, '/');
         $this->token = config('services.moodle.token');
+        $this->format = config('services.moodle.format', 'json');
+
     }
 
     public function getCourse(int $id): ?array
     {
-        $response = Http::get($this->url . '/webservice/rest/server.php', [
+
+        $params = [
             'wstoken' => $this->token,
             'wsfunction' => 'core_course_get_courses',
-            'moodlewsrestformat' => 'json',
+            'moodlewsrestformat' => $this->format,
             'options[ids][0]' => $id,
-        ]);
+        ];
+
+        $response = Http::get($this->url . '/webservice/rest/server.php', $params);
+
+        if (!$response->ok() && $this->altUrl !== $this->url) {
+            $response = Http::get($this->altUrl . '/webservice/rest/server.php', $params);
+        }
+
 
         return $response->ok() ? ($response->json()[0] ?? null) : null;
     }
