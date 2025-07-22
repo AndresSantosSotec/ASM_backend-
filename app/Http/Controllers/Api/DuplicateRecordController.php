@@ -109,7 +109,11 @@ class DuplicateRecordController extends Controller
      */
     public function action(Request $request, $id)
     {
-        $dup = DuplicateRecord::findOrFail($id);
+        $dup = DuplicateRecord::find($id);
+
+        if (!$dup) {
+            return response()->json(['message' => 'Duplicado no encontrado'], 404);
+        }
 
         $request->validate([
             'action' => 'required|in:keep_original,keep_duplicate,delete_duplicate,mark_reviewed'
@@ -117,17 +121,23 @@ class DuplicateRecordController extends Controller
 
         switch ($request->action) {
             case 'keep_original':
-                Prospecto::findOrFail($dup->duplicate_prospect_id)->delete();
+                if ($prospect = Prospecto::find($dup->duplicate_prospect_id)) {
+                    $prospect->delete();
+                }
                 $dup->status = 'resolved';
                 break;
 
             case 'keep_duplicate':
-                Prospecto::findOrFail($dup->original_prospect_id)->delete();
+                if ($prospect = Prospecto::find($dup->original_prospect_id)) {
+                    $prospect->delete();
+                }
                 $dup->status = 'resolved';
                 break;
 
             case 'delete_duplicate':
-                Prospecto::findOrFail($dup->duplicate_prospect_id)->delete();
+                if ($prospect = Prospecto::find($dup->duplicate_prospect_id)) {
+                    $prospect->delete();
+                }
                 $dup->status = 'resolved';
                 break;
 
