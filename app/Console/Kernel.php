@@ -22,6 +22,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('accounts:block-overdue')->daily();
         $schedule->command('payments:send-reminders')->daily();
         $schedule->command('reconciliations:process-pending')->daily();
+        $schedule->command('moodle:sync')->daily();
     }
 
     /**
