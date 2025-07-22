@@ -44,6 +44,7 @@ class CourseController extends Controller
         $data = $request->all();
 
         $validator = Validator::make($data, [
+            'moodle_id'      => 'nullable|integer|unique:courses',
             'name'           => 'required|string|max:255',
             'code'           => 'required|string|max:50|unique:courses',
             'area'           => 'required|in:common,specialty',
@@ -93,6 +94,7 @@ class CourseController extends Controller
         $data   = $request->all();
 
         $validator = Validator::make($data, [
+            'moodle_id'      => "sometimes|integer|unique:courses,moodle_id,{$course->id}",
             'name'           => 'sometimes|required|string|max:255',
             'code'           => "sometimes|required|string|max:50|unique:courses,code,{$course->id}",
             'area'           => 'sometimes|required|in:common,specialty',
@@ -176,17 +178,15 @@ class CourseController extends Controller
                 'message' => 'El curso debe tener un facilitador asignado para sincronizar'
             ], 422);
         }
-        // Aquí iría la lógica para sincronizar con Moodle
 
+        $service = app(\App\Services\MoodleService::class);
+        $synced = $service->syncCourse($course->moodle_id ?? 0);
 
+        if (!$synced) {
+            return response()->json(['message' => 'No se pudo sincronizar'], 500);
+        }
 
-
-        $course->update(['status' => 'synced']);
-        return response()->json($course);
-
-        return response()->json([
-            'message' => 'Curso sincronizado correctamente'
-        ]);
+        return response()->json($synced);
     }
 
     /**

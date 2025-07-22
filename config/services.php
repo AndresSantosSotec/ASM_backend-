@@ -31,4 +31,11 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'moodle' => [
+        'url' => env('MOODLE_URL', env('NEXT_PUBLIC_MOODLE_URL')),
+        'alt_url' => env('MOODLE_ALT_URL', env('NEXT_PUBLIC_MOODLE_ALT_URL')),
+        'token' => env('MOODLE_TOKEN', env('NEXT_PUBLIC_MOODLE_TOKEN')),
+        'format' => env('MOODLE_FORMAT', env('NEXT_PUBLIC_MOODLE_FORMAT', 'json')),
+    ],
+
 ];
