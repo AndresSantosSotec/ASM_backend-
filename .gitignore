@@ -19,4 +19,4 @@ yarn-error.log
 /.vscode
 .qodo
 package-lock.json
-
+.env
