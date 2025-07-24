@@ -117,6 +117,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // Importación de prospectos
     Route::post('/import', [ProspectosImportController::class, 'uploadExcel'])
         ->name('prospectos.import');
+    //importación de estudiantes Inscritos
+    Route::prefix('estudiantes')->group(function () {
+        // POST /api/estudiantes/import
+        Route::post('import', [\App\Http\Controllers\Api\EstudiantesImportController::class, 'uploadExcel'])
+             ->name('estudiantes.import');
+    });
+
+
 
     // ----------------------
     // Sesiones

@@ -66,6 +66,8 @@ class Prospecto extends Model
         'convenio_pago_id',
         'dia_estudio',
         // auditoría
+        'carnet',
+        'activo',
         'created_by',
         'updated_by',
         'deleted_by',
@@ -81,6 +83,7 @@ class Prospecto extends Model
         'anio_graduacion'               => 'integer',
         'cantidad_cursos_aprobados'     => 'integer',
         'monto_inscripcion'             => 'decimal:2',
+        'activo' => 'boolean',
     ];
 
     /** Relaciones de usuario (auditoría) */
@@ -111,7 +114,7 @@ class Prospecto extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
-        public function documentos()
+    public function documentos()
     {
         return $this->hasMany(ProspectosDocumento::class, 'prospecto_id');
     }
@@ -196,7 +199,6 @@ class Prospecto extends Model
         $deuda = $this->cuotas()->sum('monto');
         $pagos = $this->kardexPagos()->sum('monto_pagado');
         return (float) ($deuda - $pagos);
-
     }
 
     public function isBlocked(): bool
@@ -208,5 +210,4 @@ class Prospecto extends Model
 
             ->exists();
     }
-    
 }
