@@ -8,6 +8,7 @@ use App\Models\Programa;
 use App\Models\CuotaProgramaEstudiante;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 use Maatwebsite\Excel\Concerns\{
     OnEachRow,
@@ -23,6 +24,13 @@ use Maatwebsite\Excel\Concerns\SkipsFailures;
 use Maatwebsite\Excel\Row;
 use Illuminate\Contracts\Queue\ShouldQueue;
 
+/**
+ * Importa inscripciones desde un archivo Excel.
+ *
+ * Incluye validaciones y manejo de errores por fila para
+ * garantizar que la carga sea lo más robusta posible.
+ */
+
 class InscripcionesImport implements
     OnEachRow,
     WithHeadingRow,
@@ -35,12 +43,56 @@ class InscripcionesImport implements
 {
     use SkipsErrors, SkipsFailures;
 
+    /** Programa usado cuando el código de carrera no existe. */
+    private const DEFAULT_PROGRAM_ABBR = 'TEMP';
+    private const DEFAULT_PROGRAM_NAME = 'Programa Pendiente';
+
+    /**
+     * Errores ocurridos al procesar filas.
+     *
+     * @var array<int, array>
+     */
+    protected array $rowErrors = [];
+
+    /**
+     * Devuelve las filas que no pudieron procesarse.
+     */
+    public function getRowErrors(): array
+    {
+        return $this->rowErrors;
+    }
+
+    /**
+     * Devuelve un programa existente por código o uno temporal si no se encuentra.
+     */
+    protected function obtenerPrograma(string $claveProg): Programa
+    {
+        if ($claveProg !== '') {
+            $programa = Programa::whereRaw('upper(abreviatura) = ?', [$claveProg])->first()
+                ?? Programa::where('abreviatura', 'ilike', "%{$claveProg}%")->first();
+            if ($programa) {
+                return $programa;
+            }
+            Log::warning('Programa no encontrado para código: ' . $claveProg . '. Se utilizará temporal.');
+        } else {
+            Log::warning('Código de programa vacío, se utilizará temporal.');
+        }
+
+        return Programa::firstOrCreate(
+            ['abreviatura' => self::DEFAULT_PROGRAM_ABBR],
+            ['nombre_del_programa' => self::DEFAULT_PROGRAM_NAME]
+        );
+    }
+
     /** 1) Reglas de validación «a nivel de fila» */
     public function rules(): array
     {
         return [
-            '*.carnet'                               => 'required|string',
-            '*.email'                                => 'nullable|email',
+            '*.carnet'       => 'required|string',
+            '*.nombre'       => 'required|string',
+            '*.apellido'     => 'required|string',
+            '*.telefono'     => 'nullable|string',
+            '*.email'        => 'nullable|email',
             '*.numero_de_cuotas'                     => 'nullable|integer',
             '*.valor_q_matricula_inscripcion'       => 'nullable',
             '*.mensualidad'                          => 'nullable',
@@ -66,7 +118,7 @@ class InscripcionesImport implements
         try {
             return Carbon::parse($value)->toDateString();
         } catch (\Exception $e) {
-            // opcional: registrar $e->getMessage()
+            Log::warning('Fecha no válida: ' . $value . ' - ' . $e->getMessage());
             return null;
         }
     }
@@ -77,10 +129,38 @@ class InscripcionesImport implements
         return (float) str_replace(['Q', ',', ' '], '', trim($v));
     }
 
+    /** Genera un correo temporal si no se proporciona uno. */
+    protected function defaultEmail(string $carnet): string
+    {
+        return 'sin-email-' . Str::slug($carnet ?: Str::random(6)) . '@example.com';
+    }
+
+    /** Genera un teléfono temporal si no se proporciona uno. */
+    protected function defaultTelefono(): string
+    {
+        return '00000000';
+    }
+
+    /**
+     * Registra un error ocurrido al procesar una fila y lo almacena.
+     */
+    protected function addRowError(Row $row, \Throwable $e): void
+    {
+        $this->rowErrors[] = [
+            'row'    => $row->getIndex(),
+            'error'  => $e->getMessage(),
+            'values' => $row->toArray(),
+        ];
+        Log::error('Error processing row ' . $row->getIndex() . ': ' . $e->getMessage());
+    }
+
     /** 5) Procesar cada fila */
     public function onRow(Row $row)
     {
         $d = array_map('trim', $row->toArray());
+
+        $telefono = $d['telefono'] ?: $this->defaultTelefono();
+        $correo   = $d['email'] ? strtolower($d['email']) : $this->defaultEmail($d['carnet'] ?? '');
 
         // Normalizar género
         if (!empty($d['m']) && $d['m'] === '1') {
@@ -88,20 +168,21 @@ class InscripcionesImport implements
         } elseif (!empty($d['f']) && $d['f'] === '1') {
             $genero = 'Femenino';
         } else {
-            $genero = null;
+            $genero = 'No especificado';
         }
 
         // Abreviatura solo letras (fallback para buscar programa)
         $claveProg = Str::upper(preg_replace('/[^A-Za-z]/', '', $d['codigo_carrera'] ?? ''));
 
-        DB::transaction(function () use ($d, $genero, $claveProg) {
+        try {
+            DB::transaction(function () use ($d, $genero, $claveProg, $row, $telefono, $correo) {
             // — Prospecto —
             $prospecto = Prospecto::updateOrCreate(
                 ['carnet' => $d['carnet']],
                 [
                     'nombre_completo'               => trim("{$d['nombre']} {$d['apellido']}"),
-                    'telefono'                      => $d['telefono'] ?: null,
-                    'correo_electronico'            => $d['email'] ?: null,
+                    'telefono'                      => $telefono,
+                    'correo_electronico'            => $correo,
                     'genero'                        => $genero,
                     'empresa_donde_labora_actualmente' => $d['empresa_p_labora'] ?? null,
                     'puesto'                        => $d['puesto_trabajo'] ?? null,
@@ -110,6 +191,7 @@ class InscripcionesImport implements
                     'fecha_nacimiento'              => $this->parseDate($d['cumpleanos']),
                     'modalidad'                     => $d['modalidad'] ?? null,
                     'fecha_inicio_especifica'       => $this->parseDate($d['fecha_de_inscripcion']),
+                    'fecha'                         => $this->parseDate($d['fecha_de_inscripcion']) ?? now()->toDateString(),
                     'dia_estudio'                   => $d['dia'] ?? null,
                     'direccion_residencia'          => $d['direccion'] ?? null,
                     'pais_residencia'               => $d['pais'] ?? null,
@@ -122,13 +204,7 @@ class InscripcionesImport implements
             );
 
             // — Programa —
-            $prog = Programa::whereRaw('upper(abreviatura) = ?', [$claveProg])->first()
-                ?? Programa::where('abreviatura', 'ilike', "%{$claveProg}%")->first();
-
-            if (! $prog) {
-                // Si no encontramos programa, saltamos esta fila
-                return;
-            }
+            $prog = $this->obtenerPrograma($claveProg);
 
             // — Inscripción académica (histórico) —
             $fechaInicio = $this->parseDate($d['fecha_de_inscripcion']) ?? now()->toDateString();
@@ -167,5 +243,8 @@ class InscripcionesImport implements
                 );
             }
         });
+        } catch (\Throwable $e) {
+            $this->addRowError($row, $e);
+        }
     }
 }
