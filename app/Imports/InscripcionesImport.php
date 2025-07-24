@@ -2,27 +2,25 @@
 
 namespace App\Imports;
 
-use App\Models\Prospecto;
+use App\Models\CuotaProgramaEstudiante;
 use App\Models\EstudiantePrograma;
 use App\Models\Programa;
-use App\Models\CuotaProgramaEstudiante;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Log;
+use App\Models\Prospecto;
 use Carbon\Carbon;
-use Maatwebsite\Excel\Concerns\{
-    OnEachRow,
-    WithHeadingRow,
-    WithChunkReading,
-    SkipsOnError,
-    SkipsOnFailure,
-    WithValidation,
-    SkipsEmptyRows
-};
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Maatwebsite\Excel\Concerns\OnEachRow;
+use Maatwebsite\Excel\Concerns\SkipsEmptyRows;
 use Maatwebsite\Excel\Concerns\SkipsErrors;
 use Maatwebsite\Excel\Concerns\SkipsFailures;
+use Maatwebsite\Excel\Concerns\SkipsOnError;
+use Maatwebsite\Excel\Concerns\SkipsOnFailure;
+use Maatwebsite\Excel\Concerns\WithChunkReading;
+use Maatwebsite\Excel\Concerns\WithHeadingRow;
+use Maatwebsite\Excel\Concerns\WithValidation;
 use Maatwebsite\Excel\Row;
-use Illuminate\Contracts\Queue\ShouldQueue;
 
 /**
  * Importa inscripciones desde un archivo Excel.
@@ -30,28 +28,20 @@ use Illuminate\Contracts\Queue\ShouldQueue;
  * Incluye validaciones y manejo de errores por fila para
  * garantizar que la carga sea lo más robusta posible.
  */
-
-class InscripcionesImport implements
-    OnEachRow,
-    WithHeadingRow,
-    WithChunkReading,
-    ShouldQueue,
-    SkipsOnError,
-    SkipsOnFailure,
-    WithValidation,
-    SkipsEmptyRows
+class InscripcionesImport implements OnEachRow, ShouldQueue, SkipsEmptyRows, SkipsOnError, SkipsOnFailure, WithChunkReading, WithHeadingRow, WithValidation
 {
     use SkipsErrors, SkipsFailures;
 
     /** Programa usado cuando el código de carrera no existe. */
     private const DEFAULT_PROGRAM_ABBR = 'TEMP';
+
     private const DEFAULT_PROGRAM_NAME = 'Programa Pendiente';
 
     /** Fecha utilizada cuando no hay fecha válida. */
     private const DUMMY_BIRTH_DATE = '2000-01-01';
+
     /** Modalidad por defecto cuando el archivo no la provee o es desconocida. */
     private const DEFAULT_MODALIDAD = 'sincronica';
-
 
     /**
      * Errores ocurridos al procesar filas.
@@ -79,7 +69,7 @@ class InscripcionesImport implements
             if ($programa) {
                 return $programa;
             }
-            Log::warning('Programa no encontrado para código: ' . $claveProg . '. Se utilizará temporal.');
+            Log::warning('Programa no encontrado para código: '.$claveProg.'. Se utilizará temporal.');
         } else {
             Log::warning('Código de programa vacío, se utilizará temporal.');
         }
@@ -94,19 +84,35 @@ class InscripcionesImport implements
     public function rules(): array
     {
         return [
-            '*.carnet'       => 'required|string',
-            '*.nombre'       => 'required|string',
-            '*.apellido'     => 'required|string',
-            '*.telefono'     => 'nullable|string',
-            '*.email'        => 'nullable|email',
-            '*.numero_de_cuotas'                     => 'nullable|integer',
-            '*.valor_q_matricula_inscripcion'       => 'nullable',
-            '*.mensualidad'                          => 'nullable',
-            '*.valor_q_total_de_la_carrera'          => 'nullable',
-            '*.fecha_de_inscripcion'                 => 'nullable|date',
-            '*.fecha_nacimiento'                     => 'nullable|date',
+            '*.carnet' => 'required|string',
+            '*.nombre' => 'required|string',
+            '*.apellido' => 'required|string',
+            '*.telefono' => 'nullable|string',
+            '*.email' => 'nullable|email',
+            '*.numero_de_cuotas' => 'nullable|integer',
+            '*.valor_q_matricula_inscripcion' => 'nullable',
+            '*.mensualidad' => 'nullable',
+            '*.valor_q_total_de_la_carrera' => 'nullable',
+            '*.fecha_de_inscripcion' => 'nullable|date',
+            '*.fecha_nacimiento' => 'nullable|date',
             // puedes agregar más reglas según necesites...
         ];
+    }
+
+    /**
+     * Normaliza claves antes de la validación para aceptar variantes de encabezados.
+     */
+    public function prepareForValidation($data, $index)
+    {
+        if (! isset($data['carnet']) && isset($data['carne'])) {
+            $data['carnet'] = $data['carne'];
+        }
+
+        if (! isset($data['valor_q_matricula_inscripcion']) && isset($data['valor_q_matricula_insripcion'])) {
+            $data['valor_q_matricula_inscripcion'] = $data['valor_q_matricula_insripcion'];
+        }
+
+        return $data;
     }
 
     /** 2) Tamaño de chunk para procesar en trozos y no saturar memoria */
@@ -124,7 +130,7 @@ class InscripcionesImport implements
         try {
             return Carbon::parse($value)->toDateString();
         } catch (\Exception $e) {
-            Log::warning('Fecha no válida: ' . $value . ' - ' . $e->getMessage());
+            Log::warning('Fecha no válida: '.$value.' - '.$e->getMessage());
 
             return $default;
 
@@ -143,13 +149,11 @@ class InscripcionesImport implements
         return (float) $clean;
     }
 
-
     /** Normaliza el carné quitando espacios y pasando a mayúsculas. */
     protected function normalizeCarnet(string $carnet): string
     {
         return Str::upper(preg_replace('/\s+/', '', $carnet));
     }
-
 
     /** Limpia un número de teléfono o usa un valor por defecto. */
     protected function sanitizeTelefono(?string $telefono): string
@@ -182,11 +186,10 @@ class InscripcionesImport implements
         return $m;
     }
 
-
     /** Genera un correo temporal si no se proporciona uno. */
     protected function defaultEmail(string $carnet): string
     {
-        return 'sin-email-' . Str::slug($carnet ?: Str::random(6)) . '@example.com';
+        return 'sin-email-'.Str::slug($carnet ?: Str::random(6)).'@example.com';
     }
 
     /** Genera un teléfono temporal si no se proporciona uno. */
@@ -201,11 +204,11 @@ class InscripcionesImport implements
     protected function addRowError(Row $row, \Throwable $e): void
     {
         $this->rowErrors[] = [
-            'row'    => $row->getIndex(),
-            'error'  => $e->getMessage(),
+            'row' => $row->getIndex(),
+            'error' => $e->getMessage(),
             'values' => $row->toArray(),
         ];
-        Log::error('Error processing row ' . $row->getIndex() . ': ' . $e->getMessage());
+        Log::error('Error processing row '.$row->getIndex().': '.$e->getMessage());
     }
 
     /** 5) Procesar cada fila */
@@ -213,22 +216,29 @@ class InscripcionesImport implements
     {
         $d = array_map('trim', $row->toArray());
 
+        // Aceptar variantes de encabezados que pudieron convertirse a claves distintas
+        if (! isset($d['carnet']) && isset($d['carne'])) {
+            $d['carnet'] = $d['carne'];
+        }
 
-        if (!empty($d['carnet'])) {
+        if (! isset($d['valor_q_matricula_inscripcion']) && isset($d['valor_q_matricula_insripcion'])) {
+            $d['valor_q_matricula_inscripcion'] = $d['valor_q_matricula_insripcion'];
+        }
+
+        if (! empty($d['carnet'])) {
             $d['carnet'] = $this->normalizeCarnet($d['carnet']);
         }
 
         $telefono = $this->sanitizeTelefono($d['telefono'] ?? null);
-        $correo   = $d['email'] ? strtolower($d['email']) : $this->defaultEmail($d['carnet'] ?? '');
+        $correo = $d['email'] ? strtolower($d['email']) : $this->defaultEmail($d['carnet'] ?? '');
 
         $fechaNacimiento = $this->parseDate($d['cumpleanos'], self::DUMMY_BIRTH_DATE);
         $fechaInscripcion = $this->parseDate($d['fecha_de_inscripcion'], now()->toDateString());
 
-
         // Normalizar género
-        if (!empty($d['m']) && $d['m'] === '1') {
+        if (! empty($d['m']) && $d['m'] === '1') {
             $genero = 'Masculino';
-        } elseif (!empty($d['f']) && $d['f'] === '1') {
+        } elseif (! empty($d['f']) && $d['f'] === '1') {
             $genero = 'Femenino';
         } else {
             $genero = 'No especificado';
@@ -239,76 +249,76 @@ class InscripcionesImport implements
 
         try {
 
-            DB::transaction(function () use ($d, $genero, $claveProg, $row, $telefono, $correo, $fechaNacimiento, $fechaInscripcion) {
+            DB::transaction(function () use ($d, $genero, $claveProg, $telefono, $correo, $fechaNacimiento, $fechaInscripcion) {
 
-            // — Prospecto —
-            $prospecto = Prospecto::updateOrCreate(
-                ['carnet' => $d['carnet']],
-                [
-                    'nombre_completo'               => trim("{$d['nombre']} {$d['apellido']}"),
-                    'telefono'                      => $telefono,
-                    'correo_electronico'            => $correo,
-                    'genero'                        => $genero,
-                    'empresa_donde_labora_actualmente' => $d['empresa_p_labora'] ?? null,
-                    'puesto'                        => $d['puesto_trabajo'] ?? null,
-                    'observaciones'                 => $d['observaciones'] ?? null,
-                    'numero_identificacion'         => $d['dpi'] ?? null,
-
-                    'fecha_nacimiento'              => $fechaNacimiento,
-                    'modalidad'                     => $this->normalizeModalidad($d['modalidad'] ?? null),
-                    'fecha_inicio_especifica'       => $fechaInscripcion,
-                    'fecha'                         => $fechaInscripcion,
-                    'dia_estudio'                   => $d['dia'] ?? null,
-                    'direccion_residencia'          => $d['direccion'] ?? null,
-                    'pais_residencia'               => $d['pais'] ?? null,
-                    'medio_conocimiento_institucion'=> $d['medio_por_cual_ingreso'] ?? null,
-                    'monto_inscripcion'             => $this->limpiarMonto($d['valor_q_matricula_inscripcion'] ?? '0'),
-                    'status'                        => 'Inscrito',
-                    'activo'                        => true,
-                    'created_by'                    => auth()->id(),
-                ]
-            );
-
-            // — Programa —
-            $prog = $this->obtenerPrograma($claveProg);
-
-            // — Inscripción académica (histórico) —
-            $fechaInicio = $fechaInscripcion;
-            $numCuotas   = (int) ($d['numero_de_cuotas'] ?? 0);
-
-            $ep = EstudiantePrograma::firstOrCreate(
-                [
-                    'prospecto_id' => $prospecto->id,
-                    'programa_id'  => $prog->id,
-                    'fecha_inicio' => $fechaInicio,
-                ],
-                [
-                    'convenio_id'     => $d['convenio_id'] ?? null,
-                    'inscripcion'     => $this->limpiarMonto($d['valor_q_matricula_inscripcion'] ?? '0'),
-                    'cuota_mensual'   => $this->limpiarMonto($d['mensualidad'] ?? '0'),
-                    'inversion_total' => $this->limpiarMonto($d['valor_q_total_de_la_carrera'] ?? '0'),
-                    'duracion_meses'  => $numCuotas,
-                    'created_by'      => auth()->id(),
-                ]
-            );
-
-            // — Cuotas pendientes —
-            for ($i = 1; $i <= $numCuotas; $i++) {
-                $fechaVenc = Carbon::parse($fechaInicio)->addMonths($i - 1)->toDateString();
-                CuotaProgramaEstudiante::firstOrCreate(
+                // — Prospecto —
+                $prospecto = Prospecto::updateOrCreate(
+                    ['carnet' => $d['carnet']],
                     [
-                        'estudiante_programa_id' => $ep->id,
-                        'numero_cuota'           => $i,
-                    ],
-                    [
-                        'fecha_vencimiento' => $fechaVenc,
-                        'monto'             => $ep->cuota_mensual,
-                        'estado'            => 'pendiente',
-                        'created_by'        => auth()->id(),
+                        'nombre_completo' => trim("{$d['nombre']} {$d['apellido']}"),
+                        'telefono' => $telefono,
+                        'correo_electronico' => $correo,
+                        'genero' => $genero,
+                        'empresa_donde_labora_actualmente' => $d['empresa_p_labora'] ?? null,
+                        'puesto' => $d['puesto_trabajo'] ?? null,
+                        'observaciones' => $d['observaciones'] ?? null,
+                        'numero_identificacion' => $d['dpi'] ?? null,
+
+                        'fecha_nacimiento' => $fechaNacimiento,
+                        'modalidad' => $this->normalizeModalidad($d['modalidad'] ?? null),
+                        'fecha_inicio_especifica' => $fechaInscripcion,
+                        'fecha' => $fechaInscripcion,
+                        'dia_estudio' => $d['dia'] ?? null,
+                        'direccion_residencia' => $d['direccion'] ?? null,
+                        'pais_residencia' => $d['pais'] ?? null,
+                        'medio_conocimiento_institucion' => $d['medio_por_cual_ingreso'] ?? null,
+                        'monto_inscripcion' => $this->limpiarMonto($d['valor_q_matricula_inscripcion'] ?? '0'),
+                        'status' => 'Inscrito',
+                        'activo' => true,
+                        'created_by' => auth()->id(),
                     ]
                 );
-            }
-        });
+
+                // — Programa —
+                $prog = $this->obtenerPrograma($claveProg);
+
+                // — Inscripción académica (histórico) —
+                $fechaInicio = $fechaInscripcion;
+                $numCuotas = (int) ($d['numero_de_cuotas'] ?? 0);
+
+                $ep = EstudiantePrograma::firstOrCreate(
+                    [
+                        'prospecto_id' => $prospecto->id,
+                        'programa_id' => $prog->id,
+                        'fecha_inicio' => $fechaInicio,
+                    ],
+                    [
+                        'convenio_id' => $d['convenio_id'] ?? null,
+                        'inscripcion' => $this->limpiarMonto($d['valor_q_matricula_inscripcion'] ?? '0'),
+                        'cuota_mensual' => $this->limpiarMonto($d['mensualidad'] ?? '0'),
+                        'inversion_total' => $this->limpiarMonto($d['valor_q_total_de_la_carrera'] ?? '0'),
+                        'duracion_meses' => $numCuotas,
+                        'created_by' => auth()->id(),
+                    ]
+                );
+
+                // — Cuotas pendientes —
+                for ($i = 1; $i <= $numCuotas; $i++) {
+                    $fechaVenc = Carbon::parse($fechaInicio)->addMonths($i - 1)->toDateString();
+                    CuotaProgramaEstudiante::firstOrCreate(
+                        [
+                            'estudiante_programa_id' => $ep->id,
+                            'numero_cuota' => $i,
+                        ],
+                        [
+                            'fecha_vencimiento' => $fechaVenc,
+                            'monto' => $ep->cuota_mensual,
+                            'estado' => 'pendiente',
+                            'created_by' => auth()->id(),
+                        ]
+                    );
+                }
+            });
         } catch (\Throwable $e) {
             $this->addRowError($row, $e);
         }
