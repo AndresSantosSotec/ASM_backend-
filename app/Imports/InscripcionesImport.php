@@ -143,11 +143,6 @@ class InscripcionesImport implements
         return (float) $clean;
     }
 
-    /** Genera un correo temporal si no se proporciona uno. */
-    protected function defaultEmail(string $carnet): string
-    {
-        return 'sin-email-' . Str::slug($carnet ?: Str::random(6)) . '@example.com';
-    }
 
     /** Normaliza el carné quitando espacios y pasando a mayúsculas. */
     protected function normalizeCarnet(string $carnet): string
@@ -155,11 +150,6 @@ class InscripcionesImport implements
         return Str::upper(preg_replace('/\s+/', '', $carnet));
     }
 
-    /** Genera un teléfono temporal si no se proporciona uno. */
-    protected function defaultTelefono(): string
-    {
-        return '00000000';
-    }
 
     /** Limpia un número de teléfono o usa un valor por defecto. */
     protected function sanitizeTelefono(?string $telefono): string
@@ -192,18 +182,6 @@ class InscripcionesImport implements
         return $m;
     }
 
-    /**
-     * Registra un error ocurrido al procesar una fila y lo almacena.
-     */
-    protected function addRowError(Row $row, \Throwable $e): void
-    {
-        $this->rowErrors[] = [
-            'row'    => $row->getIndex(),
-            'error'  => $e->getMessage(),
-            'values' => $row->toArray(),
-        ];
-        Log::error('Error processing row ' . $row->getIndex() . ': ' . $e->getMessage());
-    }
 
     /** Genera un correo temporal si no se proporciona uno. */
     protected function defaultEmail(string $carnet): string
