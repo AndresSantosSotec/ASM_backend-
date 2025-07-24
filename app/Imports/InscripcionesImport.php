@@ -46,10 +46,12 @@ class InscripcionesImport implements
     /** Programa usado cuando el código de carrera no existe. */
     private const DEFAULT_PROGRAM_ABBR = 'TEMP';
     private const DEFAULT_PROGRAM_NAME = 'Programa Pendiente';
+
     /** Fecha utilizada cuando no hay fecha válida. */
     private const DUMMY_BIRTH_DATE = '2000-01-01';
     /** Modalidad por defecto cuando el archivo no la provee o es desconocida. */
     private const DEFAULT_MODALIDAD = 'sincronica';
+
 
     /**
      * Errores ocurridos al procesar filas.
@@ -123,7 +125,9 @@ class InscripcionesImport implements
             return Carbon::parse($value)->toDateString();
         } catch (\Exception $e) {
             Log::warning('Fecha no válida: ' . $value . ' - ' . $e->getMessage());
+
             return $default;
+
         }
     }
 
@@ -201,10 +205,36 @@ class InscripcionesImport implements
         Log::error('Error processing row ' . $row->getIndex() . ': ' . $e->getMessage());
     }
 
+    /** Genera un correo temporal si no se proporciona uno. */
+    protected function defaultEmail(string $carnet): string
+    {
+        return 'sin-email-' . Str::slug($carnet ?: Str::random(6)) . '@example.com';
+    }
+
+    /** Genera un teléfono temporal si no se proporciona uno. */
+    protected function defaultTelefono(): string
+    {
+        return '00000000';
+    }
+
+    /**
+     * Registra un error ocurrido al procesar una fila y lo almacena.
+     */
+    protected function addRowError(Row $row, \Throwable $e): void
+    {
+        $this->rowErrors[] = [
+            'row'    => $row->getIndex(),
+            'error'  => $e->getMessage(),
+            'values' => $row->toArray(),
+        ];
+        Log::error('Error processing row ' . $row->getIndex() . ': ' . $e->getMessage());
+    }
+
     /** 5) Procesar cada fila */
     public function onRow(Row $row)
     {
         $d = array_map('trim', $row->toArray());
+
 
         if (!empty($d['carnet'])) {
             $d['carnet'] = $this->normalizeCarnet($d['carnet']);
@@ -215,6 +245,7 @@ class InscripcionesImport implements
 
         $fechaNacimiento = $this->parseDate($d['cumpleanos'], self::DUMMY_BIRTH_DATE);
         $fechaInscripcion = $this->parseDate($d['fecha_de_inscripcion'], now()->toDateString());
+
 
         // Normalizar género
         if (!empty($d['m']) && $d['m'] === '1') {
@@ -229,7 +260,9 @@ class InscripcionesImport implements
         $claveProg = Str::upper(preg_replace('/[^A-Za-z]/', '', $d['codigo_carrera'] ?? ''));
 
         try {
+
             DB::transaction(function () use ($d, $genero, $claveProg, $row, $telefono, $correo, $fechaNacimiento, $fechaInscripcion) {
+
             // — Prospecto —
             $prospecto = Prospecto::updateOrCreate(
                 ['carnet' => $d['carnet']],
@@ -242,6 +275,7 @@ class InscripcionesImport implements
                     'puesto'                        => $d['puesto_trabajo'] ?? null,
                     'observaciones'                 => $d['observaciones'] ?? null,
                     'numero_identificacion'         => $d['dpi'] ?? null,
+
                     'fecha_nacimiento'              => $fechaNacimiento,
                     'modalidad'                     => $this->normalizeModalidad($d['modalidad'] ?? null),
                     'fecha_inicio_especifica'       => $fechaInscripcion,
