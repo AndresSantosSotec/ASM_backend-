@@ -47,6 +47,12 @@ class InscripcionesImport implements
     private const DEFAULT_PROGRAM_ABBR = 'TEMP';
     private const DEFAULT_PROGRAM_NAME = 'Programa Pendiente';
 
+    /** Fecha utilizada cuando no hay fecha válida. */
+    private const DUMMY_BIRTH_DATE = '2000-01-01';
+    /** Modalidad por defecto cuando el archivo no la provee o es desconocida. */
+    private const DEFAULT_MODALIDAD = 'sincronica';
+
+
     /**
      * Errores ocurridos al procesar filas.
      *
@@ -110,23 +116,93 @@ class InscripcionesImport implements
     }
 
     /** 3) Helper para parsear fechas sin petar si vienen en otro formato */
-    protected function parseDate($value): ?string
+    protected function parseDate($value, ?string $default = null): ?string
     {
         if (empty($value)) {
-            return null;
+            return $default;
         }
         try {
             return Carbon::parse($value)->toDateString();
         } catch (\Exception $e) {
             Log::warning('Fecha no válida: ' . $value . ' - ' . $e->getMessage());
-            return null;
+
+            return $default;
+
         }
     }
 
-    /** 4) Limpia montos «Q1,400.00» → 1400.00 */
+    /** 4) Limpia montos «Q1,400.00» o "$1,400.00" → 1400.00 */
     protected function limpiarMonto($v): float
     {
-        return (float) str_replace(['Q', ',', ' '], '', trim($v));
+        if (! is_string($v)) {
+            return (float) $v;
+        }
+
+        $clean = str_replace(['Q', '$', ',', ' '], '', trim($v));
+
+        return (float) $clean;
+    }
+
+    /** Genera un correo temporal si no se proporciona uno. */
+    protected function defaultEmail(string $carnet): string
+    {
+        return 'sin-email-' . Str::slug($carnet ?: Str::random(6)) . '@example.com';
+    }
+
+    /** Normaliza el carné quitando espacios y pasando a mayúsculas. */
+    protected function normalizeCarnet(string $carnet): string
+    {
+        return Str::upper(preg_replace('/\s+/', '', $carnet));
+    }
+
+    /** Genera un teléfono temporal si no se proporciona uno. */
+    protected function defaultTelefono(): string
+    {
+        return '00000000';
+    }
+
+    /** Limpia un número de teléfono o usa un valor por defecto. */
+    protected function sanitizeTelefono(?string $telefono): string
+    {
+        if (! $telefono) {
+            return $this->defaultTelefono();
+        }
+
+        $digits = preg_replace('/\D+/', '', $telefono);
+
+        return $digits !== '' ? $digits : $this->defaultTelefono();
+    }
+
+    /** Normaliza la modalidad y aplica un valor por defecto. */
+    protected function normalizeModalidad(?string $modalidad): string
+    {
+        if (empty($modalidad)) {
+            return self::DEFAULT_MODALIDAD;
+        }
+
+        $m = strtolower(trim($modalidad));
+
+        if (str_contains($m, 'elearn')) {
+            return 'asincronica';
+        }
+        if (str_contains($m, 'sincro')) {
+            return 'sincronica';
+        }
+
+        return $m;
+    }
+
+    /**
+     * Registra un error ocurrido al procesar una fila y lo almacena.
+     */
+    protected function addRowError(Row $row, \Throwable $e): void
+    {
+        $this->rowErrors[] = [
+            'row'    => $row->getIndex(),
+            'error'  => $e->getMessage(),
+            'values' => $row->toArray(),
+        ];
+        Log::error('Error processing row ' . $row->getIndex() . ': ' . $e->getMessage());
     }
 
     /** Genera un correo temporal si no se proporciona uno. */
@@ -159,8 +235,17 @@ class InscripcionesImport implements
     {
         $d = array_map('trim', $row->toArray());
 
-        $telefono = $d['telefono'] ?: $this->defaultTelefono();
+
+        if (!empty($d['carnet'])) {
+            $d['carnet'] = $this->normalizeCarnet($d['carnet']);
+        }
+
+        $telefono = $this->sanitizeTelefono($d['telefono'] ?? null);
         $correo   = $d['email'] ? strtolower($d['email']) : $this->defaultEmail($d['carnet'] ?? '');
+
+        $fechaNacimiento = $this->parseDate($d['cumpleanos'], self::DUMMY_BIRTH_DATE);
+        $fechaInscripcion = $this->parseDate($d['fecha_de_inscripcion'], now()->toDateString());
+
 
         // Normalizar género
         if (!empty($d['m']) && $d['m'] === '1') {
@@ -175,7 +260,9 @@ class InscripcionesImport implements
         $claveProg = Str::upper(preg_replace('/[^A-Za-z]/', '', $d['codigo_carrera'] ?? ''));
 
         try {
-            DB::transaction(function () use ($d, $genero, $claveProg, $row, $telefono, $correo) {
+
+            DB::transaction(function () use ($d, $genero, $claveProg, $row, $telefono, $correo, $fechaNacimiento, $fechaInscripcion) {
+
             // — Prospecto —
             $prospecto = Prospecto::updateOrCreate(
                 ['carnet' => $d['carnet']],
@@ -188,10 +275,11 @@ class InscripcionesImport implements
                     'puesto'                        => $d['puesto_trabajo'] ?? null,
                     'observaciones'                 => $d['observaciones'] ?? null,
                     'numero_identificacion'         => $d['dpi'] ?? null,
-                    'fecha_nacimiento'              => $this->parseDate($d['cumpleanos']),
-                    'modalidad'                     => $d['modalidad'] ?? null,
-                    'fecha_inicio_especifica'       => $this->parseDate($d['fecha_de_inscripcion']),
-                    'fecha'                         => $this->parseDate($d['fecha_de_inscripcion']) ?? now()->toDateString(),
+
+                    'fecha_nacimiento'              => $fechaNacimiento,
+                    'modalidad'                     => $this->normalizeModalidad($d['modalidad'] ?? null),
+                    'fecha_inicio_especifica'       => $fechaInscripcion,
+                    'fecha'                         => $fechaInscripcion,
                     'dia_estudio'                   => $d['dia'] ?? null,
                     'direccion_residencia'          => $d['direccion'] ?? null,
                     'pais_residencia'               => $d['pais'] ?? null,
@@ -207,7 +295,7 @@ class InscripcionesImport implements
             $prog = $this->obtenerPrograma($claveProg);
 
             // — Inscripción académica (histórico) —
-            $fechaInicio = $this->parseDate($d['fecha_de_inscripcion']) ?? now()->toDateString();
+            $fechaInicio = $fechaInscripcion;
             $numCuotas   = (int) ($d['numero_de_cuotas'] ?? 0);
 
             $ep = EstudiantePrograma::firstOrCreate(
