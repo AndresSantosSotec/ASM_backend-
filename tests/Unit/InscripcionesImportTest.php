@@ -31,4 +31,23 @@ class InscripcionesImportTest extends TestCase
         $this->assertEquals(Carbon::now()->toDateString(), $result['fecha_de_inscripcion']);
         $this->assertEquals('2000-01-01', $result['cumpleanos']);
     }
+
+    public function test_program_code_normalization_and_dia_truncation()
+    {
+        $import = new InscripcionesImport();
+
+        $normMethod = new \ReflectionMethod($import, 'normalizeProgramaCodigo');
+        $normMethod->setAccessible(true);
+
+        $this->assertEquals('MBA', $normMethod->invoke($import, 'MBA 21'));
+        $this->assertEquals('MMK', $normMethod->invoke($import, 'MMK18'));
+        $this->assertEquals('MHTM', $normMethod->invoke($import, 'MRRHH21'));
+
+        $diaMethod = new \ReflectionMethod($import, 'sanitizeDiaEstudio');
+        $diaMethod->setAccessible(true);
+
+        $truncated = $diaMethod->invoke($import, 'Lunes, Miércoles y Sábado');
+        $this->assertSame(20, mb_strlen($truncated));
+    }
+
 }
