@@ -17,6 +17,7 @@ class InscripcionesImportTest extends TestCase
             'nombre' => 'John',
             'apellido' => '',
             'email' => 'bad-email',
+            'telefono' => 12345,
             'fecha_de_inscripcion' => 'not a date',
             'cumpleanos' => '',
         ];
@@ -25,6 +26,8 @@ class InscripcionesImportTest extends TestCase
 
         $this->assertEquals('Desconocido', $result['apellido']);
         $this->assertStringStartsWith('sin-email-', $result['email']);
+        $this->assertSame('12345', $result['telefono']);
+
         $this->assertEquals(Carbon::now()->toDateString(), $result['fecha_de_inscripcion']);
         $this->assertEquals('2000-01-01', $result['cumpleanos']);
     }
