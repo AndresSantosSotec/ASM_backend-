@@ -39,6 +39,16 @@ class InscripcionesImport implements OnEachRow,
     private const DUMMY_BIRTH_DATE = '2000-01-01';
     private const DEFAULT_MODALIDAD = 'sincronica';
 
+    /**
+     * Mapas de alias para códigos de programa.
+     * Permite reconocer variaciones como "MRRHH" => "MHTM".
+     */
+    private const PROGRAM_ALIASES = [
+        'MMKD'  => 'MMK',
+        'MMK'   => 'MMK',
+        'MRRHH' => 'MHTM',
+    ];
+
     protected array $rowErrors = [];
 
     // Nuevas propiedades agregadas
@@ -71,15 +81,21 @@ class InscripcionesImport implements OnEachRow,
 
     protected function obtenerPrograma(?string $claveProg): Programa
     {
-        if (!empty($claveProg)) {
-            $claveProg = Str::upper(preg_replace('/[^A-Za-z0-9]/', '', $claveProg));
+        $abrev = $this->normalizeProgramaCodigo($claveProg);
 
-            $programa = Programa::whereRaw('upper(abreviatura) = ?', [$claveProg])->first();
+        if ($abrev) {
+            $programa = Programa::whereRaw('upper(abreviatura) = ?', [$abrev])->first();
+
+            if (!$programa) {
+                // Búsqueda más flexible por prefijo por si hay variaciones
+                $programa = Programa::whereRaw('upper(abreviatura) LIKE ?', [$abrev . '%'])->first();
+            }
 
             if ($programa) {
                 return $programa;
             }
-            Log::warning("Programa no encontrado para código: {$claveProg}. Se utilizará temporal.");
+
+            Log::warning("Programa no encontrado para código: {$abrev}. Se utilizará temporal.");
         } else {
             Log::warning('Código de programa vacío, se utilizará temporal.');
         }
@@ -137,6 +153,32 @@ class InscripcionesImport implements OnEachRow,
                 $data[$field] = 0;
             }
         }
+
+        // Asegurar que teléfono sea una cadena para la validación
+        if (isset($data['telefono']) && !is_string($data['telefono'])) {
+            $data['telefono'] = strval($data['telefono']);
+        }
+
+        // Proveer apellido por defecto si falta
+        if (empty($data['apellido'])) {
+            $data['apellido'] = 'Desconocido';
+        }
+
+        // Normalizar correo electrónico, usar uno temporal si es inválido
+        $carnetBase = $data['carnet'] ?? $data['carne'] ?? null;
+        if (empty($data['email']) || !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+            $data['email'] = $this->defaultEmail($this->normalizeCarnet($carnetBase));
+        }
+
+        // Convertir fechas inválidas en valores por defecto
+        $data['fecha_de_inscripcion'] = $this->parseDate(
+            $data['fecha_de_inscripcion'] ?? null,
+            Carbon::now()->toDateString()
+        );
+        $data['cumpleanos'] = $this->parseDate(
+            $data['cumpleanos'] ?? null,
+            self::DUMMY_BIRTH_DATE
+        );
 
         return $data;
     }
@@ -199,6 +241,30 @@ class InscripcionesImport implements OnEachRow,
         }
         $digits = preg_replace('/\D+/', '', $telefono);
         return $digits !== '' ? $digits : $this->defaultTelefono();
+    }
+
+    protected function sanitizeDiaEstudio(?string $dia): ?string
+    {
+        if ($dia === null) {
+            return null;
+        }
+        return Str::limit(trim($dia), 20, '');
+    }
+
+    protected function normalizeProgramaCodigo(?string $code): ?string
+    {
+        if (empty($code)) {
+            return null;
+        }
+
+        $base = Str::upper(preg_replace('/[^A-Za-z]/', '', $code));
+
+        // Aplicar alias si existe
+        if (isset(self::PROGRAM_ALIASES[$base])) {
+            return self::PROGRAM_ALIASES[$base];
+        }
+
+        return $base;
     }
 
     protected function normalizeModalidad(?string $modalidad): string
@@ -293,7 +359,7 @@ class InscripcionesImport implements OnEachRow,
                         'modalidad' => $this->normalizeModalidad($d['modalidad'] ?? null),
                         'fecha_inicio_especifica' => $fechaInscripcion,
                         'fecha' => $fechaInscripcion,
-                        'dia_estudio' => $d['dia'] ?? null,
+                        'dia_estudio' => $this->sanitizeDiaEstudio($d['dia'] ?? null),
                         'direccion_residencia' => $d['direccion'] ?? null,
                         'pais_residencia' => $d['pais'] ?? null,
                         'medio_conocimiento_institucion' => $d['medio_por_cual_ingreso'] ?? null,
