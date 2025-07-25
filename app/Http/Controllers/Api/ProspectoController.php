@@ -541,16 +541,33 @@ class ProspectoController extends Controller
     /**
      * Obtener prospectos inscritos con sus programas y cursos asociados
      */
-    public function inscritosConCursos()
+    public function inscritosConCursos(Request $request)
     {
+        $perPage = $request->integer('per_page', 50);
+
         $prospectos = Prospecto::with('programas.programa.courses')
             ->where('status', 'Inscrito')
             ->whereHas('programas')
-            ->get();
+            ->paginate($perPage);
 
         return response()->json([
             'message' => 'Prospectos inscritos con programas y cursos',
-            'data'    => $prospectos,
+            'data'    => $prospectos->items(),
+            'links'   => [
+                'first' => $prospectos->url(1),
+                'last'  => $prospectos->url($prospectos->lastPage()),
+                'prev'  => $prospectos->previousPageUrl(),
+                'next'  => $prospectos->nextPageUrl(),
+            ],
+            'meta'    => [
+                'current_page' => $prospectos->currentPage(),
+                'from'         => $prospectos->firstItem(),
+                'last_page'    => $prospectos->lastPage(),
+                'path'         => $prospectos->path(),
+                'per_page'     => $prospectos->perPage(),
+                'to'           => $prospectos->lastItem(),
+                'total'        => $prospectos->total(),
+            ],
         ]);
     }
 
