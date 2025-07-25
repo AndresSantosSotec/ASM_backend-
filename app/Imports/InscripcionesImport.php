@@ -138,10 +138,12 @@ class InscripcionesImport implements OnEachRow,
             }
         }
 
+
         // Asegurar que teléfono sea una cadena para la validación
         if (isset($data['telefono']) && !is_string($data['telefono'])) {
             $data['telefono'] = strval($data['telefono']);
         }
+
 
         // Proveer apellido por defecto si falta
         if (empty($data['apellido'])) {
