@@ -39,6 +39,21 @@ class InscripcionesImport implements OnEachRow,
     private const DUMMY_BIRTH_DATE = '2000-01-01';
     private const DEFAULT_MODALIDAD = 'sincronica';
 
+    /** @var array<string,string> */
+    private const PROGRAM_MAPPINGS = [
+        'BBA'   => 'Bachelor of Business Administration',
+        'BBACM' => 'Bachelor of Business Administration in Commercial Management',
+        'BBABF' => 'Bachelor of Business Administration in Banking and Fintech',
+        'MBA'   => 'Master of Business Administration',
+        'MFIN'  => 'Master of Financial Management',
+        'MPM'   => 'Master of Project Management',
+        'MMKD'  => 'Master of Marketing in Commercial Management',
+        'MHTM'  => 'Master in Human Talent Management',
+        'MLDO'  => 'Master of Logistics in Operations Management',
+        'MKD'   => 'Master of Digital Marketing',
+        'TEMP'  => 'Programa Pendiente',
+    ];
+
     protected array $rowErrors = [];
 
     // Nuevas propiedades agregadas
@@ -72,13 +87,24 @@ class InscripcionesImport implements OnEachRow,
     protected function obtenerPrograma(?string $claveProg): Programa
     {
         if (!empty($claveProg)) {
-            $claveProg = Str::upper(preg_replace('/[^A-Za-z0-9]/', '', $claveProg));
+            // Extraer solo letras y convertir a mayúsculas
+            $base = Str::upper(preg_replace('/[^A-Za-z]/', '', $claveProg));
 
-            $programa = Programa::whereRaw('upper(abreviatura) = ?', [$claveProg])->first();
+            if ($base !== '') {
+                $programa = Programa::whereRaw('upper(abreviatura) = ?', [$base])->first();
 
-            if ($programa) {
-                return $programa;
+                if (! $programa && isset(self::PROGRAM_MAPPINGS[$base])) {
+                    $programa = Programa::firstOrCreate(
+                        ['abreviatura' => $base],
+                        ['nombre_del_programa' => self::PROGRAM_MAPPINGS[$base]]
+                    );
+                }
+
+                if ($programa) {
+                    return $programa;
+                }
             }
+
             Log::warning("Programa no encontrado para código: {$claveProg}. Se utilizará temporal.");
         } else {
             Log::warning('Código de programa vacío, se utilizará temporal.');
@@ -147,7 +173,7 @@ class InscripcionesImport implements OnEachRow,
 
         // Proveer apellido por defecto si falta
         if (empty($data['apellido'])) {
-            $data['apellido'] = 'Desconocido';
+            $data['apellido'] = '';
         }
 
         // Normalizar correo electrónico, usar uno temporal si es inválido
@@ -226,6 +252,7 @@ class InscripcionesImport implements OnEachRow,
             return $this->defaultTelefono();
         }
         $digits = preg_replace('/\D+/', '', $telefono);
+        $digits = substr($digits, 0, 20);
         return $digits !== '' ? $digits : $this->defaultTelefono();
     }
 
