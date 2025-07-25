@@ -27,6 +27,7 @@ class InscripcionesImportTest extends TestCase
         $this->assertEquals('Desconocido', $result['apellido']);
         $this->assertStringStartsWith('sin-email-', $result['email']);
         $this->assertSame('12345', $result['telefono']);
+
         $this->assertEquals(Carbon::now()->toDateString(), $result['fecha_de_inscripcion']);
         $this->assertEquals('2000-01-01', $result['cumpleanos']);
     }
@@ -48,4 +49,5 @@ class InscripcionesImportTest extends TestCase
         $truncated = $diaMethod->invoke($import, 'Lunes, Miércoles y Sábado');
         $this->assertSame(20, mb_strlen($truncated));
     }
+
 }
