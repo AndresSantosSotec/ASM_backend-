@@ -138,6 +138,32 @@ class InscripcionesImport implements OnEachRow,
             }
         }
 
+        // Asegurar que teléfono sea una cadena para la validación
+        if (isset($data['telefono']) && !is_string($data['telefono'])) {
+            $data['telefono'] = strval($data['telefono']);
+        }
+
+        // Proveer apellido por defecto si falta
+        if (empty($data['apellido'])) {
+            $data['apellido'] = 'Desconocido';
+        }
+
+        // Normalizar correo electrónico, usar uno temporal si es inválido
+        $carnetBase = $data['carnet'] ?? $data['carne'] ?? null;
+        if (empty($data['email']) || !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+            $data['email'] = $this->defaultEmail($this->normalizeCarnet($carnetBase));
+        }
+
+        // Convertir fechas inválidas en valores por defecto
+        $data['fecha_de_inscripcion'] = $this->parseDate(
+            $data['fecha_de_inscripcion'] ?? null,
+            Carbon::now()->toDateString()
+        );
+        $data['cumpleanos'] = $this->parseDate(
+            $data['cumpleanos'] ?? null,
+            self::DUMMY_BIRTH_DATE
+        );
+
         return $data;
     }
 
