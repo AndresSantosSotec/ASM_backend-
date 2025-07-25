@@ -31,7 +31,8 @@ class InscripcionesImport implements OnEachRow,
     WithHeadingRow,
     WithValidation
 {
-    use SkipsErrors, SkipsFailures;
+    use SkipsErrors,
+        SkipsFailures { onFailure as traitOnFailure; }
 
     private const DEFAULT_PROGRAM_ABBR = 'TEMP';
     private const DEFAULT_PROGRAM_NAME = 'Programa Pendiente';
@@ -387,5 +388,19 @@ class InscripcionesImport implements OnEachRow,
      *
      * @param Failure[] $failures
      */
+    public function onFailure(Failure ...$failures)
+    {
+        $logPrefix = $this->importId ? "[Importación {$this->importId}]" : '';
+
+        // Incrementar contador por cada fila fallida y registrar el error
+        foreach ($failures as $failure) {
+            $this->rowCount++;
+            $msg = implode('; ', $failure->errors());
+            Log::warning("⚠️ {$logPrefix} Validación fallida en fila {$failure->row()}: {$msg}");
+        }
+
+        // Conservar el comportamiento original del trait
+        $this->traitOnFailure(...$failures);
+    }
 
 }
