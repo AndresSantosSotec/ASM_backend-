@@ -264,6 +264,25 @@ class CourseController extends Controller
         return response()->json(['message' => 'Cursos asignados correctamente']);
     }
 
+    /**
+     * List courses associated with one or more programas.
+     */
+    public function byPrograms(Request $request)
+    {
+        $data = $request->validate([
+            'program_ids'   => 'required|array',
+            'program_ids.*' => 'exists:tb_programas,id',
+        ]);
+
+        $courses = Course::select('courses.*')
+            ->join('programa_course', 'courses.id', '=', 'programa_course.course_id')
+            ->whereIn('programa_course.programa_id', $data['program_ids'])
+            ->distinct()
+            ->get();
+
+        return response()->json($courses);
+    }
+
     //traer cursos displnipes por programa, por estudiante que puede llevar
     // los cursos, y para asiganacion masiva si se seleciona mas de
     //traer los cursos que se puedan asignar a ambos
