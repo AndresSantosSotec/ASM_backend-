@@ -274,11 +274,13 @@ class CourseController extends Controller
             'program_ids.*' => 'exists:tb_programas,id',
         ]);
 
+
         $courses = Course::select('courses.*')
             ->join('programa_course', 'courses.id', '=', 'programa_course.course_id')
             ->whereIn('programa_course.programa_id', $data['program_ids'])
             ->distinct()
             ->get();
+
 
         return response()->json($courses);
     }
