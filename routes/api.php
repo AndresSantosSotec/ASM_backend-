@@ -463,6 +463,7 @@ Route::prefix('courses')->group(function () {
 Route::get('/ranking/students', [RankingController::class, 'index'])->middleware('auth:sanctum');
 Route::get('/ranking/courses', [CoursePerformanceController::class, 'index'])->middleware('auth:sanctum');
 Route::get('/ranking/report', [RankingController::class, 'report'])->middleware('auth:sanctum');
+Route::get('/students', [StudentController::class, 'index'])->middleware('auth:sanctum');
 Route::get('/students/{id}', [StudentController::class, 'show'])->middleware('auth:sanctum');
 
 // ----------------------
