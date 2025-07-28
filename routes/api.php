@@ -433,7 +433,9 @@ Route::prefix('courses')->group(function () {
     Route::post('/assign',             [CourseController::class, 'assignCourses']);
     Route::post('/unassign',           [CourseController::class, 'unassignCourses']);
     Route::post('/bulk-assign',        [CourseController::class, 'bulkAssignCourses']);
-    Route::get('/by-programs',        [CourseController::class, 'byPrograms']);
+
+    Route::post('/by-programs',       [CourseController::class, 'byPrograms']);
+
 
     // 2) Listar y crear
     Route::get('/',   [CourseController::class, 'index']);
