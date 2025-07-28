@@ -10,7 +10,10 @@ class StudentResource extends JsonResource
     {
         return [
             'id'     => $this->id,
+            'carnet' => $this->carnet,
             'nombre' => $this->nombre_completo,
+            'fecha_inicio_especifica' => $this->fecha_inicio_especifica,
+            'startDate' => $this->fecha_inicio_especifica,
             'programas' => $this->programas->map(fn($p) => [
                 'programa'      => optional($p->programa)->nombre_del_programa,
                 'fecha_inicio'  => $p->fecha_inicio,
