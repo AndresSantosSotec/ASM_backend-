@@ -14,7 +14,7 @@ class Course extends Model
         'moodle_id',
         'name','code','area','credits',
         'start_date','end_date','schedule','duration',
-        'facilitator_id','status','students'
+        'facilitator_id','status','students','origen'
     ];
 
     protected $casts = [
