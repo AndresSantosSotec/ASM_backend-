@@ -195,12 +195,24 @@ class Prospecto extends Model
 
     /**
      * Genera un carnet único con el formato ASM<year><correlativo>.
+     * Busca el último carnet del año actual y suma 1 al correlativo.
      */
     public static function generateCarnet(): string
     {
         $year = now()->year;
-        $correlative = static::where('carnet', 'like', 'ASM'.$year.'%')->count() + 1;
-        return 'ASM'.$year.$correlative;
+        $prefix = 'ASM'.$year;
+
+        $max = static::where('carnet', 'like', $prefix.'%')
+            ->pluck('carnet')
+            ->map(function ($carnet) use ($prefix) {
+                $num = (int) preg_replace('/\D/', '', substr($carnet, strlen($prefix)));
+                return $num;
+            })
+            ->max();
+
+        $correlative = ($max ?? 0) + 1;
+
+        return $prefix.$correlative;
     }
 
     public function getBalance(): float

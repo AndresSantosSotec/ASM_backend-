@@ -46,4 +46,37 @@ class MoodleSyncCommandTest extends TestCase
             'name' => 'Curso Test',
         ]);
     }
+
+    public function test_sync_command_formats_name_and_code()
+    {
+        $program = Programa::create([
+            'abreviatura' => 'BBA',
+            'nombre_del_programa' => 'Admin',
+            'meses' => 1,
+        ]);
+
+        Http::fake([
+            '*' => Http::response([
+                [
+                    'id' => 15,
+                    'fullname' => 'Lunes BBA Manejo de Crisis Octubre 2023',
+                    'shortname' => 'Lunes BBA Manejo de Crisis Octubre 2023',
+                    'summary' => '<p><span>BBA07</span></p>',
+                    'startdate' => 1717132800,
+                    'enddate' => 1717219200,
+                ]
+            ])
+        ]);
+
+        Artisan::call('moodle:sync', ['courseId' => 15]);
+
+        $course = Course::where('moodle_id', 15)->first();
+        $this->assertNotNull($course);
+        $this->assertEquals('BBA Manejo de Crisis', $course->name);
+        $this->assertEquals('BBA07', $course->code);
+        $this->assertDatabaseHas('programa_course', [
+            'course_id' => $course->id,
+            'programa_id' => $program->id,
+        ]);
+    }
 }
