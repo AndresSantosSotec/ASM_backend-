@@ -190,6 +190,28 @@ class CourseController extends Controller
     }
 
     /**
+     * Sync multiple Moodle courses by ID.
+     */
+    public function bulkSyncToMoodle(Request $request)
+    {
+        $payload = $request->validate([
+            'moodle_ids'   => 'required|array',
+            'moodle_ids.*' => 'integer',
+        ]);
+
+        $service = app(\App\Services\MoodleService::class);
+        $synced = [];
+
+        foreach ($payload['moodle_ids'] as $moodleId) {
+            if ($course = $service->syncCourse($moodleId)) {
+                $synced[] = $course;
+            }
+        }
+
+        return response()->json($synced);
+    }
+
+    /**
      * Assign facilitator to course
      */
     public function assignFacilitator(Request $request, string $id)
