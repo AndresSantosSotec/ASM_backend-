@@ -88,6 +88,7 @@ class MoodleService
             'start_date' => Carbon::createFromTimestamp($data['startdate'])->toDateString(),
             'end_date'   => Carbon::createFromTimestamp($data['enddate'])->toDateString(),
             'status'     => 'synced',
+            'origen'     => 'moodle',
         ]);
         $course->save();
 
