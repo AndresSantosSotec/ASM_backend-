@@ -433,6 +433,7 @@ Route::prefix('courses')->group(function () {
     Route::post('/assign',             [CourseController::class, 'assignCourses']);
     Route::post('/unassign',           [CourseController::class, 'unassignCourses']);
     Route::post('/bulk-assign',        [CourseController::class, 'bulkAssignCourses']);
+    Route::post('/bulk-sync-moodle',  [CourseController::class, 'bulkSyncToMoodle']);
 
     Route::post('/by-programs',       [CourseController::class, 'byPrograms']);
 
