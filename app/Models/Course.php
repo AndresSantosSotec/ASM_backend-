@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -12,9 +13,18 @@ class Course extends Model
 
     protected $fillable = [
         'moodle_id',
-        'name','code','area','credits',
-        'start_date','end_date','schedule','duration',
-        'facilitator_id','status','students'
+        'name',
+        'code',
+        'area',
+        'credits',
+        'start_date',
+        'end_date',
+        'schedule',
+        'duration',
+        'facilitator_id',
+        'status',
+        'students',
+        'origen',  // <-- aquí
     ];
 
     protected $casts = [

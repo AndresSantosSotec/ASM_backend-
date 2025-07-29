@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Prospecto;
 use App\Models\ProspectosDocumento;
+use App\Models\EstudiantePrograma;
+use App\Models\Programa;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf as PDF;
 use Illuminate\Support\Facades\Mail;
@@ -579,5 +581,30 @@ class ProspectoController extends Controller
         return response($pdf->output(), 200)
             ->header('Content-Type', 'application/pdf')
             ->header('Content-Disposition', 'attachment; filename="Contrato.pdf"');
+    }
+
+    public function programasAsignados(Request $request)
+    {
+        $nombre = $request->input('nombre_completo');
+        $carnet = $request->input('carnet');
+
+        $prospecto = Prospecto::where('nombre_completo', $nombre)
+            ->where('carnet', $carnet)
+            ->where('activo', true)
+            ->where('status', 'Inscrito')
+            ->first();
+
+        if (!$prospecto) {
+            return response()->json(['message' => 'Estudiante no encontrado o no cumple criterios'], 404);
+        }
+
+        $programas = EstudiantePrograma::with(['programa', 'convenio', 'cuotas', 'pagos'])
+            ->where('prospecto_id', $prospecto->id)
+            ->get();
+
+        return response()->json([
+            'estudiante' => $prospecto->only(['id', 'nombre_completo', 'carnet']),
+            'programas' => $programas
+        ]);
     }
 }
