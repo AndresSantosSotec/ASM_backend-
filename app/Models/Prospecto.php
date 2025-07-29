@@ -193,6 +193,16 @@ class Prospecto extends Model
         return $this->hasMany(ReconciliationRecord::class);
     }
 
+    /**
+     * Genera un carnet único con el formato ASM<year><correlativo>.
+     */
+    public static function generateCarnet(): string
+    {
+        $year = now()->year;
+        $correlative = static::where('carnet', 'like', 'ASM'.$year.'%')->count() + 1;
+        return 'ASM'.$year.$correlative;
+    }
+
     public function getBalance(): float
     {
 
