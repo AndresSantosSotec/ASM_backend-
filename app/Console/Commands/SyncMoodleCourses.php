@@ -30,8 +30,21 @@ class SyncMoodleCourses extends Command
         }
 
         if ($this->option('all')) {
-            $this->error('Full sync not implemented');
-            return Command::FAILURE;
+            $ids = $this->moodle->getCourseIds();
+
+            if (empty($ids)) {
+                $this->error('No courses found');
+                return Command::FAILURE;
+            }
+
+            foreach ($ids as $cid) {
+                $course = $this->moodle->syncCourse((int) $cid);
+                if ($course) {
+                    $this->info("Course {$course->id} synced");
+                }
+            }
+
+            return Command::SUCCESS;
         }
 
         $this->error('Specify courseId or use --all');
