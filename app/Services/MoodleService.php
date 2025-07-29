@@ -43,6 +43,32 @@ class MoodleService
         return $response->ok() ? ($response->json()[0] ?? null) : null;
     }
 
+    /**
+     * Retrieve all course IDs from Moodle.
+     *
+     * @return array<int>
+     */
+    public function getCourseIds(): array
+    {
+        $params = [
+            'wstoken' => $this->token,
+            'wsfunction' => 'core_course_get_courses',
+            'moodlewsrestformat' => $this->format,
+        ];
+
+        $response = Http::get($this->url . '/webservice/rest/server.php', $params);
+
+        if (!$response->ok() && $this->altUrl !== $this->url) {
+            $response = Http::get($this->altUrl . '/webservice/rest/server.php', $params);
+        }
+
+        if (!$response->ok()) {
+            return [];
+        }
+
+        return array_column($response->json(), 'id');
+    }
+
     public function syncCourse(int $moodleId): ?Course
     {
         $data = $this->getCourse($moodleId);
