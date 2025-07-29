@@ -38,8 +38,8 @@ class InscripcionController extends Controller
                 ], 404);
             }
 
-            // Actualiza el prospecto
-            $prospecto->update([
+            // Preparar datos de actualización
+            $updateData = [
                 'nombre_completo' => $data['personales']['nombre'],
                 'pais_origen'     => $data['personales']['paisOrigen'],
                 'pais_residencia' => $data['personales']['paisResidencia'],
@@ -67,7 +67,14 @@ class InscripcionController extends Controller
                 'convenio_pago_id' => $data['financieros']['convenioId'] ?? null,
                 'monto_inscripcion' => $data['financieros']['inscripcion'],
                 'status' => 'Pendiente Aprobacion', // 👈 AÑADIDO AQUÍ
-            ]);
+            ];
+
+            if (!$prospecto->carnet) {
+                $updateData['carnet'] = Prospecto::generateCarnet();
+            }
+
+            // Actualiza el prospecto
+            $prospecto->update($updateData);
 
             // Insertar programas
             foreach ([1, 2, 3] as $i) {
