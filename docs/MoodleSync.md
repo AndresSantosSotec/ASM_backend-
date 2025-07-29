@@ -2,13 +2,24 @@
 
 Use the `php artisan moodle:sync {id}` command to import or update a course from Moodle.
 
-You can also sync multiple courses via the API:
+You can also sync multiple courses via the API. The endpoint accepts either a
+list of Moodle course IDs or an array of objects containing an `id` field.
 
 ```http
 POST /api/courses/bulk-sync-moodle
 {
   "moodle_ids": [1, 2, 3]
 }
+```
+
+Or:
+
+```http
+POST /api/courses/bulk-sync-moodle
+[
+  { "id": 1 },
+  { "id": 2 }
+]
 ```
 
 This will loop over each ID and call `MoodleService::syncCourse`.

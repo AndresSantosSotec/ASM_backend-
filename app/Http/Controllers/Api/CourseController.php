@@ -194,16 +194,28 @@ class CourseController extends Controller
      */
     public function bulkSyncToMoodle(Request $request)
     {
-        $payload = $request->validate([
-            'moodle_ids'   => 'required|array',
-            'moodle_ids.*' => 'integer',
-        ]);
+        $data = $request->all();
+
+        $ids = [];
+        if (isset($data['moodle_ids']) && is_array($data['moodle_ids'])) {
+            $ids = array_filter($data['moodle_ids'], fn($id) => is_numeric($id));
+        } elseif (isset($data[0]) && is_array($data)) {
+            foreach ($data as $item) {
+                if (is_array($item) && isset($item['id']) && is_numeric($item['id'])) {
+                    $ids[] = $item['id'];
+                }
+            }
+        }
+
+        if (empty($ids)) {
+            return response()->json(['message' => 'moodle_ids required'], 422);
+        }
 
         $service = app(\App\Services\MoodleService::class);
         $synced = [];
 
-        foreach ($payload['moodle_ids'] as $moodleId) {
-            if ($course = $service->syncCourse($moodleId)) {
+        foreach ($ids as $moodleId) {
+            if ($course = $service->syncCourse((int)$moodleId)) {
                 $synced[] = $course;
             }
         }
