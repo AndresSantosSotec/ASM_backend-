@@ -52,9 +52,13 @@ class MoodleService
 
         $course = Course::firstOrNew(['moodle_id' => $data['id']]);
 
+        $cleanName = $this->cleanCourseName($data['fullname'] ?? $data['shortname']);
+        $code = $this->extractCourseCode($data['summary'] ?? '')
+            ?? ($data['shortname'] ?? '');
+
         $course->fill([
-            'name'       => $data['fullname'] ?? $data['shortname'],
-            'code'       => $data['shortname'] ?? '',
+            'name'       => $cleanName,
+            'code'       => $code,
             'start_date' => Carbon::createFromTimestamp($data['startdate'])->toDateString(),
             'end_date'   => Carbon::createFromTimestamp($data['enddate'])->toDateString(),
             'status'     => 'synced',
@@ -62,7 +66,7 @@ class MoodleService
         $course->save();
 
         if (!$course->programas()->exists()) {
-            $abbr = $this->extractAbbreviation($data['shortname']);
+            $abbr = $this->extractAbbreviation($cleanName);
             if ($abbr) {
                 if ($program = Programa::where('abreviatura', $abbr)->first()) {
                     $course->programas()->syncWithoutDetaching($program->id);
@@ -77,5 +81,37 @@ class MoodleService
     {
         $parts = preg_split('/\s+/', trim($shortname));
         return $parts[0] ?? null;
+    }
+
+    protected function cleanCourseName(string $fullname): string
+    {
+        $name = trim($fullname);
+        $parts = preg_split('/\s+/', $name);
+
+        $days = ['Lunes','Martes','Miércoles','Miercoles','Jueves','Viernes','Sábado','Sabado','Domingo'];
+        $months = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+        if ($parts && in_array($parts[0], $days)) {
+            array_shift($parts);
+        }
+
+        if ($parts && preg_match('/^\d{4}$/', end($parts))) {
+            array_pop($parts);
+        }
+
+        if ($parts && in_array(end($parts), $months)) {
+            array_pop($parts);
+        }
+
+        return implode(' ', $parts);
+    }
+
+    protected function extractCourseCode(string $summary): ?string
+    {
+        $text = strip_tags($summary);
+        if (preg_match('/[A-Z]{3,}[A-Z]*\d+/', $text, $m)) {
+            return $m[0];
+        }
+        return null;
     }
 }
