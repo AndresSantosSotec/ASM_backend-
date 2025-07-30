@@ -197,12 +197,23 @@ class CourseController extends Controller
         $data = $request->all();
 
         $ids = [];
+        // 1) Si vienen explícitamente moodle_ids: [1405, 1406, …]
         if (isset($data['moodle_ids']) && is_array($data['moodle_ids'])) {
             $ids = array_filter($data['moodle_ids'], fn($id) => is_numeric($id));
-        } elseif (isset($data[0]) && is_array($data)) {
+        }
+        // 2) Si vienen como array de objetos en raíz
+        elseif (isset($data[0]) && is_array($data)) {
             foreach ($data as $item) {
-                if (is_array($item) && isset($item['id']) && is_numeric($item['id'])) {
-                    $ids[] = $item['id'];
+                if (!is_array($item)) {
+                    continue;
+                }
+                // Prioridad: moodle_id
+                if (isset($item['moodle_id']) && is_numeric($item['moodle_id'])) {
+                    $ids[] = (int) $item['moodle_id'];
+                }
+                // Fallback: id
+                elseif (isset($item['id']) && is_numeric($item['id'])) {
+                    $ids[] = (int) $item['id'];
                 }
             }
         }
@@ -215,13 +226,14 @@ class CourseController extends Controller
         $synced = [];
 
         foreach ($ids as $moodleId) {
-            if ($course = $service->syncCourse((int)$moodleId)) {
+            if ($course = $service->syncCourse($moodleId)) {
                 $synced[] = $course;
             }
         }
 
         return response()->json($synced);
     }
+
 
     /**
      * Assign facilitator to course
