@@ -533,7 +533,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/collection-logs/{id}', [CollectionLogController::class, 'destroy']);
 
     // Moodle queries
+
+    Route::get('/moodle/consultas/{carnet?}', [MoodleConsultasController::class, 'cursosPorCarnet']);
+    Route::get('/moodle/consultas/aprobados/{carnet?}', [MoodleConsultasController::class, 'cursosAprobados']);
+    Route::get('/moodle/consultas/reprobados/{carnet?}', [MoodleConsultasController::class, 'cursosReprobados']);
+
     Route::get('/moodle/consultas', [MoodleConsultasController::class, 'cursosPorCarnet']);
+
 });
 
 Route::apiResource('rules', RuleController::class);
