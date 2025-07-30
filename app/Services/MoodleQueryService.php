@@ -63,11 +63,26 @@ SQL;
         return $this->connection->select($this->baseSql(), [$carnet]);
     }
 
+    protected function cleanCourseName(string $name): string
+    {
+        $month  = '(?:Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre)';
+        $day    = '(?:Lunes|Martes|Mi(?:é|e)rcoles|Jueves|Viernes|S(?:á|a)bado|Domingo)';
+        $regex  = '/^(?:' . $month . '\\s+)?(?:' . $day . '\\s+)?(?:\\d{4}\\s+)?(?:[A-Z]{3,}\\s+)?/iu';
+
+        return trim(preg_replace($regex, '', $name));
+    }
+
     public function cursosAprobados(string $carnet): array
     {
         $carnet = $this->normalizeCarnet($carnet);
-        $sql = $this->baseSql('AND gg.finalgrade > 61');
-        return $this->connection->select($sql, [$carnet]);
+        $sql = $this->baseSql('AND (gg.finalgrade > 61 OR cc.timecompleted IS NOT NULL)');
+        $results = $this->connection->select($sql, [$carnet]);
+
+        foreach ($results as $result) {
+            $result->coursename = $this->cleanCourseName($result->coursename);
+        }
+
+        return $results;
     }
 
     public function cursosReprobados(string $carnet): array
