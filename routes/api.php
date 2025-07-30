@@ -49,6 +49,7 @@ use App\Http\Controllers\Api\ReconciliationController;
 use App\Http\Controllers\Api\RuleController;
 use App\Http\Controllers\Api\CollectionLogController;
 use App\Http\Controllers\Api\PaymentRuleNotificationController;
+use App\Http\Controllers\Api\MoodleConsultasController;
 
 
 
@@ -530,6 +531,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/collection-logs/{id}', [CollectionLogController::class, 'show']);
     Route::put('/collection-logs/{id}', [CollectionLogController::class, 'update']);
     Route::delete('/collection-logs/{id}', [CollectionLogController::class, 'destroy']);
+
+    // Moodle queries
+    Route::get('/moodle/consultas/{carnet?}', [MoodleConsultasController::class, 'cursosPorCarnet']);
+    Route::get('/moodle/consultas/aprobados/{carnet?}', [MoodleConsultasController::class, 'cursosAprobados']);
+    Route::get('/moodle/consultas/reprobados/{carnet?}', [MoodleConsultasController::class, 'cursosReprobados']);
 });
 
 Route::apiResource('rules', RuleController::class);
