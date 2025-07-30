@@ -91,7 +91,7 @@ class MoodleService
         }
 
         $schedule     = $this->extractSchedule($originalName);
-        $cleanName    = $this->cleanCourseName($originalName);
+        $cleanName    = $this->cleanCourseName($originalName, $code);
 
         // Mapping area/créditos (default credits = 2)
         $mapping = config('course_areas')[$cleanName] ?? ['area' => 'common', 'credits' => 2];
@@ -157,18 +157,21 @@ class MoodleService
             $year      = $date->year;
         }
 
-        // Si el nombre limpio ya contiene el código, no lo duplicamos
-        if (strpos($cleanName, $code) !== false) {
+        // Extraer solo las letras del código (ej: BBA de BBA044)
+        $codePrefix = preg_replace('/\d+$/', '', $code);
+
+        // Si el nombre limpio ya contiene el prefijo del código, no lo agregamos
+        if (!empty($codePrefix) && strpos($cleanName, $codePrefix) === 0) {
             return "{$monthName} {$dayName} {$year} {$cleanName}";
         }
 
-        return "{$monthName} {$dayName} {$year} {$code} {$cleanName}";
+        return "{$monthName} {$dayName} {$year} {$codePrefix} {$cleanName}";
     }
 
     /**
      * Limpia el nombre completo quitando días, meses, años y prefijos de código
      */
-    protected function cleanCourseName(string $fullname): string
+    protected function cleanCourseName(string $fullname, string $code = ''): string
     {
         $days   = ['Lunes','Martes','Miércoles','Miercoles','Jueves','Viernes','Sábado','Sabado','Domingo'];
         $months = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -178,13 +181,19 @@ class MoodleService
         $pattern = '/\b(' . implode('|', $tokens) . '|\d{4})\b/u';
         $clean = preg_replace($pattern, '', $fullname);
 
-        // Remover códigos de curso duplicados (ej: BBA045 BBA)
-        $clean = preg_replace('/^[A-Z]{2,}\d*\s+[A-Z]{2,}\s*/', '', $clean);
+        // Remover CUALQUIER código completo con números al inicio (ej: BBA044, MBA123, etc.)
+        $clean = preg_replace('/^[A-Z]{2,}\d+\s+/', '', $clean);
 
-        // Remover códigos simples al inicio
-        $clean = preg_replace('/^[A-Z]{2,}\d*\s*/', '', $clean);
+        // Remover SOLO códigos de letras al inicio si coinciden con el código extraído
+        if ($code) {
+            $codePrefix = preg_replace('/\d+$/', '', $code);
+            if (!empty($codePrefix)) {
+                // Solo remover si está exactamente al inicio seguido de espacio o fin de cadena
+                $clean = preg_replace('/^' . preg_quote($codePrefix) . '(?=\s|$)/', '', $clean);
+            }
+        }
 
-        // Limpiar espacios múltiples
+        // Limpiar espacios múltiples y trim
         return trim(preg_replace('/\s+/', ' ', $clean));
     }
 
