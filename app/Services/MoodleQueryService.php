@@ -41,8 +41,8 @@ FROM mdl_user u
 JOIN mdl_user_enrolments ue ON ue.userid = u.id AND ue.status = 0
 JOIN mdl_enrol e ON e.id = ue.enrolid
 JOIN mdl_course c ON c.id = e.courseid
-JOIN mdl_grade_items gi ON gi.courseid = c.id AND gi.itemtype = 'course'
-JOIN mdl_grade_grades gg ON gg.userid = u.id AND gg.itemid = gi.id
+        LEFT JOIN mdl_grade_items gi ON gi.courseid = c.id AND gi.itemtype = 'course'
+        LEFT JOIN mdl_grade_grades gg ON gg.userid = u.id AND gg.itemid = gi.id
 LEFT JOIN mdl_course_completions cc ON cc.userid = u.id AND cc.course = c.id
 WHERE u.deleted = 0
   AND u.suspended = 0
@@ -60,7 +60,13 @@ SQL;
     public function cursosPorCarnet(string $carnet): array
     {
         $carnet = $this->normalizeCarnet($carnet);
-        return $this->connection->select($this->baseSql(), [$carnet]);
+        $results = $this->connection->select($this->baseSql(), [$carnet]);
+
+        foreach ($results as $result) {
+            $result->coursename = $this->cleanCourseName($result->coursename);
+        }
+
+        return $results;
     }
 
     protected function cleanCourseName(string $name): string
