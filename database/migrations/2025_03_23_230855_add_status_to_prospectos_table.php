@@ -11,16 +11,23 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('prospectos', function (Blueprint $table) {
-            $table->string('status')->nullable()->after('interes');
-        });
+        // Sólo agregar si no existe
+        if (! Schema::hasColumn('prospectos', 'status')) {
+            Schema::table('prospectos', function (Blueprint $table) {
+                $table->string('status')->nullable()->after('interes');
+            });
+        }
     }
-    
+
+    /**
+     * Reverse the migrations.
+     */
     public function down(): void
     {
-        Schema::table('prospectos', function (Blueprint $table) {
-            $table->dropColumn('status');
-        });
+        if (Schema::hasColumn('prospectos', 'status')) {
+            Schema::table('prospectos', function (Blueprint $table) {
+                $table->dropColumn('status');
+            });
+        }
     }
-    
 };
