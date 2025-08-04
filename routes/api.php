@@ -537,6 +537,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/moodle/consultas/{carnet?}', [MoodleConsultasController::class, 'cursosPorCarnet']);
     Route::get('/moodle/consultas/aprobados/{carnet?}', [MoodleConsultasController::class, 'cursosAprobados']);
     Route::get('/moodle/consultas/reprobados/{carnet?}', [MoodleConsultasController::class, 'cursosReprobados']);
+    Route::get('/moodle/consultas/estatus/{carnet?}', [MoodleConsultasController::class, 'estatusAcademico']);
 
     Route::get('/moodle/consultas', [MoodleConsultasController::class, 'cursosPorCarnet']);
 

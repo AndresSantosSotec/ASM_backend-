@@ -172,4 +172,99 @@ SQL;
 
         return $results;
     }
+
+    public function estatusAcademico(string $carnet): ?array
+    {
+        $carnet = $this->normalizeCarnet($carnet);
+
+        $sql = <<<'SQL'
+WITH 
+program_info AS (
+  SELECT
+    u.id AS userid,
+    u.username AS carnet,
+    CONCAT(u.firstname, ' ', u.lastname) AS fullname,
+    IF(u.suspended=0, 'Activo','Suspendido') AS estado,
+    MIN(ue.timestart) AS inscription_date,
+    c.name AS program
+  FROM mdl_user u
+  LEFT JOIN mdl_user_enrolments ue ON ue.userid = u.id
+  LEFT JOIN mdl_cohort_members cm ON cm.userid = u.id
+  LEFT JOIN mdl_cohort c          ON c.id      = cm.cohortid
+  WHERE LOWER(u.username) = :carnet
+  GROUP BY u.id, u.username, fullname, estado, c.name
+),
+grades AS (
+  SELECT
+    gg.userid,
+    gi.courseid,
+    ROUND(gg.finalgrade,2) AS grade
+  FROM mdl_grade_items gi
+  JOIN mdl_grade_grades gg ON gg.itemid = gi.id
+  WHERE gi.itemtype = 'course'
+    AND gg.userid = (SELECT userid FROM program_info)
+),
+completions AS (
+  SELECT
+    cc.course    AS courseid,
+    cc.timecompleted
+  FROM mdl_course_completions cc
+  WHERE cc.userid = (SELECT userid FROM program_info)
+    AND cc.timecompleted IS NOT NULL
+),
+summary AS (
+  SELECT
+    COUNT(*)                            AS total_courses,
+    SUM(grade >= 61)                    AS approved_courses,
+    SUM(grade <  61)                    AS failed_courses,
+    (COUNT(*) - SUM(grade IS NOT NULL)) AS in_progress_courses
+  FROM grades
+)
+SELECT
+  p.userid,
+  p.carnet,
+  p.fullname,
+  p.estado,
+  p.program,
+  DATE_FORMAT(p.inscription_date, '%Y-%m-%d') AS inscription_date,
+  FLOOR(TIMESTAMPDIFF(MONTH, p.inscription_date, CURDATE())/6) + 1 AS semester,
+  ROUND((SELECT AVG(grade) FROM grades),2) AS average_grade,
+  s.approved_courses,
+  s.failed_courses,
+  s.in_progress_courses,
+  IFNULL(
+    (SELECT SUM(c.credits)
+     FROM completions cc
+     JOIN mdl_course c ON c.id = cc.courseid),
+    0
+  ) AS credits_completed,
+  ROUND(s.approved_courses / NULLIF(s.total_courses,0) * 100,2) AS progress_percentage,
+  JSON_ARRAYAGG(
+    JSON_OBJECT(
+      'courseid',   g.courseid,
+      'coursename', (SELECT fullname FROM mdl_course WHERE id = g.courseid),
+      'period',     (SELECT DATE_FORMAT(startdate,'%Y-%m') FROM mdl_course WHERE id = g.courseid),
+      'state',      CASE
+                       WHEN g.grade >= 61 THEN 'Aprobado'
+                       WHEN g.grade <  61 THEN 'Reprobado'
+                       ELSE 'En curso'
+                     END,
+      'grade',      g.grade
+    )
+  ) AS courses
+FROM program_info p
+JOIN summary      s ON 1=1
+LEFT JOIN grades  g ON g.userid = p.userid;
+SQL;
+
+        $result = $this->connection->selectOne($sql, ['carnet' => $carnet]);
+
+        if (! $result) {
+            return null;
+        }
+
+        $result->courses = $result->courses ? json_decode($result->courses, true) : [];
+
+        return (array) $result;
+    }
 }
