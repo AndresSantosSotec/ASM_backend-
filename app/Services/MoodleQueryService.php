@@ -28,21 +28,54 @@ SELECT
     CONCAT(u.firstname, ' ', u.lastname) AS fullname,
     c.id AS courseid,
     c.fullname AS coursename,
+    ROUND(gg.finalgrade, 2) AS finalgrade,
+    CASE
+        WHEN gg.finalgrade >= 61 THEN 'Completado'
+        ELSE 'No completado'
+    END AS estado_curso
+FROM mdl_user u
+JOIN mdl_user_enrolments ue ON ue.userid = u.id
+JOIN mdl_enrol e ON e.id = ue.enrolid
+JOIN mdl_course c ON c.id = e.courseid
+JOIN mdl_grade_items gi ON gi.courseid = c.id AND gi.itemtype = 'course'
+JOIN mdl_grade_grades gg ON gg.userid = u.id AND gg.itemid = gi.id
+WHERE u.deleted = 0
+  AND gg.finalgrade IS NOT NULL
+  AND LOWER(u.username) = ?
+SQL;
+        if ($extraWhere) {
+            $sql .= "\n  $extraWhere";
+        }
+        $sql .= "\nORDER BY fullname, coursename";
+        return $sql;
+    }
+
+    // Método alternativo para todos los cursos (incluyendo los sin calificación)
+    protected function baseSqlComplete(string $extraWhere = ''): string
+    {
+        $sql = <<<'SQL'
+SELECT
+    u.id AS userid,
+    u.username AS carnet,
+    CONCAT(u.firstname, ' ', u.lastname) AS fullname,
+    c.id AS courseid,
+    c.fullname AS coursename,
     FROM_UNIXTIME(c.startdate) AS fecha_inicio_curso,
     FROM_UNIXTIME(c.enddate) AS fecha_fin_curso,
     ROUND(gg.finalgrade, 2) AS finalgrade,
     CASE
-        WHEN c.enddate > 0 AND UNIX_TIMESTAMP() > c.enddate AND gg.finalgrade > 61 THEN 'Aprobado'
-        WHEN c.enddate > 0 AND UNIX_TIMESTAMP() > c.enddate THEN 'Reprobado'
-        WHEN cc.timecompleted IS NOT NULL THEN 'Completado'
+        WHEN cc.timecompleted IS NOT NULL THEN 'Completado por criterios'
+        WHEN gg.finalgrade >= 61 THEN 'Completado'
+        WHEN gg.finalgrade IS NOT NULL AND gg.finalgrade < 61 THEN 'No completado'
+        WHEN c.enddate > 0 AND UNIX_TIMESTAMP() > c.enddate THEN 'Expirado'
         ELSE 'En curso'
     END AS estado_curso
 FROM mdl_user u
 JOIN mdl_user_enrolments ue ON ue.userid = u.id AND ue.status = 0
 JOIN mdl_enrol e ON e.id = ue.enrolid
 JOIN mdl_course c ON c.id = e.courseid
-        LEFT JOIN mdl_grade_items gi ON gi.courseid = c.id AND gi.itemtype = 'course'
-        LEFT JOIN mdl_grade_grades gg ON gg.userid = u.id AND gg.itemid = gi.id
+LEFT JOIN mdl_grade_items gi ON gi.courseid = c.id AND gi.itemtype = 'course'
+LEFT JOIN mdl_grade_grades gg ON gg.userid = u.id AND gg.itemid = gi.id
 LEFT JOIN mdl_course_completions cc ON cc.userid = u.id AND cc.course = c.id
 WHERE u.deleted = 0
   AND u.suspended = 0
@@ -60,7 +93,8 @@ SQL;
     public function cursosPorCarnet(string $carnet): array
     {
         $carnet = $this->normalizeCarnet($carnet);
-        $results = $this->connection->select($this->baseSql(), [$carnet]);
+        // Usar la consulta completa para mostrar todos los cursos
+        $results = $this->connection->select($this->baseSqlComplete(), [$carnet]);
 
         foreach ($results as $result) {
             $result->coursename = $this->cleanCourseName($result->coursename);
@@ -81,7 +115,8 @@ SQL;
     public function cursosAprobados(string $carnet): array
     {
         $carnet = $this->normalizeCarnet($carnet);
-        $sql = $this->baseSql('AND (gg.finalgrade > 61 OR cc.timecompleted IS NOT NULL)');
+        // Usar JOIN directo como en tu SQL que funciona, ignorando fechas
+        $sql = $this->baseSql('AND gg.finalgrade >= 61');
         $results = $this->connection->select($sql, [$carnet]);
 
         foreach ($results as $result) {
@@ -94,7 +129,47 @@ SQL;
     public function cursosReprobados(string $carnet): array
     {
         $carnet = $this->normalizeCarnet($carnet);
-        $sql = $this->baseSql('AND gg.finalgrade <= 61 AND c.enddate > 0 AND UNIX_TIMESTAMP() > c.enddate');
-        return $this->connection->select($sql, [$carnet]);
+        // Usar JOIN directo para obtener solo cursos con calificación reprobatoria
+        $sql = $this->baseSql('AND gg.finalgrade < 61');
+        $results = $this->connection->select($sql, [$carnet]);
+
+        foreach ($results as $result) {
+            $result->coursename = $this->cleanCourseName($result->coursename);
+        }
+
+        return $results;
+    }
+
+    // Método adicional para cursos completados por criterios (sin depender de calificaciones)
+    public function cursosCompletadosPorCriterios(string $carnet): array
+    {
+        $carnet = $this->normalizeCarnet($carnet);
+        $sql = <<<'SQL'
+SELECT
+    u.id AS userid,
+    u.username AS carnet,
+    CONCAT(u.firstname, ' ', u.lastname) AS fullname,
+    c.id AS courseid,
+    c.fullname AS coursename,
+    FROM_UNIXTIME(cc.timecompleted) AS fecha_completado,
+    'Completado por criterios' AS estado_curso
+FROM mdl_user u
+JOIN mdl_user_enrolments ue ON ue.userid = u.id
+JOIN mdl_enrol e ON e.id = ue.enrolid
+JOIN mdl_course c ON c.id = e.courseid
+JOIN mdl_course_completions cc ON cc.userid = u.id AND cc.course = c.id
+WHERE u.deleted = 0
+  AND cc.timecompleted IS NOT NULL
+  AND LOWER(u.username) = ?
+ORDER BY fullname, coursename
+SQL;
+
+        $results = $this->connection->select($sql, [$carnet]);
+
+        foreach ($results as $result) {
+            $result->coursename = $this->cleanCourseName($result->coursename);
+        }
+
+        return $results;
     }
 }
