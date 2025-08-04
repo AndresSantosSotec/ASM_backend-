@@ -50,5 +50,17 @@ class MoodleConsultasController extends Controller
 
         return response()->json(['data' => $results]);
     }
+
+    public function estatusAcademico(Request $request, $carnet = null)
+    {
+        $carnetInput = $carnet ?? $request->input('carnet');
+        if (!$carnetInput) {
+            return response()->json(['message' => 'El campo carnet es obligatorio'], 422);
+        }
+
+        $result = $this->queries->estatusAcademico($carnetInput);
+
+        return response()->json(['data' => $result]);
+    }
 }
 
