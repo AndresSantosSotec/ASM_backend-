@@ -34,7 +34,8 @@ class ColumnConfigurationController extends Controller
             "nota1",
             "nota2",
             "nota3",
-            "cierre"
+            "cierre",
+            "medio_conocimiento_institucion"
         ];
 
         // Obtener las configuraciones existentes para prospectos (id_tipo = 1)
@@ -74,12 +75,12 @@ class ColumnConfigurationController extends Controller
             'excelColumnName' => 'required|string|max:100',
             'columnNumber'    => 'required|integer|min:0',
         ]);
-    
+
         // Buscar si ya existe una configuración para esta columna (id_tipo = 1 para prospectos)
         $columnConfig = ColumnConfiguration::where('column_name', $validatedData['columnName'])
             ->where('id_tipo', 1)
             ->first();
-    
+
         if ($columnConfig) {
             // Actualizar la configuración existente
             $columnConfig->excel_column_name = $validatedData['excelColumnName'];
@@ -94,12 +95,12 @@ class ColumnConfigurationController extends Controller
                 'column_number'     => $validatedData['columnNumber'],
             ]);
         }
-    
+
         return response()->json([
             'message' => 'Configuración de columna guardada exitosamente',
         ]);
     }
-    
+
 
     /**
      * Actualizar de forma específica la configuración de una columna para 'prospectos'.

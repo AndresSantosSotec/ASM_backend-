@@ -178,7 +178,7 @@ SQL;
         $carnet = $this->normalizeCarnet($carnet);
 
         $sql = <<<'SQL'
-WITH 
+WITH
 program_info AS (
   SELECT
     u.id AS userid,
