@@ -33,6 +33,9 @@ class ProspectosDocumentoController extends Controller
         $path = $request->file('file')
             ->store('prospectos/' . $data['prospecto_id'], 'public');
 
+        // Generar URL pública del archivo
+        $url = Storage::disk('public')->url($path);
+
         // Crear registro
         $doc = ProspectosDocumento::create([
             'prospecto_id'   => $data['prospecto_id'],
@@ -41,6 +44,9 @@ class ProspectosDocumentoController extends Controller
             'subida_at'      => now(),
             'created_by'     => Auth::id(),
         ]);
+
+        // Incluir URL en la respuesta
+        $doc->url = $url;
 
         return response()->json($doc, 201);
     }
@@ -113,7 +119,11 @@ class ProspectosDocumentoController extends Controller
     {
         $docs = ProspectosDocumento::with('prospecto')
             ->where('prospecto_id', $prospectoId)
-            ->get();
+            ->get()
+            ->map(function ($doc) {
+                $doc->url = Storage::disk('public')->url($doc->ruta_archivo);
+                return $doc;
+            });
 
         return response()->json($docs);
     }
