@@ -20,6 +20,8 @@ class SendContractPdf extends Mailable
     public $inscripcion;
     public $mensualidad;
     public $convenio_id;
+    public $advisorName;
+    public $signature;
 
     public function __construct(
         $student,
@@ -28,7 +30,9 @@ class SendContractPdf extends Mailable
         $programa,
         $inscripcion,
         $mensualidad,
-        $convenio_id
+        $convenio_id,
+        $advisorName,
+        $signature = null
     ) {
         $this->student     = $student;
         $this->pdfData     = $pdfData;
@@ -37,6 +41,8 @@ class SendContractPdf extends Mailable
         $this->inscripcion = $inscripcion;
         $this->mensualidad = $mensualidad;
         $this->convenio_id = $convenio_id;
+        $this->advisorName = $advisorName;
+        $this->signature   = $signature;
     }
 
     public function envelope(): Envelope
@@ -57,7 +63,8 @@ class SendContractPdf extends Mailable
                 'inscripcion'  => $this->inscripcion,
                 'mensualidad'  => $this->mensualidad,
                 'convenio_id'  => $this->convenio_id,
-                'signature'    => $this->signature ?? null,
+                'signature'    => $this->signature,
+                'advisorName'  => $this->advisorName,
             ]
         );
     }
