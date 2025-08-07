@@ -452,8 +452,9 @@ class ProspectoController extends Controller
             ]);
             $pdfData = $pdf->output();
 
-            // Enviar correo
+            // Enviar correo al prospecto y en copia al asesor
             Mail::to($prospecto->correo_electronico)
+                ->cc($advisor->email)
                 ->send(new SendContractPdf(
                     $prospecto,
                     $pdfData,
@@ -462,7 +463,8 @@ class ProspectoController extends Controller
                     $estProg->inscripcion,
                     $estProg->cuota_mensual,
                     $estProg->convenio_id,
-                    $advisorName
+                    $advisorName,
+                    $request->signature
                 ));
 
             // ——— Aquí guardamos el registro en contactos_enviados ———
