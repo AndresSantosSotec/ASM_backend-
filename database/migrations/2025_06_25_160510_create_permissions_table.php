@@ -13,17 +13,19 @@ return new class extends Migration
     {
         Schema::create('permissions', function (Blueprint $table) {
             $table->increments('id');
-            $table->string('module', 50)->nullable();
-            $table->string('section', 50)->nullable();
-            $table->string('resource', 50)->nullable();
-            $table->string('action', 50)->nullable();
-            $table->enum('effect', ['allow', 'deny'])->nullable();
-            $table->text('description')->nullable();
-            $table->string('route_path')->nullable();
-            $table->string('file_name', 100)->nullable();
-            $table->integer('object_id')->nullable();
-            $table->boolean('is_enabled')->nullable()->default(true);
-            $table->enum('level', ['view', 'create', 'edit', 'delete', 'export'])->nullable();
+            $table->enum('action', ['view', 'create', 'edit', 'delete', 'export']);
+            $table->unsignedInteger('moduleview_id')->nullable();
+            $table->string('name')->unique();
+            $table->string('description')->nullable();
+            $table->timestamps();
+
+            $table->index('action');
+            $table->index('moduleview_id');
+            $table->foreign('moduleview_id')
+                ->references('id')
+                ->on('moduleviews')
+                ->onUpdate('cascade')
+                ->onDelete('cascade');
         });
     }
 
