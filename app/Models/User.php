@@ -119,4 +119,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(Commission::class, 'user_id');
     }
+
+    public function roles()
+    {
+        return $this->belongsToMany(Role::class, 'userroles')->withTimestamps();
+    }
 }
