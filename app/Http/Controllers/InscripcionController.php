@@ -124,7 +124,7 @@ class InscripcionController extends Controller
     public function show($id)
     {
         Log::info("⇨ InscripcionController@show — id recibido: {$id}");
-        $prospecto = Prospecto::with('programas')->find($id);
+    $prospecto = Prospecto::with(['programas', 'convenio'])->find($id);
         if (! $prospecto) {
             Log::warning("⇨ show — Prospecto no existe: {$id}");
             return response()->json(['error' => 'Ficha no encontrada'], 404);
@@ -164,7 +164,7 @@ class InscripcionController extends Controller
             ],
             'financieros' => [
                 'formaPago'        => $prospecto->metodo_pago,
-                'convenioId'       => $prospecto->convenio_pago_id,
+                'convenio'         => optional($prospecto->convenio)->nombre,
                 'inscripcion'      => $prospecto->monto_inscripcion,
                 'cuotaMensual'     => optional($prospecto->programas->first())->cuota_mensual,
                 'inversionTotal'   => optional($prospecto->programas->first())->inversion_total,
