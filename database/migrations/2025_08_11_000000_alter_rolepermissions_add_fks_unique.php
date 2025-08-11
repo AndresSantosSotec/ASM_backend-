@@ -2,24 +2,17 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('rolepermissions', function (Blueprint $table) {
-            try {
-                $table->dropForeign(['role_id']);
-            } catch (\Throwable $e) {
-                // ignore if foreign key does not exist
-            }
-            try {
-                $table->dropForeign(['permission_id']);
-            } catch (\Throwable $e) {
-                // ignore
-            }
-        });
+
+        DB::statement('ALTER TABLE rolepermissions DROP CONSTRAINT IF EXISTS rolepermissions_role_id_foreign');
+        DB::statement('ALTER TABLE rolepermissions DROP CONSTRAINT IF EXISTS rolepermissions_permission_id_foreign');
 
         Schema::table('rolepermissions', function (Blueprint $table) {
             $table->foreign('role_id')
@@ -40,14 +33,11 @@ return new class extends Migration
     {
         Schema::table('rolepermissions', function (Blueprint $table) {
             $table->dropUnique(['role_id', 'permission_id', 'scope']);
-            try {
-                $table->dropForeign(['role_id']);
-            } catch (\Throwable $e) {
-            }
-            try {
-                $table->dropForeign(['permission_id']);
-            } catch (\Throwable $e) {
-            }
+
         });
+
+        DB::statement('ALTER TABLE rolepermissions DROP CONSTRAINT IF EXISTS rolepermissions_role_id_foreign');
+        DB::statement('ALTER TABLE rolepermissions DROP CONSTRAINT IF EXISTS rolepermissions_permission_id_foreign');
+
     }
 };
