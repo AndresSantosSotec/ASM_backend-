@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\ProspectoController;
 use App\Http\Controllers\Api\ProgramaController;
 use App\Http\Controllers\Api\UbicacionController;
 use App\Http\Controllers\Api\RolController;
+use App\Http\Controllers\Api\RolePermissionController;
+use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\LoginController;
 use App\Http\Controllers\Api\SessionController;
@@ -264,7 +266,11 @@ Route::prefix('roles')->group(function () {
     Route::post('/', [RolController::class, 'store']);
     Route::put('/{id}', [RolController::class, 'update']);
     Route::delete('/{id}', [RolController::class, 'destroy']);
+    Route::get('/{role}/permissions', [RolePermissionController::class, 'index']);
+    Route::put('/{role}/permissions', [RolePermissionController::class, 'update']);
 });
+
+    Route::post('/permissions', [PermissionController::class, 'store']);
 
 // ----------------------
 // Usuarios

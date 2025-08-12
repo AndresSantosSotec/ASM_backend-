@@ -30,4 +30,11 @@ class Role extends Model
         'user_count'  => 'integer',
         'created_at'  => 'datetime',
     ];
+
+    public function permissions()
+    {
+        return $this->belongsToMany(Permission::class, 'rolepermissions')
+            ->withPivot('scope', 'assigned_at')
+            ->withTimestamps();
+    }
 }
