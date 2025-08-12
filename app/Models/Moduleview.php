@@ -23,8 +23,10 @@ class Moduleview extends Model
         'icon',
     ];
 
+
     public function permissions()
     {
         return $this->hasMany(Permission::class, 'moduleview_id');
     }
+
 }

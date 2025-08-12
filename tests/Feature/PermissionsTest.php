@@ -135,6 +135,7 @@ class PermissionsTest extends TestCase
         $this->assertEquals($count, Permission::count());
     }
 
+
     public function test_can_create_permission_via_api(): void
     {
         $mv = Moduleview::create([
@@ -158,4 +159,5 @@ class PermissionsTest extends TestCase
             'name' => 'view:/extra/view',
         ]);
     }
+
 }
