@@ -13,7 +13,7 @@ class ModulesViews extends Model
 
     protected $table = 'moduleviews';
     protected $primaryKey = 'id';
-    
+
     protected $fillable = [
         'module_id',
         'menu',
@@ -37,4 +37,11 @@ class ModulesViews extends Model
     {
         return $this->belongsTo(Modules::class, 'module_id');
     }
+
+    // 🔧 Relación correcta: permissions.route_path (FK) ↔ moduleviews.view_path (local key)
+    public function permissions()
+    {
+        return $this->hasMany(Permisos::class, 'route_path', 'view_path');
+    }
+
 }

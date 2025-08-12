@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Role;
-use App\Models\Permission;
-use App\Models\Moduleview;
+use App\Models\Permisos;
+use App\Models\ModulesViews;
 use Illuminate\Http\Request;
 
 class RolePermissionController extends Controller
@@ -15,14 +15,17 @@ class RolePermissionController extends Controller
      */
     public function index(Role $role)
     {
-        $moduleviews = Moduleview::with('permissions')->orderBy('menu')->orderBy('submenu')->get();
+        // Eager load con la relación corregida (permissions por route_path)
+        $moduleviews = ModulesViews::with('permissions')
+            ->orderBy('menu')->orderBy('submenu')->get();
+
         $assigned = $role->permissions->pluck('id')->toArray();
 
         $data = $moduleviews->map(function ($mv) use ($assigned) {
             $perms = [
-                'view' => false,
+                'view'   => false,
                 'create' => false,
-                'edit' => false,
+                'edit'   => false,
                 'delete' => false,
                 'export' => false,
             ];
@@ -35,10 +38,10 @@ class RolePermissionController extends Controller
 
             return [
                 'moduleview_id' => $mv->id,
-                'menu' => $mv->menu,
-                'submenu' => $mv->submenu,
-                'view_path' => $mv->view_path,
-                'permissions' => $perms,
+                'menu'          => $mv->menu,
+                'submenu'       => $mv->submenu,
+                'view_path'     => $mv->view_path,
+                'permissions'   => $perms,
             ];
         });
 
@@ -47,29 +50,50 @@ class RolePermissionController extends Controller
 
     /**
      * Update permissions for the given role.
+     *
+     * Espera payload:
+     * {
+     *   "permissions": [
+     *     { "moduleview_id": 12, "actions": ["view","create"] },
+     *     ...
+     *   ]
+     * }
      */
     public function update(Request $request, Role $role)
     {
         $validated = $request->validate([
             'permissions' => 'array',
             'permissions.*.moduleview_id' => 'required|exists:moduleviews,id',
-            'permissions.*.actions' => 'array',
-            'permissions.*.actions.*' => 'in:view,create,edit,delete,export',
+            'permissions.*.actions'       => 'array',
+            'permissions.*.actions.*'     => 'in:view,create,edit,delete,export',
         ]);
 
         $permissionIds = [];
+
         foreach ($validated['permissions'] ?? [] as $perm) {
             $moduleviewId = $perm['moduleview_id'];
-            $actions = $perm['actions'] ?? [];
+            $actions      = $perm['actions'] ?? [];
 
-            $ids = Permission::where('moduleview_id', $moduleviewId)
+            // 1) Obtener el view_path de esa moduleview
+            $mv = ModulesViews::find($moduleviewId);
+            if (!$mv) {
+                continue;
+            }
+
+            // 2) Buscar en permissions por (route_path = view_path) y action IN (...)
+            $ids = Permisos::query()
+                ->where('route_path', $mv->view_path)
                 ->whereIn('action', $actions)
+                ->where('is_enabled', true)
                 ->pluck('id')
                 ->toArray();
 
             $permissionIds = array_merge($permissionIds, $ids);
         }
 
+        $permissionIds = array_values(array_unique($permissionIds));
+
+        // Sync en la pivot del rol
         $role->permissions()->sync($permissionIds);
 
         return response()->json(['message' => 'Permisos actualizados']);

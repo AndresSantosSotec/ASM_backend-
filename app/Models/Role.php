@@ -9,13 +9,9 @@ class Role extends Model
 {
     use HasFactory;
 
-    // Nombre de la tabla (se asume que es "roles")
     protected $table = 'roles';
-
-    // Asume que la clave primaria es "id"
     protected $primaryKey = 'id';
 
-    // Campos asignables masivamente
     protected $fillable = [
         'name',
         'description',
@@ -24,17 +20,24 @@ class Role extends Model
         'type',
     ];
 
-    // Casteo de campos
     protected $casts = [
-        'is_system'   => 'boolean',
-        'user_count'  => 'integer',
-        'created_at'  => 'datetime',
+        'is_system'  => 'boolean',
+        'user_count' => 'integer',
+        'created_at' => 'datetime',
     ];
 
+    /**
+     * Permisos asociados al rol mediante la pivote rolepermissions.
+     */
     public function permissions()
     {
-        return $this->belongsToMany(Permission::class, 'rolepermissions')
-            ->withPivot('scope', 'assigned_at')
-            ->withTimestamps();
+        return $this->belongsToMany(
+            \App\Models\Permisos::class, // <- usa tu modelo Permisos
+            'rolepermissions',           // tabla pivote
+            'role_id',                   // FK de Role en la pivote
+            'permission_id'              // FK de Permisos en la pivote
+        )
+        ->withPivot('scope', 'assigned_at'); // campos extra de la pivote
+        // ->withTimestamps(); // SOLO si la pivote tiene created_at/updated_at
     }
 }
