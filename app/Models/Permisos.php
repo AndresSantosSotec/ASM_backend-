@@ -49,7 +49,7 @@ class Permisos extends Model
      */
     protected $casts = [
         'is_enabled' => 'boolean',
-        'level' => 'integer',
+        'level' => 'string',
         'object_id' => 'integer'
     ];
 
@@ -59,8 +59,8 @@ class Permisos extends Model
     public function users()
     {
         return $this->belongsToMany(User::class, 'userpermissions', 'permission_id', 'user_id')
-                   ->withPivot('assigned_at', 'scope')
-                   ->withTimestamps();
+            ->withPivot('assigned_at', 'scope')
+            ->withTimestamps();
     }
 
     /**
@@ -71,11 +71,25 @@ class Permisos extends Model
         return $query->where('is_enabled', true);
     }
 
+    // App/Models/Permisos.php
+    public function moduleView()
+    {
+        // FK en permissions: route_path  →  PK-like en moduleviews: view_path
+        return $this->belongsTo(ModulesViews::class, 'route_path', 'view_path');
+    }
+
+
     /**
      * Scope a query to filter by module.
      */
-    public function scopeModule($query, $module)
+    public function scopeModule($query, $moduleId = null)
     {
-        return $query->where('module', $module);
+        if ($moduleId === null) {
+            // Si lo invocan sin args (por el eager load fallido), no rompas.
+            return $query;
+        }
+        return $query->whereHas('moduleView', function ($q) use ($moduleId) {
+            $q->where('module_id', $moduleId);
+        });
     }
 }

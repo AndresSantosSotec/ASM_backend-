@@ -6,15 +6,15 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\UserPermisos;
 use App\Models\ModulesViews;
-use App\Models\Modules;
+use App\Models\Permisos;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 
 class UserPermisosController extends Controller
 {
     /**
      * Lista los permisos asignados a un usuario.
-     *
-     * Se espera recibir el parámetro 'user_id' por query.
      */
     public function index(Request $request)
     {
@@ -26,8 +26,7 @@ class UserPermisosController extends Controller
             ], 400);
         }
 
-        // Obtener los permisos asignados con la relación de la vista
-        $permissions = UserPermisos::with('permission.module.views') // Cargar las vistas relacionadas
+        $permissions = UserPermisos::with('permission.moduleView.module')
             ->where('user_id', $user_id)
             ->get();
 
@@ -40,54 +39,122 @@ class UserPermisosController extends Controller
 
     /**
      * Asigna o actualiza los permisos de un usuario.
-     *
-     * Se espera recibir en el request:
-     * - user_id: identificador del usuario.
-     * - permissions: arreglo con los id de las vistas (moduleviews) a asignar.
-     *
-     * Se eliminan los permisos previos y se insertan los nuevos de forma masiva.
+     * Espera:
+     * {
+     *   "user_id": 123,
+     *   "permissions": [ <moduleview_id>, <moduleview_id>, ... ]
+     * }
      */
     public function store(Request $request)
     {
-        $validated = $request->validate([
+        // Loguea el payload crudo para depurar 422
+        Log::info('UserPermisos.store payload', ['payload' => $request->all()]);
+
+        // Asegura que "permissions" sea un array plano de enteros
+        $incoming = $request->all();
+        $permissions = $incoming['permissions'] ?? [];
+        if (is_array($permissions)) {
+            $permissions = array_values(array_filter(array_map(function ($v) {
+                // Soporta objetos {id: X}, strings "X"
+                if (is_array($v) && isset($v['id'])) return (int)$v['id'];
+                return is_numeric($v) ? (int)$v : null;
+            }, $permissions), function ($v) {
+                return !is_null($v);
+            }));
+        } else {
+            $permissions = [];
+        }
+        $request->merge([
+            'permissions' => $permissions
+        ]);
+
+        // Valida
+        $validator = Validator::make($request->all(), [
             'user_id'       => 'required|exists:users,id',
             'permissions'   => 'required|array',
             'permissions.*' => 'exists:moduleviews,id'
         ]);
 
+        if ($validator->fails()) {
+            Log::warning('UserPermisos.store validation failed', [
+                'errors' => $validator->errors()->toArray()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Datos inválidos',
+                'errors'  => $validator->errors()
+            ], 422);
+        }
+
         DB::beginTransaction();
         try {
-            // Elimina todos los permisos previos para el usuario
-            UserPermisos::where('user_id', $validated['user_id'])->delete();
-            
-            // Preparamos la inserción masiva
+            $userId = (int) $request->input('user_id');
+            $moduleviewIds = $request->input('permissions', []);
+
+            // Limpia previos
+            UserPermisos::where('user_id', $userId)->delete();
+
+            // Mapea cada moduleview_id → permission.id (action='view')
             $now = now();
-            $data = [];
-            foreach ($validated['permissions'] as $permission_id) {
-                $data[] = [
-                    'user_id'       => $validated['user_id'],
-                    'permission_id' => $permission_id,
+            $rows = [];
+
+            foreach ($moduleviewIds as $mvId) {
+                $mv = ModulesViews::find($mvId);
+                if (!$mv) {
+                    // Safety: debería estar cubierto por la validación exists
+                    continue;
+                }
+
+                $permId = Permisos::query()
+                    ->where('route_path', $mv->view_path)
+                    ->where('action', 'view') // aquí defines qué action representa “acceso a la vista”
+                    ->where('is_enabled', true)
+                    ->value('id');
+
+                if (!$permId) {
+                    // Si no existe el permiso 'view' para esa vista, puedes:
+                    // (a) saltarlo, (b) crearlo, o (c) disparar 422
+                    Log::warning('No existe permiso view para la vista', [
+                        'moduleview_id' => $mvId,
+                        'view_path' => $mv->view_path
+                    ]);
+                    return response()->json([
+                        'success' => false,
+                        'message' => "No existe permiso 'view' para la vista seleccionada.",
+                        'errors'  => ['permissions' => ["moduleview_id {$mvId} no tiene permiso 'view' configurado en permissions."]]
+                    ], 422);
+                }
+
+                $rows[] = [
+                    'user_id'       => $userId,
+                    'permission_id' => $permId,  // <<<<< guarda permissions.id
                     'assigned_at'   => $now,
-                    'scope'         => 'self' // Valor permitido según la restricción CHECK
+                    'scope'         => 'self'
                 ];
             }
 
-            // Inserción en lote
-            UserPermisos::insert($data);
+            if (!empty($rows)) {
+                UserPermisos::insert($rows);
+            }
+
             DB::commit();
 
-            // Cargar los permisos asignados para actualizar la interfaz del frontend
-            $updatedPermissions = UserPermisos::with('permission.module.views') // Incluir vistas relacionadas
-                ->where('user_id', $validated['user_id'])
+            // Eager load correcto
+            $updated = UserPermisos::with('permission.moduleView.module')
+                ->where('user_id', $userId)
                 ->get();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Permisos actualizados correctamente.',
-                'data' => $updatedPermissions
+                'data'    => $updated
             ], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
+            Log::error('UserPermisos.store exception', [
+                'message' => $e->getMessage(),
+                'trace'   => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'Error al asignar los permisos.',
@@ -96,11 +163,6 @@ class UserPermisosController extends Controller
         }
     }
 
-    /**
-     * Actualiza un permiso específico del usuario (por ejemplo, para modificar el 'scope').
-     *
-     * @param int $id Id del registro de permiso.
-     */
     public function update(Request $request, $id)
     {
         $validated = $request->validate([
@@ -117,11 +179,6 @@ class UserPermisosController extends Controller
         ], 200);
     }
 
-    /**
-     * Elimina un permiso asignado al usuario.
-     *
-     * @param int $id Id del registro de permiso.
-     */
     public function destroy($id)
     {
         $userPermiso = UserPermisos::findOrFail($id);
