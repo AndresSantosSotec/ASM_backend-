@@ -134,4 +134,30 @@ class PermissionsTest extends TestCase
         Artisan::call('permissions:sync');
         $this->assertEquals($count, Permission::count());
     }
+
+
+    public function test_can_create_permission_via_api(): void
+    {
+        $mv = Moduleview::create([
+            'module_id' => 1,
+            'menu' => 'Extra',
+            'submenu' => 'View',
+            'view_path' => '/extra/view',
+        ]);
+
+        $user = User::first();
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/permissions', [
+            'moduleview_id' => $mv->id,
+            'action' => 'view',
+            'description' => 'test',
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('permissions', [
+            'moduleview_id' => $mv->id,
+            'name' => 'view:/extra/view',
+        ]);
+    }
+
 }

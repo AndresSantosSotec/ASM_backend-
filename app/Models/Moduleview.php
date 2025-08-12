@@ -22,4 +22,11 @@ class Moduleview extends Model
         'order_num',
         'icon',
     ];
+
+
+    public function permissions()
+    {
+        return $this->hasMany(Permission::class, 'moduleview_id');
+    }
+
 }
