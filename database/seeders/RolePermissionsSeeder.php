@@ -5,7 +5,6 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use App\Models\Role;
-use App\Models\Permission;
 
 class RolePermissionsSeeder extends Seeder
 {
@@ -14,14 +13,14 @@ class RolePermissionsSeeder extends Seeder
         $mapping = [
             'Administrador' => '*',
             'Docente' => [
-                '/docente%' => ['view','create','edit','export'],
+                '/docente%'   => ['view','create','edit','export'],
                 '/academico%' => ['view','create','edit','export'],
             ],
             'Estudiante' => [
                 '/estudiantes%' => ['view'],
             ],
             'Administrativo' => [
-                '/admin%' => ['view','create','edit','export'],
+                '/admin%'       => ['view','create','edit','export'],
                 '/inscripcion%' => ['view','create','edit','export'],
             ],
             'Finanzas' => [
@@ -31,18 +30,18 @@ class RolePermissionsSeeder extends Seeder
                 '/seguridad%' => ['view','create','edit','delete','export'],
             ],
             'Asesor' => [
-                '/gestion%' => ['view','create','edit','export'],
-                '/captura%' => ['view','create','edit','export'],
-                '/leads-asignados%' => ['view','create','edit','export'],
-                '/seguimiento%' => ['view','create','edit','export'],
+                '/gestion%'        => ['view','create','edit','export'],
+                '/captura%'        => ['view','create','edit','export'],
+                '/leads-asignados%'=> ['view','create','edit','export'],
+                '/seguimiento%'    => ['view','create','edit','export'],
                 '/importar-leads%' => ['view','create','edit','export'],
-                '/correos%' => ['view','create','edit','export'],
-                '/calendario%' => ['view','create','edit','export'],
+                '/correos%'        => ['view','create','edit','export'],
+                '/calendario%'     => ['view','create','edit','export'],
             ],
             'Marketing' => [
                 '/admin/plantillas-mailing%' => ['view','export'],
-                '/finanzas/reportes%' => ['view','export'],
-                '/admin%' => ['view','export'],
+                '/finanzas/reportes%'        => ['view','export'],
+                '/admin%'                    => ['view','export'],
             ],
         ];
 
@@ -52,26 +51,42 @@ class RolePermissionsSeeder extends Seeder
                 continue;
             }
 
-            $permissionIds = [];
+            // Si '*' → todos los permisos habilitados
             if ($rules === '*') {
-                $permissionIds = Permission::pluck('id')->all();
+                $permissionIds = DB::table('permissions')
+                    ->where('is_enabled', true)
+                    ->pluck('id')
+                    ->all();
             } else {
-                foreach ($rules as $prefix => $actions) {
+                $permissionIds = [];
+                foreach ($rules as $routePrefixLike => $actions) {
                     foreach ($actions as $action) {
-                        $ids = Permission::where('name', 'like', $action.':'.$prefix)->pluck('id')->all();
+                        // ¡Clave!: filtrar por action + route_path (ya no 'name')
+                        $ids = DB::table('permissions')
+                            ->where('action', $action)
+                            ->where('route_path', 'like', $routePrefixLike)
+                            ->where('is_enabled', true)
+                            ->pluck('id')
+                            ->all();
+
                         $permissionIds = array_merge($permissionIds, $ids);
                     }
                 }
-                $permissionIds = array_unique($permissionIds);
+                $permissionIds = array_values(array_unique($permissionIds));
             }
 
+            // Upsert en tabla pivote rolepermissions
             foreach ($permissionIds as $pid) {
-                DB::table('rolepermissions')->upsert([
-                    'role_id' => $role->id,
-                    'permission_id' => $pid,
-                    'scope' => 'global',
-                    'assigned_at' => now(),
-                ], ['role_id','permission_id','scope'], ['assigned_at']);
+                DB::table('rolepermissions')->upsert(
+                    [[
+                        'role_id'      => $role->id,
+                        'permission_id'=> $pid,
+                        'scope'        => 'global',
+                        'assigned_at'  => now(),
+                    ]],
+                    ['role_id','permission_id','scope'], // clave de conflicto
+                    ['assigned_at']                      // columnas a actualizar
+                );
             }
         }
     }
