@@ -10,25 +10,50 @@ use Carbon\Carbon;
 class CitasController extends Controller
 {
     // Listar todas las citas (filtrando según el usuario autenticado)
-    public function index()
-    {
-        $user = auth()->user();
-        if (!$user) {
-            return response()->json(['error' => 'Usuario no autenticado'], 401);
-        }
-        // Si el usuario es administrador, se muestran todas; de lo contrario, las creadas por él.
-        $isAdmin = strtolower($user->rol) === 'administrador';
-        if ($isAdmin) {
-            $citas = Citas::all();
-        } else {
-            $citas = Citas::where('createby', $user->id)->get();
-        }
+    // app/Http/Controllers/Api/CitasController.php
 
-        return response()->json([
-            'message' => 'Datos de citas obtenidos con éxito',
-            'data'    => $citas,
-        ]);
+    public function index()
+{
+    $user = auth()->user();
+    if (!$user) {
+        return response()->json(['error' => 'Usuario no autenticado'], 401);
     }
+
+    $isAdmin = strtolower($user->rol) === 'administrador';
+
+    $q = Citas::with(['creador']); // sin columns forzados
+
+    $citas = $isAdmin
+        ? $q->get()
+        : $q->where('createby', $user->id)->get();
+
+    // Normaliza el output para el frontend:
+    $out = $citas->map(function ($cita) {
+        $u = $cita->creador;
+        // intenta varios posibles nombres de columna
+        $nombre = $u->nombre ?? $u->name ?? $u->username ?? $u->email ?? null;
+
+        return [
+            'id'             => $cita->id,
+            'datecita'       => $cita->datecita,
+            'descricita'     => $cita->descricita,
+            'createby'       => $cita->createby,
+            'creado_por'     => $u ? [
+                'id'    => $u->id,
+                'nombre'=> $nombre,
+                'rol'   => $u->rol ?? null,
+            ] : null,
+            'fecha_creacion' => optional($cita->created_at)->toDateTimeString(),
+        ];
+    });
+
+    return response()->json([
+        'message' => 'Datos de citas obtenidos con éxito',
+        'data'    => $out,
+    ]);
+}
+
+
 
     // Mostrar una sola cita
     public function show($id)

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\User; // relación con el usuario
 
 class Citas extends Model
 {
@@ -27,5 +28,13 @@ class Citas extends Model
         'created_at',
         'updated_at'
     ];
+
+    // Relación: usuario que creó la cita
+    public function creador()
+    {
+        // si tu FK es createby -> users.id:
+        return $this->belongsTo(User::class, 'createby', 'id'); // SIN ->select(...)
+    }
+
 
 }
