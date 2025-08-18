@@ -18,53 +18,45 @@
             color: white;
         }
 
-        .header img {
-            max-height: 40px;
-        }
+        .header img { max-height: 40px; }
 
-        .gold-line {
-            height: 4px;
-            background: #b08b4f;
-        }
+        .gold-line { height: 4px; background: #b08b4f; }
 
-        .content {
-            padding: 30px;
-            line-height: 1.4;
-        }
+        .content { padding: 30px; line-height: 1.4; }
 
-        .title {
-            text-align: center;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
+        .title { text-align: center; font-weight: bold; margin-bottom: 10px; }
 
-        .sub {
-            text-align: center;
-            font-size: 10px;
-            color: #666;
-            margin-bottom: 20px;
-        }
+        .sub { text-align: center; font-size: 10px; color: #666; margin-bottom: 20px; }
 
-        .signature-block {
+        /* === FIRMAS: versión compatible con PDF === */
+        .signature-table {
+            width: 100%;
             margin-top: 40px;
-            display: flex;
-            justify-content: space-between;
+            border-collapse: collapse;
+            table-layout: fixed;
+            page-break-inside: avoid;
         }
-
-        .sig {
-            width: 45%;
+        .signature-table td {
+            width: 50%;
             text-align: center;
+            vertical-align: bottom; /* alinea ambos al fondo */
+            padding: 0 10px;
         }
-
+        /* Caja que reserva espaço para la firma (igual altura en ambos) */
+        .sig-box {
+            height: 110px;              /* ajusta si tu imagen es más grande */
+            line-height: 110px;         /* fallback simple para centrar si no hay imagen */
+        }
+        .sig-box img {
+            max-height: 100px;          /* cabe dentro de la caja */
+            display: inline-block;
+            vertical-align: middle;
+        }
         .sig-line {
             border-top: 1px solid #000;
-            margin: 60px 0 10px;
+            margin: 10px 0 6px;
         }
-
-        .sig-label {
-            font-size: 10px;
-            color: #666;
-        }
+        .sig-label { font-size: 10px; color: #666; }
     </style>
 </head>
 
@@ -191,22 +183,26 @@
             firmo en señal de conformidad con este contrato.
         </p>
 
-        <div class="signature-block">
-            <div class="sig">
-
-                <div class="sig-line"></div>
-                <div class="sig-label">{{ $student->nombre_completo }}</div>
-            </div>
-            <div class="sig">
-                @if (!empty($signature))
-                    <img src="{{ $signature }}" style="max-height:100px;" alt="Firma estudiante">
-                @endif
-                <div class="sig-line"></div>
-                <div class="sig-label">{{ $advisorName ?? 'Asesor Educativo' }}</div>
-            </div>
-        </div>
+        <!-- FIRMAS: tabla de dos columnas -->
+        <table class="signature-table">
+            <tr>
+                <td>
+                    <div class="sig-box"><!-- vacío a propósito para reservar espacio --></div>
+                    <div class="sig-line"></div>
+                    <div class="sig-label">{{ $student->nombre_completo }}</div>
+                </td>
+                <td>
+                    <div class="sig-box">
+                        @if (!empty($signature))
+                            <img src="{{ $signature }}" alt="Firma estudiante">
+                        @endif
+                    </div>
+                    <div class="sig-line"></div>
+                    <div class="sig-label">{{ $advisorName ?? 'Asesor Educativo' }}</div>
+                </td>
+            </tr>
+        </table>
     </div>
 
 </body>
-
 </html>
