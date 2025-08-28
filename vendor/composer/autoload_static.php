@@ -364,13 +364,13 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         ),
         'Spatie\\LaravelIgnition\\' => 
         array (
-            0 => __DIR__ . '/..' . '/spatie/laravel-ignition/src',
-            1 => __DIR__ . '/..' . '/spatie/error-solutions/legacy/laravel-ignition',
+            0 => __DIR__ . '/..' . '/spatie/error-solutions/legacy/laravel-ignition',
+            1 => __DIR__ . '/..' . '/spatie/laravel-ignition/src',
         ),
         'Spatie\\Ignition\\' => 
         array (
-            0 => __DIR__ . '/..' . '/spatie/ignition/src',
-            1 => __DIR__ . '/..' . '/spatie/error-solutions/legacy/ignition',
+            0 => __DIR__ . '/..' . '/spatie/error-solutions/legacy/ignition',
+            1 => __DIR__ . '/..' . '/spatie/ignition/src',
         ),
         'Spatie\\FlareClient\\' => 
         array (
@@ -730,6 +730,7 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         'App\\Http\\Controllers\\Api\\PaymentPlanController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/PaymentPlanController.php',
         'App\\Http\\Controllers\\Api\\PaymentRuleNotificationController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/PaymentRuleNotificationController.php',
         'App\\Http\\Controllers\\Api\\PeriodoInscripcionController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/PeriodoInscripcionController.php',
+        'App\\Http\\Controllers\\Api\\PermissionController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/PermissionController.php',
         'App\\Http\\Controllers\\Api\\PlanPagosController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/PlanPagosController.php',
         'App\\Http\\Controllers\\Api\\ProgramaController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ProgramaController.php',
         'App\\Http\\Controllers\\Api\\ProspectoController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ProspectoController.php',
@@ -739,6 +740,7 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         'App\\Http\\Controllers\\Api\\ReconciliationController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ReconciliationController.php',
         'App\\Http\\Controllers\\Api\\ReportsController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ReportsController.php',
         'App\\Http\\Controllers\\Api\\RolController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/RolController.php',
+        'App\\Http\\Controllers\\Api\\RolePermissionController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/RolePermissionController.php',
         'App\\Http\\Controllers\\Api\\RuleController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/RuleController.php',
         'App\\Http\\Controllers\\Api\\SessionController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/SessionController.php',
         'App\\Http\\Controllers\\Api\\StudentController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/StudentController.php',
@@ -837,6 +839,7 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         'App\\Providers\\BroadcastServiceProvider' => __DIR__ . '/../..' . '/app/Providers/BroadcastServiceProvider.php',
         'App\\Providers\\EventServiceProvider' => __DIR__ . '/../..' . '/app/Providers/EventServiceProvider.php',
         'App\\Providers\\RouteServiceProvider' => __DIR__ . '/../..' . '/app/Providers/RouteServiceProvider.php',
+        'App\\Services\\EffectivePermissionsService' => __DIR__ . '/../..' . '/app/Services/EffectivePermissionsService.php',
         'App\\Services\\MoodleQueryService' => __DIR__ . '/../..' . '/app/Services/MoodleQueryService.php',
         'App\\Services\\MoodleService' => __DIR__ . '/../..' . '/app/Services/MoodleService.php',
         'App\\Services\\PermissionService' => __DIR__ . '/../..' . '/app/Services/PermissionService.php',
@@ -992,7 +995,6 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         'Database\\Seeders\\PermissionsSeeder' => __DIR__ . '/../..' . '/database/seeders/PermissionsSeeder.php',
         'Database\\Seeders\\PrecioProgramasSeeder' => __DIR__ . '/../..' . '/database/seeders/PrecioProgramasSeeder.php',
         'Database\\Seeders\\ProgramasSeeder' => __DIR__ . '/../..' . '/database/seeders/ProgramasSeeder.php',
-        'Database\\Seeders\\RankingDemoSeeder' => __DIR__ . '/../..' . '/database/seeders/RankingDemoSeeder.php',
         'Database\\Seeders\\RolePermissionsSeeder' => __DIR__ . '/../..' . '/database/seeders/RolePermissionsSeeder.php',
         'DateError' => __DIR__ . '/..' . '/symfony/polyfill-php83/Resources/stubs/DateError.php',
         'DateException' => __DIR__ . '/..' . '/symfony/polyfill-php83/Resources/stubs/DateException.php',

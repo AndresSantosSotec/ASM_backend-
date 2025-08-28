@@ -21,3 +21,9 @@ yarn-error.log
 package-lock.json
 
 
+/vendor
+/vendor/*
+/node_modules
+/public/build
+/storage
+/.env, .env.* (ya tienes .env en .gitignore)
