@@ -53,6 +53,10 @@ use App\Http\Controllers\Api\CollectionLogController;
 use App\Http\Controllers\Api\PaymentRuleNotificationController;
 use App\Http\Controllers\Api\MoodleConsultasController;
 
+use App\Http\Controllers\Api\PaymentRuleBlockingRuleController;
+use App\Http\Controllers\Api\PaymentExceptionCategoryController;
+use App\Http\Controllers\Api\PaymentGatewayController;
+
 
 
 
@@ -124,7 +128,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('estudiantes')->group(function () {
         // POST /api/estudiantes/import
         Route::post('import', [\App\Http\Controllers\Api\EstudiantesImportController::class, 'uploadExcel'])
-             ->name('estudiantes.import');
+            ->name('estudiantes.import');
     });
 
 
@@ -270,7 +274,7 @@ Route::prefix('roles')->group(function () {
     Route::put('/{role}/permissions', [RolePermissionController::class, 'update']);
 });
 
-    Route::post('/permissions', [PermissionController::class, 'store']);
+Route::post('/permissions', [PermissionController::class, 'store']);
 
 // ----------------------
 // Usuarios
@@ -459,11 +463,11 @@ Route::prefix('courses')->group(function () {
     // 4) Finalmente, las rutas REST estándar show/update/delete
     //    con restricción whereNumber para que no atrapen `available-for-students`
     Route::get('/{course}',    [CourseController::class, 'show'])
-         ->whereNumber('course');
+        ->whereNumber('course');
     Route::put('/{course}',    [CourseController::class, 'update'])
-         ->whereNumber('course');
+        ->whereNumber('course');
     Route::delete('/{course}', [CourseController::class, 'destroy'])
-         ->whereNumber('course');
+        ->whereNumber('course');
 });
 
 
@@ -488,7 +492,6 @@ Route::middleware('auth:sanctum')->group(function () {
     //paymatent Edit
 
 
-
     Route::prefix('payment-plans')->group(function () {
         Route::get('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'index']);
         Route::post('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'store']);
@@ -505,16 +508,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/payment-rules', [RuleController::class, 'index']);
     Route::post('/payment-rules', [RuleController::class, 'store']);
+    Route::get('/payment-rules/{rule}', [RuleController::class, 'show']); // <- NUEVO
     Route::put('/payment-rules/{rule}', [RuleController::class, 'update']);
-
-
-    Route::post('/payment-rules', [RuleController::class, 'store']);
 
     Route::post('/payment-rules/{rule}/notifications', [PaymentRuleNotificationController::class, 'store']);
     Route::put('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'update']);
     Route::delete('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'destroy']);
-
-
+    Route::get('/payment-rules/{rule}/notifications', [PaymentRuleNotificationController::class, 'index']);
+    Route::get('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'show']);
 
     // Planes de pago reales
     Route::get('/prospectos/{id}/cuotas', [\App\Http\Controllers\Api\CuotaController::class, 'byProspecto']);
@@ -547,6 +548,55 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/moodle/consultas', [MoodleConsultasController::class, 'cursosPorCarnet']);
 
+    // ----------------------
+    // REGLAS DE BLOQUEO (PaymentRuleBlockingRule)
+    // ----------------------
+    Route::prefix('payment-rules/{rule}/blocking-rules')->group(function () {
+        Route::get('/', [PaymentRuleBlockingRuleController::class, 'index']);
+        Route::post('/', [PaymentRuleBlockingRuleController::class, 'store']);
+        Route::get('/{blockingRule}', [PaymentRuleBlockingRuleController::class, 'show']);
+        Route::put('/{blockingRule}', [PaymentRuleBlockingRuleController::class, 'update']);
+        Route::delete('/{blockingRule}', [PaymentRuleBlockingRuleController::class, 'destroy']);
+
+        // Opcional: cambiar estado (activar/desactivar)
+        Route::patch('/{blockingRule}/toggle-status', [PaymentRuleBlockingRuleController::class, 'toggleStatus']);
+    });
+
+    // *** PASARELAS DE PAGO ***
+    Route::prefix('payment-gateways')->group(function () {
+        Route::get('/', [PaymentGatewayController::class, 'index']);
+        Route::post('/', [PaymentGatewayController::class, 'store']);
+        Route::get('/active', [PaymentGatewayController::class, 'activeGateways']);
+        Route::get('/{gateway}', [PaymentGatewayController::class, 'show']);
+        Route::put('/{gateway}', [PaymentGatewayController::class, 'update']);
+        Route::delete('/{gateway}', [PaymentGatewayController::class, 'destroy']);
+        Route::patch('/{gateway}/toggle-status', [PaymentGatewayController::class, 'toggleStatus']);
+    });
+
+    // *** CATEGORÍAS DE EXCEPCIÓN ***
+    Route::prefix('payment-exception-categories')->group(function () {
+        // CRUD básico
+        Route::get('/', [PaymentExceptionCategoryController::class, 'index']);
+        Route::post('/', [PaymentExceptionCategoryController::class, 'store']);
+        Route::get('/{category}', [PaymentExceptionCategoryController::class, 'show']);
+        Route::put('/{category}', [PaymentExceptionCategoryController::class, 'update']);
+        Route::delete('/{category}', [PaymentExceptionCategoryController::class, 'destroy']);
+
+        // Activar/desactivar
+        Route::patch('/{category}/toggle-status', [PaymentExceptionCategoryController::class, 'toggleStatus']);
+
+        // Gestión de asignaciones a prospectos
+        Route::post('/{category}/assign-prospecto', [PaymentExceptionCategoryController::class, 'assignToProspecto']);
+        Route::delete('/{category}/remove-prospecto', [PaymentExceptionCategoryController::class, 'removeFromProspecto']);
+        Route::get('/{category}/assigned-prospectos', [PaymentExceptionCategoryController::class, 'assignedProspectos']);
+
+        // Método legacy (mantenido por compatibilidad)
+        Route::post('/{category}/assign-student', [PaymentExceptionCategoryController::class, 'assignToStudent']);
+    });
+    // Regla aplicable por días vencidos (opcional, si usas esta lógica en backend)
+    Route::get('/payment-rules/{rule}/blocking-rules/applicable', [PaymentRuleBlockingRuleController::class, 'getApplicableRules']);
 });
 
 Route::apiResource('rules', RuleController::class);
+
+Route::get('/payment-rules-current', [RuleController::class, 'current']);//Metodo Global para purebas de las api

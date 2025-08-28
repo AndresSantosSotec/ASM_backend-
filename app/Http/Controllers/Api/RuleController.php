@@ -33,4 +33,21 @@ class RuleController extends Controller
         $rule = PaymentRule::create($data);
         return response()->json($rule, 201);
     }
+
+    public function show(PaymentRule $rule)
+    {
+        // Si luego necesitas las notificaciones: $rule->load('notifications');
+        return response()->json($rule);
+    }
+    public function current()
+    {
+        // Si tu app tiene una sola regla vigente, exponemos la última creada.
+        $rule = PaymentRule::latest('id')->first();
+
+        if (!$rule) {
+            return response()->json(['message' => 'No hay regla configurada.'], 404);
+        }
+
+        return response()->json($rule);
+    }
 }

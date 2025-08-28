@@ -12,6 +12,8 @@ use App\Models\Payment;
 use App\Models\PaymentPlan;
 use App\Models\CollectionLog;
 use App\Models\ReconciliationRecord;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Carbon\Carbon;
 
 
 class Prospecto extends Model
@@ -200,9 +202,9 @@ class Prospecto extends Model
     public static function generateCarnet(): string
     {
         $year = now()->year;
-        $prefix = 'ASM'.$year;
+        $prefix = 'ASM' . $year;
 
-        $max = static::where('carnet', 'like', $prefix.'%')
+        $max = static::where('carnet', 'like', $prefix . '%')
             ->pluck('carnet')
             ->map(function ($carnet) use ($prefix) {
                 $num = (int) preg_replace('/\D/', '', substr($carnet, strlen($prefix)));
@@ -212,7 +214,7 @@ class Prospecto extends Model
 
         $correlative = ($max ?? 0) + 1;
 
-        return $prefix.$correlative;
+        return $prefix . $correlative;
     }
 
     public function getBalance(): float
@@ -231,5 +233,86 @@ class Prospecto extends Model
             ->whereDate('fecha_vencimiento', '<', now())
 
             ->exists();
+    }
+
+    public function exceptionCategories(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            PaymentExceptionCategory::class,
+            'prospecto_exception_categories',
+            'prospecto_id',
+            'payment_exception_category_id'
+        )
+            ->withPivot('effective_from', 'effective_until', 'notes')
+            ->withTimestamps();
+    }
+
+    public function activeExceptionCategories(Carbon $date = null): BelongsToMany
+    {
+        $date = $date ?? now();
+
+        return $this->exceptionCategories()
+            ->where('payment_exception_categories.active', true)
+            ->wherePivot(function ($query) use ($date) {
+                $query->where(function ($q) use ($date) {
+                    // Sin fecha de inicio O fecha de inicio <= fecha actual
+                    $q->whereNull('effective_from')
+                        ->orWhere('effective_from', '<=', $date);
+                })
+                    ->where(function ($q) use ($date) {
+                        // Sin fecha de fin O fecha de fin >= fecha actual
+                        $q->whereNull('effective_until')
+                            ->orWhere('effective_until', '>=', $date);
+                    });
+            });
+    }
+    /**
+     * Verifica si el prospecto tiene alguna excepción activa para una regla específica
+     */
+    public function hasActiveException(string $ruleType, Carbon $date = null): bool
+    {
+        $activeCategories = $this->activeExceptionCategories($date)->get();
+
+        switch ($ruleType) {
+            case 'late_fee':
+                return $activeCategories->contains('skip_late_fee', true);
+            case 'partial_payments':
+                return $activeCategories->contains('allow_partial_payments', true);
+            case 'blocking':
+                return $activeCategories->contains('skip_blocking', true);
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Obtiene el día de vencimiento personalizado si tiene excepción activa
+     */
+    public function getCustomDueDay(Carbon $date = null): ?int
+    {
+        $activeCategories = $this->activeExceptionCategories($date)->get();
+
+        // Retorna el primer día personalizado encontrado
+        foreach ($activeCategories as $category) {
+            if ($category->due_day_override) {
+                return $category->due_day_override;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Verifica si está bloqueado considerando excepciones
+     */
+    public function isBlockedWithExceptions(): bool
+    {
+        // Si tiene excepción de bloqueo activa, nunca está bloqueado
+        if ($this->hasActiveException('blocking')) {
+            return false;
+        }
+
+        // Usar la lógica original de bloqueo
+        return $this->isBlocked();
     }
 }

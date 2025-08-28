@@ -48,4 +48,22 @@ class PaymentRuleNotificationController extends Controller
 
         return response()->json(null, 204);
     }
+
+    public function index($ruleId)
+    {
+        $rule = PaymentRule::findOrFail($ruleId);
+        $notifications = $rule->notifications()->get();
+
+        return response()->json(['data' => $notifications]);
+    }
+
+    public function show($ruleId, $notificationId)
+    {
+        $rule = PaymentRule::findOrFail($ruleId);
+        $notification = $rule->notifications()->findOrFail($notificationId);
+
+        return response()->json(['data' => $notification]);
+    }
+
+
 }
