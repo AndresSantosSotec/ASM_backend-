@@ -23,6 +23,7 @@ class User extends Authenticatable
         'password_hash',
         'first_name',
         'last_name',
+        'carnet',
         'is_active',
         'email_verified',
         'mfa_enabled',
@@ -123,5 +124,62 @@ class User extends Authenticatable
     public function roles()
     {
         return $this->belongsToMany(Role::class, 'userroles')->withTimestamps();
+    }
+
+    /**
+     * 🔥 RELACIÓN: User → Prospecto a través del carnet
+     */
+    public function prospecto()
+    {
+        return $this->hasOne(\App\Models\Prospecto::class, 'carnet', 'carnet');
+    }
+
+    /**
+     * 🔥 MÉTODO PARA OBTENER CUOTAS PENDIENTES
+     */
+    public function getCuotasPendientesAttribute()
+    {
+        if (!$this->carnet) {
+            return collect();
+        }
+
+        return \App\Models\CuotaProgramaEstudiante::whereHas('estudiantePrograma.prospecto', function ($query) {
+            $query->where('carnet', $this->carnet);
+        })
+        ->where('estado', 'pendiente')
+        ->with(['estudiantePrograma.programa'])
+        ->get();
+    }
+
+    /**
+     * 🔥 MÉTODO PARA OBTENER TODAS LAS CUOTAS
+     */
+    public function getTodasLasCuotasAttribute()
+    {
+        if (!$this->carnet) {
+            return collect();
+        }
+
+        return \App\Models\CuotaProgramaEstudiante::whereHas('estudiantePrograma.prospecto', function ($query) {
+            $query->where('carnet', $this->carnet);
+        })
+        ->with(['estudiantePrograma.programa', 'pagos'])
+        ->get();
+    }
+
+    /**
+     * 🔥 MÉTODO PARA OBTENER PROGRAMAS DEL ESTUDIANTE
+     */
+    public function getProgramasEstudianteAttribute()
+    {
+        if (!$this->carnet) {
+            return collect();
+        }
+
+        return \App\Models\EstudiantePrograma::whereHas('prospecto', function ($query) {
+            $query->where('carnet', $this->carnet);
+        })
+        ->with(['programa'])
+        ->get();
     }
 }

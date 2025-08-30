@@ -45,26 +45,78 @@ use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\ReportsController;
-
 use App\Http\Controllers\Api\ReconciliationController;
-
 use App\Http\Controllers\Api\RuleController;
 use App\Http\Controllers\Api\CollectionLogController;
 use App\Http\Controllers\Api\PaymentRuleNotificationController;
 use App\Http\Controllers\Api\MoodleConsultasController;
-
 use App\Http\Controllers\Api\PaymentRuleBlockingRuleController;
 use App\Http\Controllers\Api\PaymentExceptionCategoryController;
 use App\Http\Controllers\Api\PaymentGatewayController;
-
-
-
+use App\Http\Controllers\Api\EstudiantePagosController;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Rutas Públicas
  */
 // Ping para verificar que el API esté activo
 Route::get('/ping', fn() => response()->json(['message' => 'pong!']));
+
+route::get('/status', function () {
+    return response()->json(['status' => 'API is running']);
+});
+
+Route::get('/version', function () {
+    return response()->json(['version' => '1.0.0']);
+});
+
+Route::get('/time', function () {
+    return response()->json(['time' => now()->toDateTimeString()]);
+});
+
+Route::get('/health', function () {
+    try {
+        DB::connection()->getPdo();
+
+        $basic = [
+            'status' => 'API is healthy',
+            'ok'     => true,
+            'time'   => now()->toDateTimeString(),
+            // 'version'=> '1.0.0',
+        ];
+
+        // Entorno de desarrollo: información ampliada (no secretos)
+        if (app()->environment(['local', 'testing'])) {
+            $basic['meta'] = [
+                'app'     => config('app.name'),
+                // 'laravel' => app()->version(),
+                // 'php'     => PHP_VERSION,
+                'db'      => [
+                    'connected' => true,
+                ],
+            ];
+
+            Log::info('Healthcheck successful (dev)', [
+                'env' => app()->environment(),
+                'ok'  => true,
+            ]);
+        } else {
+            // Producción: mínima y segura
+            Log::info('Healthcheck successful', ['ok' => true]);
+        }
+
+        return response()->json($basic);
+    } catch (\Throwable $e) {
+        Log::error('Healthcheck failed', ['error' => $e->getMessage()]);
+
+        return response()->json([
+            'status' => 'API is unhealthy',
+            'ok'     => false,
+            'time'   => now()->toDateTimeString(),
+        ], 500);
+    }
+});
 
 // Rutas de autenticación
 Route::post('/login', [LoginController::class, 'login'])->name('login');
@@ -595,6 +647,14 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     // Regla aplicable por días vencidos (opcional, si usas esta lógica en backend)
     Route::get('/payment-rules/{rule}/blocking-rules/applicable', [PaymentRuleBlockingRuleController::class, 'getApplicableRules']);
+
+    // Reglas de pago del estudiante
+    Route::prefix('estudiante/pagos')->group(function () {
+        Route::get('/pendientes', [EstudiantePagosController::class, 'pagosPendientes']);
+        Route::get('/historial', [EstudiantePagosController::class, 'historialPagos']);
+        Route::get('/estado-cuenta', [EstudiantePagosController::class, 'estadoCuenta']);
+        Route::post('/subir-recibo', [EstudiantePagosController::class, 'subirReciboPago']);
+    });
 });
 
 Route::apiResource('rules', RuleController::class);

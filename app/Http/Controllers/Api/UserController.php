@@ -10,6 +10,9 @@ use Illuminate\Support\Facades\Hash;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use App\Exports\UserExport;
 use Maatwebsite\Excel\Facades\Excel;
+use App\Models\Prospecto; // ← AGREGAR IMPORT
+use Illuminate\Support\Facades\DB; // ← AGREGAR IMPORT
+
 
 class UserController extends Controller
 {
@@ -68,6 +71,7 @@ class UserController extends Controller
             'password'       => 'required|string|min:8',
             'first_name'     => 'nullable|string|max:50',
             'last_name'      => 'nullable|string|max:50',
+            'carnet'         => 'nullable|string|max:20', // 🔥 AGREGADO
             'is_active'      => 'boolean',
             'email_verified' => 'boolean',
             'mfa_enabled'    => 'boolean',
@@ -120,6 +124,7 @@ class UserController extends Controller
             'password'       => 'nullable|string|min:8',
             'first_name'     => 'nullable|string|max:50',
             'last_name'      => 'nullable|string|max:50',
+            'carnet'         => 'nullable|string|max:20', // 🔥 AGREGADO
             'is_active'      => 'boolean',
             'email_verified' => 'boolean',
             'mfa_enabled'    => 'boolean',
@@ -232,7 +237,7 @@ class UserController extends Controller
                 $query->where('role_id', $roleId);
             })
             ->get();
-    
+
         // Agregar el atributo 'rol' a cada usuario
         $users->transform(function ($user) {
             $user->setAttribute('rol', $user->userRole && $user->userRole->role
@@ -240,7 +245,7 @@ class UserController extends Controller
                 : "");
             return $user;
         });
-    
+
         return response()->json($users);
     }
 }

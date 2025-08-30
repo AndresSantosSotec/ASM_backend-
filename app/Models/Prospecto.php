@@ -315,4 +315,9 @@ class Prospecto extends Model
         // Usar la lógica original de bloqueo
         return $this->isBlocked();
     }
+
+    public function usuario()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'carnet_generado', 'carnet');
+    }
 }

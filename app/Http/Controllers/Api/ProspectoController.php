@@ -29,8 +29,8 @@ class ProspectoController extends Controller
         $isAdmin = strtolower($user->rol) === 'administrador';
 
         // ◀ Aquí agregamos, además de 'creator', el eager loading de:
-        //    – ‘programas.programa’ para traer en cada EstudiantePrograma su Programa
-        //    – ‘courses’ para traer los cursos asociados (vía pivote curso_prospecto)
+        //    – 'programas.programa' para traer en cada EstudiantePrograma su Programa
+        //    – 'courses' para traer los cursos asociados (vía pivote curso_prospecto)
         $query = Prospecto::with([
             'creator',
             'programas.programa',
@@ -53,7 +53,6 @@ class ProspectoController extends Controller
         ]);
     }
 
-
     public function filterByStatus($status)
     {
         $prospectos = Prospecto::with([
@@ -65,7 +64,7 @@ class ProspectoController extends Controller
             ->get();
 
         return response()->json([
-            'message' => "Prospectos en estado “{$status}” obtenidos",
+            //'message' => 'Prospectos en estado "' . $status . '" obtenidos',
             'data'    => $prospectos,
         ]);
     }
@@ -307,6 +306,20 @@ class ProspectoController extends Controller
             return response()->json(['message' => 'Prospecto no encontrado'], 404);
         }
 
+        // 🔥 GENERAR CARNET AUTOMÁTICAMENTE CUANDO SE APRUEBA
+        if ($v['status'] === 'aprobada' && empty($prospecto->carnet)) {
+            try {
+                $prospecto->carnet = Prospecto::generateCarnet();
+                Log::info("⇨ Carnet generado automáticamente: {$prospecto->carnet} para prospecto ID: {$prospecto->id}");
+            } catch (\Exception $e) {
+                Log::error("❌ Error generando carnet para prospecto ID: {$prospecto->id}: " . $e->getMessage());
+                return response()->json([
+                    'error' => 'No se pudo generar el carnet automáticamente',
+                    'message' => $e->getMessage()
+                ], 500);
+            }
+        }
+
         $prospecto->status = $v['status'];
         $prospecto->updated_by = $user->id;
         $prospecto->save();
@@ -380,6 +393,25 @@ class ProspectoController extends Controller
             'prospecto_ids.*' => 'integer|exists:prospectos,id',
             'status' => 'required|string',
         ]);
+
+        // 🔥 GENERAR CARNETS AUTOMÁTICAMENTE EN ACTUALIZACIONES MASIVAS
+        if ($data['status'] === 'aprobada') {
+            $prospectosSinCarnet = Prospecto::whereIn('id', $data['prospecto_ids'])
+                ->where(function($query) {
+                    $query->whereNull('carnet')->orWhere('carnet', '');
+                })
+                ->get();
+
+            foreach ($prospectosSinCarnet as $prospecto) {
+                try {
+                    $prospecto->carnet = Prospecto::generateCarnet();
+                    $prospecto->save();
+                    Log::info("⇨ Carnet generado en bulk: {$prospecto->carnet} para prospecto ID: {$prospecto->id}");
+                } catch (\Exception $e) {
+                    Log::error("❌ Error generando carnet en bulk para prospecto ID: {$prospecto->id}: " . $e->getMessage());
+                }
+            }
+        }
 
         Prospecto::whereIn('id', $data['prospecto_ids'])
             ->update([
@@ -518,6 +550,7 @@ class ProspectoController extends Controller
                 'p.correo_electronico',
                 'p.departamento',
                 'p.status',
+                'p.carnet', // 🔥 CAMPO CARNET INCLUIDO
                 'pr.nombre_del_programa AS nombre_programa',
                 DB::raw('(SELECT COUNT(*) FROM estudiante_programa WHERE prospecto_id = p.id) AS cantidad_programas')
             )
