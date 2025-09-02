@@ -12,10 +12,18 @@ use App\Exports\UserExport;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Models\Prospecto; // ← AGREGAR IMPORT
 use Illuminate\Support\Facades\DB; // ← AGREGAR IMPORT
+use App\Services\RolePermissionService; // ← AGREGAR IMPORT
+use Illuminate\Support\Facades\Log; // ← AGREGAR IMPORT
 
 
 class UserController extends Controller
 {
+    protected $rolePermissionService;
+
+    public function __construct(RolePermissionService $rolePermissionService)
+    {
+        $this->rolePermissionService = $rolePermissionService;
+    }
     /**
      * Obtener todos los usuarios con su rol asignado.
      */
@@ -82,28 +90,58 @@ class UserController extends Controller
             $validatedData['is_active'] = true;
         }
 
-        // Encriptar la contraseña y quitar el campo original
-        $validatedData['password_hash'] = Hash::make($validatedData['password']);
-        unset($validatedData['password']);
+        try {
+            DB::beginTransaction();
 
-        // Crear el usuario
-        $user = User::create($validatedData);
+            // Encriptar la contraseña y quitar el campo original
+            $validatedData['password_hash'] = Hash::make($validatedData['password']);
+            unset($validatedData['password']);
 
-        // Insertar la asignación en la tabla userroles
-        \App\Models\UserRole::create([
-            'user_id'     => $user->id,
-            'role_id'     => $validatedData['rol'],
-            'assigned_at' => now(),
-            'expires_at'  => null,
-        ]);
+            // Crear el usuario
+            $user = User::create($validatedData);
 
-        // Actualizar el contador de usuarios en la tabla roles
-        $role = \App\Models\Role::find($validatedData['rol']);
-        if ($role) {
-            $role->increment('user_count');
+            // Insertar la asignación en la tabla userroles
+            \App\Models\UserRole::create([
+                'user_id'     => $user->id,
+                'role_id'     => $validatedData['rol'],
+                'assigned_at' => now(),
+                'expires_at'  => null,
+            ]);
+
+            // Actualizar el contador de usuarios en la tabla roles
+            $role = \App\Models\Role::find($validatedData['rol']);
+            if ($role) {
+                $role->increment('user_count');
+            }
+
+            // Recargar el usuario con su relación de rol para asignación de permisos
+            $user->load('userRole');
+
+            // Asignar permisos automáticamente según el rol
+            $permissionAssigned = $this->rolePermissionService->assignPermissionsToUser($user);
+            
+            if (!$permissionAssigned) {
+                // Log warning pero no fallar la creación del usuario
+                Log::warning("Failed to assign permissions to user {$user->id} with role {$validatedData['rol']}");
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'user' => $user,
+                'permissions_assigned' => $permissionAssigned,
+                'message' => 'Usuario creado exitosamente' . ($permissionAssigned ? ' con permisos asignados' : ' pero falló la asignación de permisos')
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            Log::error("Failed to create user: " . $e->getMessage());
+            
+            return response()->json([
+                'error' => 'Error al crear el usuario',
+                'message' => $e->getMessage()
+            ], 500);
         }
-
-        return response()->json($user, 201);
     }
 
     /**
@@ -131,51 +169,103 @@ class UserController extends Controller
             'rol'            => 'sometimes|integer|exists:roles,id',
         ]);
 
-        if (isset($validatedData['password'])) {
-            $validatedData['password_hash'] = Hash::make($validatedData['password']);
-            unset($validatedData['password']);
-        }
+        try {
+            DB::beginTransaction();
 
-        // Actualizar datos básicos del usuario
-        $user->update($validatedData);
+            if (isset($validatedData['password'])) {
+                $validatedData['password_hash'] = Hash::make($validatedData['password']);
+                unset($validatedData['password']);
+            }
 
-        // Si se envía el campo 'rol', se actualiza la asignación y se ajusta el contador
-        if (isset($validatedData['rol'])) {
-            $newRoleId = $validatedData['rol'];
-            $currentUserRole = $user->userRole;
+            // Actualizar datos básicos del usuario
+            $user->update($validatedData);
 
-            if ($currentUserRole) {
-                if ($currentUserRole->role_id != $newRoleId) {
-                    // Decrementar el contador del rol anterior
-                    $oldRole = \App\Models\Role::find($currentUserRole->role_id);
-                    if ($oldRole) {
-                        $oldRole->decrement('user_count');
+            $roleChanged = false;
+            $oldRoleId = null;
+            $newRoleId = null;
+
+            // Si se envía el campo 'rol', se actualiza la asignación y se ajusta el contador
+            if (isset($validatedData['rol'])) {
+                $newRoleId = $validatedData['rol'];
+                $currentUserRole = $user->userRole;
+
+                if ($currentUserRole) {
+                    $oldRoleId = $currentUserRole->role_id;
+                    
+                    if ($currentUserRole->role_id != $newRoleId) {
+                        $roleChanged = true;
+                        
+                        // Decrementar el contador del rol anterior
+                        $oldRole = \App\Models\Role::find($currentUserRole->role_id);
+                        if ($oldRole) {
+                            $oldRole->decrement('user_count');
+                        }
+                        
+                        // Actualizar la asignación con el nuevo rol
+                        $currentUserRole->update(['role_id' => $newRoleId]);
+                        
+                        // Incrementar el contador del nuevo rol
+                        $newRole = \App\Models\Role::find($newRoleId);
+                        if ($newRole) {
+                            $newRole->increment('user_count');
+                        }
                     }
-                    // Actualizar la asignación con el nuevo rol
-                    $currentUserRole->update(['role_id' => $newRoleId]);
-                    // Incrementar el contador del nuevo rol
-                    $newRole = \App\Models\Role::find($newRoleId);
-                    if ($newRole) {
-                        $newRole->increment('user_count');
+                } else {
+                    // Si no existe asignación, crearla
+                    $roleChanged = true;
+                    
+                    \App\Models\UserRole::create([
+                        'user_id'     => $user->id,
+                        'role_id'     => $newRoleId,
+                        'assigned_at' => now(),
+                        'expires_at'  => null,
+                    ]);
+                    
+                    // Incrementar el contador del rol
+                    $role = \App\Models\Role::find($newRoleId);
+                    if ($role) {
+                        $role->increment('user_count');
                     }
-                }
-            } else {
-                // Si no existe asignación, crearla
-                \App\Models\UserRole::create([
-                    'user_id'     => $user->id,
-                    'role_id'     => $newRoleId,
-                    'assigned_at' => now(),
-                    'expires_at'  => null,
-                ]);
-                // Incrementar el contador del rol
-                $role = \App\Models\Role::find($newRoleId);
-                if ($role) {
-                    $role->increment('user_count');
                 }
             }
-        }
 
-        return response()->json($user);
+            // Si el rol cambió, actualizar permisos automáticamente
+            $permissionsUpdated = false;
+            if ($roleChanged) {
+                // Recargar el usuario con su nueva relación de rol
+                $user->load('userRole');
+                
+                $permissionsUpdated = $this->rolePermissionService->updateUserPermissionsOnRoleChange(
+                    $user, 
+                    $oldRoleId ?? 0, 
+                    $newRoleId
+                );
+                
+                if (!$permissionsUpdated) {
+                    Log::warning("Failed to update permissions for user {$user->id} after role change from {$oldRoleId} to {$newRoleId}");
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'user' => $user,
+                'role_changed' => $roleChanged,
+                'permissions_updated' => $permissionsUpdated,
+                'message' => 'Usuario actualizado exitosamente' . 
+                           ($roleChanged ? ' con cambio de rol' : '') . 
+                           ($permissionsUpdated ? ' y permisos actualizados' : '')
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            Log::error("Failed to update user {$id}: " . $e->getMessage());
+            
+            return response()->json([
+                'error' => 'Error al actualizar el usuario',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
