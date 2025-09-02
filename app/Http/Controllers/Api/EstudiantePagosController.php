@@ -124,7 +124,6 @@ class EstudiantePagosController extends Controller
             'archivo_comprobante' => $rutaArchivo,
             'estado_pago' => 'pendiente_revision',
             'observaciones' => 'Pago subido por estudiante',
-            'created_by' => $user->id,
         ]);
 
         // Cambiar estado de la cuota a "en_revision"

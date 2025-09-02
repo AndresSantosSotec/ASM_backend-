@@ -18,8 +18,7 @@ class KardexPago extends Model
         'archivo_comprobante',  // ← NUEVO
         'estado_pago',          // ← NUEVO
         'observaciones',
-        'created_by',
-        'updated_by'
+
     ];
     protected $casts = [
         'fecha_pago'  => 'date',
