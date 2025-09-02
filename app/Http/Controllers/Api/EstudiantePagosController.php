@@ -79,7 +79,7 @@ class EstudiantePagosController extends Controller
     }
 
     /**
-     * Registra un pago con subida de recibo
+     * Registra un pago con subida de recibo - APROBACIÓN AUTOMÁTICA
      */
     public function subirReciboPago(Request $request)
     {
@@ -112,7 +112,7 @@ class EstudiantePagosController extends Controller
         $nombreArchivo = 'recibo_' . $user->carnet . '_' . $cuota->id . '_' . time() . '.' . $archivo->getClientOriginalExtension();
         $rutaArchivo = $archivo->storeAs('recibos_pago', $nombreArchivo, 'public');
 
-        // Crear registro de pago (pendiente de aprobación)
+        // 🔥 CREAR REGISTRO DE PAGO CON APROBACIÓN AUTOMÁTICA
         $pago = KardexPago::create([
             'estudiante_programa_id' => $cuota->estudiante_programa_id,
             'cuota_id' => $cuota->id,
@@ -122,18 +122,23 @@ class EstudiantePagosController extends Controller
             'numero_boleta' => $request->numero_boleta,
             'banco' => $request->banco,
             'archivo_comprobante' => $rutaArchivo,
-            'estado_pago' => 'pendiente_revision',
-            'observaciones' => 'Pago subido por estudiante',
+            'estado_pago' => 'aprobado', // 🔥 CAMBIO: Directamente aprobado
+            'observaciones' => 'Pago procesado automáticamente',
+            'fecha_aprobacion' => now(), // 🔥 AGREGADO: Fecha de aprobación automática
+            'aprobado_por' => 'sistema_automatico', // 🔥 AGREGADO: Quién aprobó
         ]);
 
-        // Cambiar estado de la cuota a "en_revision"
+        // 🔥 CAMBIO: Cambiar estado de la cuota directamente a "pagado"
         $cuota->update([
-            'estado' => 'en_revision'
+            'estado' => 'pagado',
+            'fecha_pago' => now()
         ]);
 
         return response()->json([
-            'message' => 'Recibo de pago enviado correctamente. Se revisará en las próximas 48 horas.',
-            'pago_id' => $pago->id
+            'message' => 'Pago procesado exitosamente. Su cuota ha sido marcada como pagada.',
+            'pago_id' => $pago->id,
+            'estado_cuota' => 'pagado',
+            'fecha_procesamiento' => now()->format('Y-m-d H:i:s')
         ], 201);
     }
 
