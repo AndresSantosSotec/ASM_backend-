@@ -54,6 +54,8 @@ use App\Http\Controllers\Api\PaymentRuleBlockingRuleController;
 use App\Http\Controllers\Api\PaymentExceptionCategoryController;
 use App\Http\Controllers\Api\PaymentGatewayController;
 use App\Http\Controllers\Api\EstudiantePagosController;
+use App\Http\Controllers\Api\DashboardFinancieroController;
+
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -280,6 +282,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/{id}',     [CommissionController::class, 'update']);
         Route::delete('/{id}',     [CommissionController::class, 'destroy']);
         Route::get('/report',   [CommissionController::class, 'report']);
+
+
     });
 });
 
@@ -534,6 +538,9 @@ Route::get('/students/{id}', [StudentController::class, 'show'])->middleware('au
 // Finanzas y Pagos
 // ----------------------
 Route::middleware('auth:sanctum')->group(function () {
+    // ✅ Dashboard Financiero protegido
+    Route::get('/dashboard-financiero', [DashboardFinancieroController::class, 'index'])->name('dashboard.financiero');
+
     Route::get('/invoices', [InvoiceController::class, 'index']);
     Route::post('/invoices', [InvoiceController::class, 'store']);
     Route::put('/invoices/{invoice}', [InvoiceController::class, 'update']);
@@ -542,8 +549,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
     //paymatent Edit
-
-
     Route::prefix('payment-plans')->group(function () {
         Route::get('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'index']);
         Route::post('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'store']);
