@@ -132,28 +132,31 @@ class EstudiantePagosController extends Controller
         $tempPath = $archivo->store('temp');
         $fullTempPath = storage_path('app/' . $tempPath);
         
-        // 🔥 NUEVO: Calcular hash del archivo
-        $fileHash = KardexPago::calculateFileHash($fullTempPath);
-        
-        // 🔥 NUEVO: Verificar duplicado de archivo
-        $existingFile = KardexPago::fileHashExists($cuota->estudiante_programa_id, $fileHash);
-        if ($existingFile) {
-            // Limpiar archivo temporal
-            \Storage::delete($tempPath);
+        try {
+            // 🔥 NUEVO: Calcular hash del archivo
+            $fileHash = KardexPago::calculateFileHash($fullTempPath);
             
-            return response()->json([
-                'message' => 'Este comprobante ya fue cargado previamente.'
-            ], 400);
+            // 🔥 NUEVO: Verificar duplicado de archivo
+            $existingFile = KardexPago::fileHashExists($cuota->estudiante_programa_id, $fileHash);
+            if ($existingFile) {
+                return response()->json([
+                    'message' => 'Este comprobante ya fue cargado previamente.'
+                ], 400);
+            }
+
+            // Mover archivo a ubicación final
+            $nombreArchivo = 'recibo_' . $user->carnet . '_' . $cuota->id . '_' . time() . '.' . $archivo->getClientOriginalExtension();
+            $rutaArchivo = $archivo->storeAs('recibos_pago', $nombreArchivo, 'public');
+            
+        } finally {
+            // Limpiar archivo temporal siempre
+            if (\Storage::exists($tempPath)) {
+                \Storage::delete($tempPath);
+            }
         }
 
-        // Mover archivo a ubicación final
-        $nombreArchivo = 'recibo_' . $user->carnet . '_' . $cuota->id . '_' . time() . '.' . $archivo->getClientOriginalExtension();
-        $rutaArchivo = $archivo->storeAs('recibos_pago', $nombreArchivo, 'public');
-        
-        // Limpiar archivo temporal
-        \Storage::delete($tempPath);
-
         // 🔥 TRANSACCIÓN: Crear registro de pago con valores normalizados
+        $pago = null;
         \DB::transaction(function () use ($cuota, $request, $rutaArchivo, $fileHash, &$pago) {
             $pago = KardexPago::create([
                 'estudiante_programa_id' => $cuota->estudiante_programa_id,

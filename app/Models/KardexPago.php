@@ -43,7 +43,7 @@ class KardexPago extends Model
      */
     public function scopePendientesRevision($query)
     {
-        return $query->where('estado_pago', 'pendiente_revision');
+        return $query->whereIn('estado_pago', ['pendiente_revision', 'en_revision']);
     }
 
     /**
@@ -52,6 +52,22 @@ class KardexPago extends Model
     public function scopeAprobados($query)
     {
         return $query->where('estado_pago', 'aprobado');
+    }
+
+    /**
+     * Scope para pagos rechazados
+     */
+    public function scopeRechazados($query)
+    {
+        return $query->where('estado_pago', 'rechazado');
+    }
+
+    /**
+     * Scope para pagos anulados
+     */
+    public function scopeAnulados($query)
+    {
+        return $query->where('estado_pago', 'anulado');
     }
 
     /**
@@ -101,5 +117,23 @@ class KardexPago extends Model
         return self::where('estudiante_programa_id', $estudianteProgramaId)
                    ->where('file_sha256', $fileHash)
                    ->first();
+    }
+
+    /**
+     * Boot the model and add event listeners
+     */
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Automatically normalize fields when saving
+        static::saving(function ($model) {
+            if ($model->banco && !$model->banco_norm) {
+                $model->banco_norm = self::normalizeBanco($model->banco);
+            }
+            if ($model->numero_boleta && !$model->numero_boleta_norm) {
+                $model->numero_boleta_norm = self::normalizeNumeroBoleta($model->numero_boleta);
+            }
+        });
     }
 }
