@@ -18,6 +18,9 @@ yarn-error.log
 /.idea
 /.vscode
 .qodo
+
+# Temporary test files
+/tmp/test_*.php
 package-lock.json
 
 
