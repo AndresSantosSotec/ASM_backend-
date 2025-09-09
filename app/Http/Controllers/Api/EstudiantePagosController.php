@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use App\Models\CuotaProgramaEstudiante;
 use App\Models\KardexPago;
 use Carbon\Carbon;
@@ -107,32 +109,76 @@ class EstudiantePagosController extends Controller
             ], 404);
         }
 
-        // Guardar el archivo
+        // 🔥 NUEVO: Validaciones de duplicado antes de guardar archivo
+        $existingReceipt = KardexPago::receiptExists($request->banco, $request->numero_boleta);
+        if ($existingReceipt) {
+            $isOwnPayment = $existingReceipt->estudiantePrograma && 
+                           $existingReceipt->estudiantePrograma->prospecto && 
+                           $existingReceipt->estudiantePrograma->prospecto->carnet === $user->carnet;
+            
+            if ($isOwnPayment) {
+                return response()->json([
+                    'message' => "Esta boleta ya fue registrada por usted el {$existingReceipt->created_at->format('d/m/Y')} (estado: {$existingReceipt->estado_pago})."
+                ], 400);
+            } else {
+                return response()->json([
+                    'message' => 'Esta boleta ya fue utilizada por otro estudiante.'
+                ], 400);
+            }
+        }
+
+        // Guardar el archivo temporalmente para calcular hash
         $archivo = $request->file('comprobante');
+        $tempPath = $archivo->store('temp');
+        $fullTempPath = storage_path('app/' . $tempPath);
+        
+        // 🔥 NUEVO: Calcular hash del archivo
+        $fileHash = KardexPago::calculateFileHash($fullTempPath);
+        
+        // 🔥 NUEVO: Verificar duplicado de archivo
+        $existingFile = KardexPago::fileHashExists($cuota->estudiante_programa_id, $fileHash);
+        if ($existingFile) {
+            // Limpiar archivo temporal
+            \Storage::delete($tempPath);
+            
+            return response()->json([
+                'message' => 'Este comprobante ya fue cargado previamente.'
+            ], 400);
+        }
+
+        // Mover archivo a ubicación final
         $nombreArchivo = 'recibo_' . $user->carnet . '_' . $cuota->id . '_' . time() . '.' . $archivo->getClientOriginalExtension();
         $rutaArchivo = $archivo->storeAs('recibos_pago', $nombreArchivo, 'public');
+        
+        // Limpiar archivo temporal
+        \Storage::delete($tempPath);
 
-        // 🔥 CREAR REGISTRO DE PAGO CON APROBACIÓN AUTOMÁTICA
-        $pago = KardexPago::create([
-            'estudiante_programa_id' => $cuota->estudiante_programa_id,
-            'cuota_id' => $cuota->id,
-            'fecha_pago' => now(),
-            'monto_pagado' => $request->monto,
-            'metodo_pago' => 'transferencia_bancaria',
-            'numero_boleta' => $request->numero_boleta,
-            'banco' => $request->banco,
-            'archivo_comprobante' => $rutaArchivo,
-            'estado_pago' => 'aprobado', // 🔥 CAMBIO: Directamente aprobado
-            'observaciones' => 'Pago procesado automáticamente',
-            'fecha_aprobacion' => now(), // 🔥 AGREGADO: Fecha de aprobación automática
-            'aprobado_por' => 'sistema_automatico', // 🔥 AGREGADO: Quién aprobó
-        ]);
+        // 🔥 TRANSACCIÓN: Crear registro de pago con valores normalizados
+        \DB::transaction(function () use ($cuota, $request, $rutaArchivo, $fileHash, &$pago) {
+            $pago = KardexPago::create([
+                'estudiante_programa_id' => $cuota->estudiante_programa_id,
+                'cuota_id' => $cuota->id,
+                'fecha_pago' => now(),
+                'monto_pagado' => $request->monto,
+                'metodo_pago' => 'transferencia_bancaria',
+                'numero_boleta' => $request->numero_boleta,
+                'banco' => $request->banco,
+                'banco_norm' => KardexPago::normalizeBanco($request->banco),
+                'numero_boleta_norm' => KardexPago::normalizeNumeroBoleta($request->numero_boleta),
+                'archivo_comprobante' => $rutaArchivo,
+                'file_sha256' => $fileHash,
+                'estado_pago' => 'aprobado', 
+                'observaciones' => 'Pago procesado automáticamente',
+                'fecha_aprobacion' => now(),
+                'aprobado_por' => 'sistema_automatico',
+            ]);
 
-        // 🔥 CAMBIO: Cambiar estado de la cuota directamente a "pagado"
-        $cuota->update([
-            'estado' => 'pagado',
-            'fecha_pago' => now()
-        ]);
+            // 🔥 CAMBIO: Cambiar estado de la cuota directamente a "pagado"
+            $cuota->update([
+                'estado' => 'pagado',
+                'fecha_pago' => now()
+            ]);
+        });
 
         return response()->json([
             'message' => 'Pago procesado exitosamente. Su cuota ha sido marcada como pagada.',
@@ -171,6 +217,47 @@ class EstudiantePagosController extends Controller
         return response()->json([
             'cuotas' => $cuotas,
             'resumen' => $resumen
+        ]);
+    }
+
+    /**
+     * Preflight verification for bank receipt to check for duplicates
+     */
+    public function verifyBoleta(Request $request)
+    {
+        $request->validate([
+            'banco' => 'required|string|max:100',
+            'numero_boleta' => 'required|string|max:100',
+        ]);
+
+        $existingPayment = KardexPago::receiptExists($request->banco, $request->numero_boleta);
+
+        if (!$existingPayment) {
+            return response()->json([
+                'exists' => false,
+                'message' => 'Esta boleta está disponible para uso.'
+            ]);
+        }
+
+        $user = Auth::user();
+        $isOwnPayment = $existingPayment->estudiantePrograma && 
+                       $existingPayment->estudiantePrograma->prospecto && 
+                       $existingPayment->estudiantePrograma->prospecto->carnet === $user->carnet;
+
+        if ($isOwnPayment) {
+            return response()->json([
+                'exists' => true,
+                'is_own' => true,
+                'message' => "Esta boleta ya fue registrada por usted el {$existingPayment->created_at->format('d/m/Y')} (estado: {$existingPayment->estado_pago}).",
+                'fecha_registro' => $existingPayment->created_at->format('d/m/Y'),
+                'estado' => $existingPayment->estado_pago
+            ]);
+        }
+
+        return response()->json([
+            'exists' => true,
+            'is_own' => false,
+            'message' => 'Esta boleta ya fue utilizada por otro estudiante.'
         ]);
     }
 }

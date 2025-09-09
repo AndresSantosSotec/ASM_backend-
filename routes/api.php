@@ -659,6 +659,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/historial', [EstudiantePagosController::class, 'historialPagos']);
         Route::get('/estado-cuenta', [EstudiantePagosController::class, 'estadoCuenta']);
         Route::post('/subir-recibo', [EstudiantePagosController::class, 'subirReciboPago']);
+        Route::get('/boletas/verify', [EstudiantePagosController::class, 'verifyBoleta']);
     });
 });
 
