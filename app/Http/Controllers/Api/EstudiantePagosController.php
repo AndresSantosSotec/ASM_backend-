@@ -7,7 +7,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\CuotaProgramaEstudiante;
 use App\Models\KardexPago;
+use App\Models\PaymentRequest;
+use App\Http\Requests\SubirReciboRequest;
+use App\Support\Boletas;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class EstudiantePagosController extends Controller
 {
@@ -79,67 +85,196 @@ class EstudiantePagosController extends Controller
     }
 
     /**
-     * Registra un pago con subida de recibo - APROBACIÓN AUTOMÁTICA
+     * Registra un pago con subida de recibo - ROBUSTECIDO
      */
-    public function subirReciboPago(Request $request)
+    public function subirReciboPago(SubirReciboRequest $request)
     {
-        $request->validate([
-            'cuota_id' => 'required|exists:cuotas_programa_estudiante,id',
-            'numero_boleta' => 'required|string|max:100',
-            'banco' => 'required|string|max:100',
-            'monto' => 'required|numeric|min:0',
-            'comprobante' => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120', // 5MB máx
-        ]);
-
         $user = Auth::user();
+        $ipAddress = $request->ip();
+        $userAgent = $request->userAgent();
 
-        // 🔥 VERIFICAR QUE LA CUOTA PERTENECE AL ESTUDIANTE
-        $cuota = CuotaProgramaEstudiante::whereHas('estudiantePrograma.prospecto', function ($query) use ($user) {
-            $query->where('carnet', $user->carnet);
-        })
-            ->where('id', $request->cuota_id)
-            ->where('estado', 'pendiente')
-            ->first();
-
-        if (!$cuota) {
-            return response()->json([
-                'message' => 'Cuota no encontrada o ya está pagada'
-            ], 404);
+        // Handle idempotency
+        $idempotencyKey = $request->header('Idempotency-Key');
+        if ($idempotencyKey) {
+            $existingRequest = PaymentRequest::where('idempotency_key', $idempotencyKey)->first();
+            if ($existingRequest) {
+                return response()->json($existingRequest->response_payload, $existingRequest->response_status);
+            }
         }
 
-        // Guardar el archivo
-        $archivo = $request->file('comprobante');
-        $nombreArchivo = 'recibo_' . $user->carnet . '_' . $cuota->id . '_' . time() . '.' . $archivo->getClientOriginalExtension();
-        $rutaArchivo = $archivo->storeAs('recibos_pago', $nombreArchivo, 'public');
+        try {
+            return DB::transaction(function () use ($request, $user, $ipAddress, $userAgent, $idempotencyKey) {
+                $cuota = $request->cuota_model;
+                $boletaNorm = $request->numero_boleta_norm;
+                $bancoNorm = $request->banco_norm;
+                $fileHash = $request->file_hash;
 
-        // 🔥 CREAR REGISTRO DE PAGO CON APROBACIÓN AUTOMÁTICA
-        $pago = KardexPago::create([
-            'estudiante_programa_id' => $cuota->estudiante_programa_id,
-            'cuota_id' => $cuota->id,
-            'fecha_pago' => now(),
-            'monto_pagado' => $request->monto,
-            'metodo_pago' => 'transferencia_bancaria',
-            'numero_boleta' => $request->numero_boleta,
-            'banco' => $request->banco,
-            'archivo_comprobante' => $rutaArchivo,
-            'estado_pago' => 'aprobado', // 🔥 CAMBIO: Directamente aprobado
-            'observaciones' => 'Pago procesado automáticamente',
-            'fecha_aprobacion' => now(), // 🔥 AGREGADO: Fecha de aprobación automática
-            'aprobado_por' => 'sistema_automatico', // 🔥 AGREGADO: Quién aprobó
-        ]);
+                // Calculate expected amount (including late fees)
+                $expectedAmount = $this->calculateExpectedAmount($cuota);
+                $paidAmount = $request->monto;
+                $tolerance = config('payment.amount_tolerance', 0.01);
+                $amountDifference = abs($expectedAmount - $paidAmount);
 
-        // 🔥 CAMBIO: Cambiar estado de la cuota directamente a "pagado"
-        $cuota->update([
-            'estado' => 'pagado',
-            'fecha_pago' => now()
-        ]);
+                // Determine if payment should be auto-approved
+                $shouldAutoApprove = config('payment.auto_approve_exact_amount', true) 
+                    && $amountDifference <= $tolerance;
 
-        return response()->json([
-            'message' => 'Pago procesado exitosamente. Su cuota ha sido marcada como pagada.',
-            'pago_id' => $pago->id,
-            'estado_cuota' => 'pagado',
-            'fecha_procesamiento' => now()->format('Y-m-d H:i:s')
-        ], 201);
+                // Save the file with secure naming
+                $archivo = $request->file('comprobante');
+                $fileName = $this->generateSecureFileName($user->carnet, $cuota->id, $archivo->getClientOriginalExtension());
+                $filePath = $archivo->storeAs('recibos_pago', $fileName, 'public');
+
+                // Create payment record
+                $estadoPago = $shouldAutoApprove ? 'aprobado' : 'en_revision';
+                $fechaAprobacion = $shouldAutoApprove ? now() : null;
+                $aprobadoPor = $shouldAutoApprove ? 'sistema_automatico' : null;
+
+                $pago = KardexPago::create([
+                    'estudiante_programa_id' => $cuota->estudiante_programa_id,
+                    'cuota_id' => $cuota->id,
+                    'fecha_pago' => now(),
+                    'monto_pagado' => $paidAmount,
+                    'metodo_pago' => 'transferencia_bancaria',
+                    'numero_boleta' => $request->numero_boleta,
+                    'banco' => $request->banco,
+                    'numero_boleta_norm' => $boletaNorm,
+                    'banco_norm' => $bancoNorm,
+                    'archivo_comprobante' => $filePath,
+                    'file_sha256' => $fileHash,
+                    'estado_pago' => $estadoPago,
+                    'fecha_aprobacion' => $fechaAprobacion,
+                    'aprobado_por' => $aprobadoPor,
+                    'ip_address' => $ipAddress,
+                    'user_agent' => $userAgent,
+                    'observaciones' => $shouldAutoApprove 
+                        ? 'Pago procesado automáticamente - monto exacto' 
+                        : "Pago en revisión - diferencia de monto: $" . number_format($amountDifference, 2),
+                ]);
+
+                // Update cuota status only if auto-approved
+                $estadoCuota = 'pendiente';
+                if ($shouldAutoApprove) {
+                    $cuota->update([
+                        'estado' => 'pagado',
+                        'fecha_pago' => now()
+                    ]);
+                    $estadoCuota = 'pagado';
+                }
+
+                // Log payment attempt
+                Log::info('Payment uploaded', [
+                    'user_id' => $user->id,
+                    'carnet' => $user->carnet,
+                    'pago_id' => $pago->id,
+                    'cuota_id' => $cuota->id,
+                    'monto' => $paidAmount,
+                    'expected_amount' => $expectedAmount,
+                    'estado' => $estadoPago,
+                    'ip_address' => $ipAddress,
+                    'boleta_norm' => $boletaNorm,
+                    'banco_norm' => $bancoNorm,
+                ]);
+
+                $responseData = [
+                    'success' => true,
+                    'message' => $shouldAutoApprove 
+                        ? 'Pago procesado exitosamente. Su cuota ha sido marcada como pagada.'
+                        : 'Pago recibido y enviado a revisión debido a diferencias en el monto.',
+                    'pago_id' => $pago->id,
+                    'estado_cuota' => $estadoCuota,
+                    'estado_pago' => $estadoPago,
+                    'fecha_procesamiento' => now()->format('Y-m-d H:i:s'),
+                    'monto_esperado' => $expectedAmount,
+                    'monto_recibido' => $paidAmount,
+                ];
+
+                $responseStatus = 201;
+
+                // Store idempotency record if key provided
+                if ($idempotencyKey) {
+                    PaymentRequest::create([
+                        'idempotency_key' => $idempotencyKey,
+                        'user_id' => $user->id,
+                        'request_payload' => $request->all(),
+                        'response_payload' => $responseData,
+                        'response_status' => $responseStatus,
+                        'ip_address' => $ipAddress,
+                        'user_agent' => $userAgent,
+                    ]);
+                }
+
+                return response()->json($responseData, $responseStatus);
+            });
+
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Handle unique constraint violations
+            if (str_contains($e->getMessage(), 'unique_boleta_per_student_bank')) {
+                return response()->json([
+                    'success' => false,
+                    'field_errors' => [
+                        'numero_boleta' => ['Esta boleta ya ha sido registrada anteriormente.']
+                    ]
+                ], 422);
+            }
+            
+            if (str_contains($e->getMessage(), 'unique_file_per_student')) {
+                return response()->json([
+                    'success' => false,
+                    'field_errors' => [
+                        'comprobante' => ['Este archivo ya ha sido utilizado anteriormente.']
+                    ]
+                ], 422);
+            }
+            
+            Log::error('Payment upload database error', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+                'ip_address' => $ipAddress,
+            ]);
+            
+            throw $e;
+        } catch (\Exception $e) {
+            Log::error('Payment upload error', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+                'ip_address' => $ipAddress,
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error interno del servidor. Por favor, inténtelo nuevamente.'
+            ], 500);
+        }
+    }
+
+    /**
+     * Calculate expected payment amount including late fees
+     */
+    private function calculateExpectedAmount(CuotaProgramaEstudiante $cuota): float
+    {
+        $baseAmount = $cuota->monto;
+        $dueDate = Carbon::parse($cuota->fecha_vencimiento);
+        $today = Carbon::now();
+
+        if ($today->gt($dueDate)) {
+            // Calculate late fee (example: 2% per month overdue)
+            $monthsLate = $today->diffInMonths($dueDate);
+            $lateFeePercentage = 0.02; // 2% per month
+            $lateFee = $baseAmount * $lateFeePercentage * $monthsLate;
+            return $baseAmount + $lateFee;
+        }
+
+        return $baseAmount;
+    }
+
+    /**
+     * Generate secure file name for uploaded receipts
+     */
+    private function generateSecureFileName(string $carnet, int $cuotaId, string $extension): string
+    {
+        $timestamp = now()->format('Y-m-d_H-i-s');
+        $random = Str::random(8);
+        return "recibo_{$carnet}_{$cuotaId}_{$timestamp}_{$random}.{$extension}";
     }
 
     /**

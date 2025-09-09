@@ -658,7 +658,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/pendientes', [EstudiantePagosController::class, 'pagosPendientes']);
         Route::get('/historial', [EstudiantePagosController::class, 'historialPagos']);
         Route::get('/estado-cuenta', [EstudiantePagosController::class, 'estadoCuenta']);
-        Route::post('/subir-recibo', [EstudiantePagosController::class, 'subirReciboPago']);
+        Route::post('/subir-recibo', [EstudiantePagosController::class, 'subirReciboPago'])
+            ->middleware('throttle:6,1'); // Rate limiting: 6 requests per minute
     });
 });
 

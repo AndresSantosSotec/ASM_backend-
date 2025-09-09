@@ -17,11 +17,18 @@ class KardexPago extends Model
         'banco',                // ← NUEVO
         'archivo_comprobante',  // ← NUEVO
         'estado_pago',          // ← NUEVO
+        'numero_boleta_norm',   // ← ROBUSTIFY
+        'banco_norm',           // ← ROBUSTIFY
+        'file_sha256',          // ← ROBUSTIFY
+        'fecha_aprobacion',     // ← ROBUSTIFY
+        'aprobado_por',         // ← ROBUSTIFY
+        'ip_address',           // ← ROBUSTIFY
+        'user_agent',           // ← ROBUSTIFY
         'observaciones',
-
     ];
     protected $casts = [
         'fecha_pago'  => 'date',
+        'fecha_aprobacion' => 'datetime',
         'monto_pagado' => 'decimal:2',
     ];
 
