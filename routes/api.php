@@ -55,7 +55,9 @@ use App\Http\Controllers\Api\PaymentExceptionCategoryController;
 use App\Http\Controllers\Api\PaymentGatewayController;
 use App\Http\Controllers\Api\EstudiantePagosController;
 use App\Http\Controllers\Api\DashboardFinancieroController;
+
 use App\Http\Controllers\Api\GestionPagosController;
+
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -66,7 +68,7 @@ use Illuminate\Support\Facades\Log;
 // Ping para verificar que el API esté activo
 Route::get('/ping', fn() => response()->json(['message' => 'pong!']));
 
-Route::get('/status', function () {
+route::get('/status', function () {
     return response()->json(['status' => 'API is running']);
 });
 
@@ -86,12 +88,15 @@ Route::get('/health', function () {
             'status' => 'API is healthy',
             'ok'     => true,
             'time'   => now()->toDateTimeString(),
+            // 'version'=> '1.0.0',
         ];
 
         // Entorno de desarrollo: información ampliada (no secretos)
         if (app()->environment(['local', 'testing'])) {
             $basic['meta'] = [
                 'app'     => config('app.name'),
+                // 'laravel' => app()->version(),
+                // 'php'     => PHP_VERSION,
                 'db'      => [
                     'connected' => true,
                 ],
@@ -182,6 +187,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('import', [\App\Http\Controllers\Api\EstudiantesImportController::class, 'uploadExcel'])
             ->name('estudiantes.import');
     });
+
+
 
     // ----------------------
     // Sesiones
@@ -543,9 +550,25 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
 
+    //Rutas De Preubas que fureson descartadas y no se usaran de forma Temporal
+    // //paymatent Edit
+    // Route::prefix('payment-plans')->group(function () {
+    //     Route::get('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'index']);
+    //     Route::post('/', [\App\Http\Controllers\Api\PaymentPlanController::class, 'store']);
+    //     Route::get('/{paymentPlan}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'show']);
+    //     Route::put('/{paymentPlan}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'update']);
+    //     Route::delete('/{paymentPlan}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'destroy']);
+
+    //     Route::get('/{paymentPlan}/installments', [\App\Http\Controllers\Api\PaymentPlanController::class, 'indexInstallments']);
+    //     Route::post('/{paymentPlan}/installments', [\App\Http\Controllers\Api\PaymentPlanController::class, 'storeInstallment']);
+    //     Route::get('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'showInstallment']);
+    //     Route::put('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'updateInstallment']);
+    //     Route::delete('/installments/{installment}', [\App\Http\Controllers\Api\PaymentPlanController::class, 'destroyInstallment']);
+    // });
+
     Route::get('/payment-rules', [RuleController::class, 'index']);
     Route::post('/payment-rules', [RuleController::class, 'store']);
-    Route::get('/payment-rules/{rule}', [RuleController::class, 'show']);
+    Route::get('/payment-rules/{rule}', [RuleController::class, 'show']); // <- NUEVO
     Route::put('/payment-rules/{rule}', [RuleController::class, 'update']);
 
     Route::post('/payment-rules/{rule}/notifications', [PaymentRuleNotificationController::class, 'store']);
@@ -568,7 +591,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/summary', [ReportsController::class, 'summary']);
     Route::get('/reports/export', [ReportsController::class, 'export']);
 
-    // Collection Logs (mantenidos para compatibilidad si otros controladores los usan)
+
+    // Collection Logs
     Route::get('/collection-logs', [CollectionLogController::class, 'index']);
     Route::post('/collection-logs', [CollectionLogController::class, 'store']);
     Route::get('/collection-logs/{id}', [CollectionLogController::class, 'show']);
@@ -576,10 +600,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/collection-logs/{id}', [CollectionLogController::class, 'destroy']);
 
     // Moodle queries
+
     Route::get('/moodle/consultas/{carnet?}', [MoodleConsultasController::class, 'cursosPorCarnet']);
     Route::get('/moodle/consultas/aprobados/{carnet?}', [MoodleConsultasController::class, 'cursosAprobados']);
     Route::get('/moodle/consultas/reprobados/{carnet?}', [MoodleConsultasController::class, 'cursosReprobados']);
     Route::get('/moodle/consultas/estatus/{carnet?}', [MoodleConsultasController::class, 'estatusAcademico']);
+
     Route::get('/moodle/consultas', [MoodleConsultasController::class, 'cursosPorCarnet']);
 
     // ----------------------
@@ -639,7 +665,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/prevalidar-recibo', [EstudiantePagosController::class, 'prevalidarRecibo'])->name('prevalidar_recibo');
     });
 
-    // Gestión de pagos (admin/finanzas) - SIN COLLECTION_LOGS
+    // Gestión de pagos (admin/finanzas)
     Route::prefix('collections')->group(function () {
         // Lista paginada de alumnos con cuotas vencidas (por EstudiantePrograma)
         Route::get('/late-payments', [GestionPagosController::class, 'latePayments']);
@@ -647,10 +673,13 @@ Route::middleware('auth:sanctum')->group(function () {
         // Detalle financiero del estudiante-programa (para modal)
         Route::get('/students/{epId}/snapshot', [GestionPagosController::class, 'studentSnapshot'])
             ->whereNumber('epId');
+
+        // (Opcional) planes de pago activos (si usas tabla PaymentPlan)
+        //Route::get('/payment-plans', [GestionPagosController::class, 'paymentPlans']);
     });
 
 });
 
 Route::apiResource('rules', RuleController::class);
 
-Route::get('/payment-rules-current', [RuleController::class, 'current']); // Método Global para pruebas de las API
+Route::get('/payment-rules-current', [RuleController::class, 'current']);//Metodo Global para purebas de las api
