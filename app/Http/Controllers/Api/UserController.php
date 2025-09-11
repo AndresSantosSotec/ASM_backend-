@@ -121,8 +121,18 @@ class UserController extends Controller
             $permissionAssigned = $this->rolePermissionService->assignPermissionsToUser($user);
             
             if (!$permissionAssigned) {
-                // Log warning pero no fallar la creación del usuario
-                Log::warning("Failed to assign permissions to user {$user->id} with role {$validatedData['rol']}");
+                // Log error but don't fail the user creation
+                Log::error("Failed to assign permissions to user {$user->id} with role {$validatedData['rol']}");
+                
+                // Still commit the transaction as user and role were created successfully
+                DB::commit();
+                
+                return response()->json([
+                    'user' => $user,
+                    'permissions_assigned' => false,
+                    'message' => 'Usuario creado exitosamente pero falló la asignación de permisos',
+                    'warning' => 'Los permisos deben ser asignados manualmente'
+                ], 201);
             }
 
             DB::commit();
@@ -337,5 +347,43 @@ class UserController extends Controller
         });
 
         return response()->json($users);
+    }
+
+    /**
+     * Manually assign permissions to a user (for debugging/fixing issues)
+     */
+    public function assignPermissions(Request $request, $userId)
+    {
+        try {
+            $user = User::with('userRole.role')->find($userId);
+            
+            if (!$user) {
+                return response()->json(['error' => 'Usuario no encontrado'], 404);
+            }
+
+            if (!$user->userRole) {
+                return response()->json(['error' => 'Usuario no tiene rol asignado'], 400);
+            }
+
+            $permissionAssigned = $this->rolePermissionService->assignPermissionsToUser($user);
+            
+            return response()->json([
+                'user_id' => $userId,
+                'role_id' => $user->userRole->role_id,
+                'role_name' => $user->userRole->role ? $user->userRole->role->name : 'Unknown',
+                'permissions_assigned' => $permissionAssigned,
+                'message' => $permissionAssigned 
+                    ? 'Permisos asignados correctamente' 
+                    : 'Error al asignar permisos'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("Error manually assigning permissions to user {$userId}: " . $e->getMessage());
+            
+            return response()->json([
+                'error' => 'Error al asignar permisos',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 }
