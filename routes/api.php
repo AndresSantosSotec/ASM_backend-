@@ -137,6 +137,9 @@ Route::get('/health', function () {
     }
 });
 
+Route::post('/conciliacion/import', [ReconciliationController::class, 'import']);
+Route::get('/conciliacion/template', [ReconciliationController::class, 'downloadTemplate']);
+Route::get('/conciliacion/export', [ReconciliationController::class, 'export']);
 Route::get('/conciliacion/pendientes-desde-kardex', [ReconciliationController::class, 'kardexNoConciliados']);
 // Rutas de autenticación
 Route::post('/login', [LoginController::class, 'login'])->name('login');
