@@ -181,27 +181,6 @@ class Mailable implements MailableContract, Renderable
     protected $assertionableRenderStrings;
 
     /**
-     * The delay for queued mailables.
-     *
-     * @var \DateTimeInterface|\DateInterval|int|null
-     */
-    public $delay;
-
-    /**
-     * The queue name for queued mailables.
-     *
-     * @var string|null
-     */
-    public $queue;
-
-    /**
-     * The queue connection for queued mailables.
-     *
-     * @var string|null
-     */
-    public $connection;
-
-    /**
      * The callback that should be invoked while building the view data.
      *
      * @var callable

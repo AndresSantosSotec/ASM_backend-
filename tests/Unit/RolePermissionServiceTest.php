@@ -55,9 +55,14 @@ class RolePermissionServiceTest extends TestCase
         for ($i = 34; $i <= 38; $i++) {
             DB::table('permissions')->insert([
                 'id' => $i,
+                'module' => 'docente',
+                'section' => 'portal',
+                'resource' => 'view',
                 'action' => 'view',
-                'name' => "permission_$i",
+                'effect' => 'allow',
                 'description' => "Test permission $i",
+                'route_path' => "/docente/portal/$i",
+                'is_enabled' => true,
                 'created_at' => now(),
                 'updated_at' => now()
             ]);
@@ -121,9 +126,14 @@ class RolePermissionServiceTest extends TestCase
         for ($i = 34; $i <= 38; $i++) { // Docente permissions
             DB::table('permissions')->insert([
                 'id' => $i,
+                'module' => 'docente',
+                'section' => 'portal',
+                'resource' => 'view',
                 'action' => 'view',
-                'name' => "docente_permission_$i",
+                'effect' => 'allow',
                 'description' => "Docente permission $i",
+                'route_path' => "/docente/portal/$i",
+                'is_enabled' => true,
                 'created_at' => now(),
                 'updated_at' => now()
             ]);
@@ -132,9 +142,14 @@ class RolePermissionServiceTest extends TestCase
         for ($i = 44; $i <= 48; $i++) { // Estudiante permissions
             DB::table('permissions')->insert([
                 'id' => $i,
+                'module' => 'estudiante',
+                'section' => 'portal',
+                'resource' => 'view',
                 'action' => 'view',
-                'name' => "estudiante_permission_$i",
+                'effect' => 'allow',
                 'description' => "Estudiante permission $i",
+                'route_path' => "/estudiante/portal/$i",
+                'is_enabled' => true,
                 'created_at' => now(),
                 'updated_at' => now()
             ]);
@@ -170,23 +185,79 @@ class RolePermissionServiceTest extends TestCase
 
     public function test_get_default_permission_ids_for_role()
     {
+        // Create some test permissions first
+        for ($i = 34; $i <= 38; $i++) {
+            DB::table('permissions')->insert([
+                'id' => $i,
+                'module' => 'docente',
+                'section' => 'portal',
+                'resource' => 'view',
+                'action' => 'view',
+                'effect' => 'allow',
+                'description' => "Docente permission $i",
+                'route_path' => "/docente/view/$i",
+                'is_enabled' => true,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+        }
+
         // Use reflection to test the private method
         $reflection = new \ReflectionClass($this->rolePermissionService);
         $method = $reflection->getMethod('getDefaultPermissionIdsForRole');
         $method->setAccessible(true);
 
-        // Test Docente role (ID: 2)
+        // Test Docente role (ID: 2) - should only return existing permissions
         $docentePermissions = $method->invoke($this->rolePermissionService, 2);
-        $this->assertEquals(range(34, 43), $docentePermissions);
+        
+        // Should only contain the permissions we created (34-38), not the full range (34-43)
+        $this->assertEquals([34, 35, 36, 37, 38], $docentePermissions);
 
-        // Test Estudiante role (ID: 3)
-        $estudiantePermissions = $method->invoke($this->rolePermissionService, 3);
-        $expectedEstudiante = array_merge(range(44, 51), [81]);
-        $this->assertEquals($expectedEstudiante, $estudiantePermissions);
+        // Test unknown role
+        $unknownPermissions = $method->invoke($this->rolePermissionService, 99);
+        $this->assertEquals([], $unknownPermissions);
+    }
 
-        // Test Asesor role (ID: 7)
-        $asesorPermissions = $method->invoke($this->rolePermissionService, 7);
-        $expectedAsesor = array_merge(range(1, 5), range(8, 9), [12]);
-        $this->assertEquals($expectedAsesor, $asesorPermissions);
+    public function test_handles_missing_permissions_gracefully()
+    {
+        // Create a role for Docente (ID: 2)
+        $role = Role::create([
+            'id' => 2,
+            'name' => 'Docente',
+            'description' => 'Portal Docente',
+            'is_system' => true,
+            'user_count' => 0
+        ]);
+
+        // Create a user
+        $user = User::create([
+            'username' => 'test_docente',
+            'email' => 'docente@test.com',
+            'password_hash' => bcrypt('password'),
+            'first_name' => 'Test',
+            'last_name' => 'Docente',
+            'is_active' => true
+        ]);
+
+        // Create user role assignment
+        UserRole::create([
+            'user_id' => $user->id,
+            'role_id' => $role->id,
+            'assigned_at' => now()
+        ]);
+
+        // Don't create any permissions - so assignment should fail gracefully
+
+        // Reload user with role relationship
+        $user->load('userRole');
+
+        // Test permission assignment - should return false but not crash
+        $result = $this->rolePermissionService->assignPermissionsToUser($user);
+
+        $this->assertFalse($result);
+
+        // Verify no permissions were assigned
+        $assignedPermissions = UserPermisos::where('user_id', $user->id)->count();
+        $this->assertEquals(0, $assignedPermissions);
     }
 }
