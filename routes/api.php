@@ -55,6 +55,10 @@ use App\Http\Controllers\Api\PaymentExceptionCategoryController;
 use App\Http\Controllers\Api\PaymentGatewayController;
 use App\Http\Controllers\Api\EstudiantePagosController;
 use App\Http\Controllers\Api\DashboardFinancieroController;
+use App\Http\Controllers\Api\EmailController;
+use App\Http\Controllers\Api\AdminEstudiantePagosController;
+
+
 
 use App\Http\Controllers\Api\GestionPagosController;
 
@@ -79,6 +83,16 @@ Route::get('/version', function () {
 Route::get('/time', function () {
     return response()->json(['time' => now()->toDateTimeString()]);
 });
+
+Route::post('/emails/send', [EmailController::class, 'send']);          // síncrono
+Route::post('/emails/send-queued', [EmailController::class, 'sendQueued']); // opcional: en cola
+
+Route::prefix('admin')->group(function () {
+    Route::get('/prospectos', [AdminEstudiantePagosController::class, 'index']);
+    Route::get('/prospectos/{id}/estado-cuenta', [AdminEstudiantePagosController::class, 'estadoCuenta']);
+    Route::get('/prospectos/{id}/historial', [AdminEstudiantePagosController::class, 'historial']);
+});
+
 
 Route::get('/health', function () {
     try {
@@ -674,10 +688,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/students/{epId}/snapshot', [GestionPagosController::class, 'studentSnapshot'])
             ->whereNumber('epId');
 
+        // nuevos
+        Route::get('/payment-plans', [GestionPagosController::class, 'paymentPlansOverview']);
+        Route::post('/payment-plans/preview', [GestionPagosController::class, 'previewPaymentPlan']);
+        Route::post('/payment-plans', [GestionPagosController::class, 'createPaymentPlan']);
+
         // (Opcional) planes de pago activos (si usas tabla PaymentPlan)
         //Route::get('/payment-plans', [GestionPagosController::class, 'paymentPlans']);
     });
-
 });
 
 Route::apiResource('rules', RuleController::class);

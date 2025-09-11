@@ -253,17 +253,15 @@ class Prospecto extends Model
 
         return $this->exceptionCategories()
             ->where('payment_exception_categories.active', true)
-            ->wherePivot(function ($query) use ($date) {
-                $query->where(function ($q) use ($date) {
-                    // Sin fecha de inicio O fecha de inicio <= fecha actual
-                    $q->whereNull('effective_from')
-                        ->orWhere('effective_from', '<=', $date);
-                })
-                    ->where(function ($q) use ($date) {
-                        // Sin fecha de fin O fecha de fin >= fecha actual
-                        $q->whereNull('effective_until')
-                            ->orWhere('effective_until', '>=', $date);
-                    });
+            ->where(function ($query) use ($date) {
+                // Condición para effective_from
+                $query->whereNull('prospecto_exception_categories.effective_from')
+                    ->orWhere('prospecto_exception_categories.effective_from', '<=', $date);
+            })
+            ->where(function ($query) use ($date) {
+                // Condición para effective_until
+                $query->whereNull('prospecto_exception_categories.effective_until')
+                    ->orWhere('prospecto_exception_categories.effective_until', '>=', $date);
             });
     }
     /**
