@@ -137,6 +137,7 @@ Route::get('/health', function () {
     }
 });
 
+Route::get('/conciliacion/pendientes-desde-kardex', [ReconciliationController::class, 'kardexNoConciliados']);
 // Rutas de autenticación
 Route::post('/login', [LoginController::class, 'login'])->name('login');
 Route::post('/logout', [LoginController::class, 'logout'])->middleware('auth:sanctum');
@@ -264,20 +265,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('commissions')->group(function () {
         //
         // 1) Configuración global de comisiones (singleton)
-        //
-        // GET  /api/commissions/config   → CommissionConfigController@index
-        // POST /api/commissions/config   → CommissionConfigController@store
-        // PUT  /api/commissions/config   → CommissionConfigController@update
         Route::get('/config', [CommissionConfigController::class, 'index']);
         Route::post('/config', [CommissionConfigController::class, 'store']);
         Route::put('/config', [CommissionConfigController::class, 'update']);
 
         //
         // 2) Tasas personalizadas por asesor
-        //
-        // GET  /api/commissions/rates/{userId}  → AdvisorCommissionRateController@show
-        // PUT  /api/commissions/rates/{userId}  → AdvisorCommissionRateController@update
-        // Get commission rate for an advisor
         Route::get('/rates/{userId}', [AdvisorCommissionRateController::class, 'show']);
 
         // Store (create) commission rate for an advisor
@@ -287,12 +280,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/rates/{userId}', [AdvisorCommissionRateController::class, 'update']);
         //
         // 3) Comisiones / histórico
-        //
-        // GET  /api/commissions         → CommissionController@index
-        // POST /api/commissions         → CommissionController@store
-        // GET  /api/commissions/{id}    → CommissionController@show
-        // DELETE /api/commissions/{id}  → CommissionController@destroy
-        // (opcional) GET /api/commissions/report → CommissionController@report
         Route::get('/',         [CommissionController::class, 'index']);
         Route::post('/',         [CommissionController::class, 'store']);
         Route::get('/{id}',     [CommissionController::class, 'show']);
@@ -597,9 +584,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'index']);
     Route::post('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'store']);
+
+
     Route::post('/reconciliation/upload', [ReconciliationController::class, 'upload']);
     Route::get('/reconciliation/pending', [ReconciliationController::class, 'pending']);
     Route::post('/reconciliation/process', [ReconciliationController::class, 'process']);
+    //rutas nuevas para la concilaicion
+
+
 
     // Financial reports
     Route::get('/reports/summary', [ReportsController::class, 'summary']);
