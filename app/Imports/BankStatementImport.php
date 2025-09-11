@@ -44,14 +44,33 @@ class BankStatementImport implements ToCollection, WithHeadingRow
         if (is_numeric($v)) return (float) $v;
         $s = strtoupper(trim((string) $v));
         $s = str_replace(['Q',' ',"\u{00A0}"], '', $s);
+        
+        // Detectar formato específico
         if (str_contains($s, ',') && str_contains($s, '.')) {
-            // "1.234,56" -> "1234.56"
-            $s = str_replace('.', '', $s);
-            $s = str_replace(',', '.', $s);
-        } else {
-            // "1,234" -> "1.234"
-            $s = str_replace(',', '.', $s);
+            // Determinar cuál es el separador de miles y cuál es el decimal
+            $lastComma = strrpos($s, ',');
+            $lastDot = strrpos($s, '.');
+            
+            if ($lastDot > $lastComma) {
+                // "1,234.56" formato US - coma es separador de miles
+                $s = str_replace(',', '', $s);
+            } else {
+                // "1.234,56" formato europeo - punto es separador de miles
+                $s = str_replace('.', '', $s);
+                $s = str_replace(',', '.', $s);
+            }
+        } elseif (str_contains($s, ',')) {
+            // Solo coma - puede ser decimal o separador de miles
+            $parts = explode(',', $s);
+            if (count($parts) == 2 && strlen($parts[1]) <= 2) {
+                // Probablemente decimal: "1234,56"
+                $s = str_replace(',', '.', $s);
+            } else {
+                // Probablemente separador de miles: "1,234"
+                $s = str_replace(',', '', $s);
+            }
         }
+        
         return (float) (is_numeric($s) ? $s : 0.0);
     }
 
