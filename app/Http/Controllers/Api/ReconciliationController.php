@@ -13,6 +13,7 @@ use Maatwebsite\Excel\Facades\Excel;
 use App\Imports\BankStatementImport;
 use App\Exports\ReconciliationTemplateExport;
 use App\Exports\ReconciliationRecordsExport;
+use Illuminate\Support\Facades\Log;
 
 class ReconciliationController extends Controller
 {
@@ -49,7 +50,7 @@ class ReconciliationController extends Controller
     protected function makeFingerprint(string $bankNorm, string $receiptNorm, float $amount, string $dateYmd): string
     {
         // NOTA: no usamos hash para poder depurar fácil; si quieres, cambia a sha256()
-        return $bankNorm.'|'.$receiptNorm.'|'.number_format($amount, 2, '.', '').'|'.$dateYmd;
+        return $bankNorm . '|' . $receiptNorm . '|' . number_format($amount, 2, '.', '') . '|' . $dateYmd;
     }
 
     /**
@@ -100,8 +101,8 @@ class ReconciliationController extends Controller
                 // CORREGIDO: Usa orWhereRaw para normalización en tiempo real
                 $kardexQuery->where(function ($q) use ($bankFilterNorm) {
                     $q->where('banco_normalizado', $bankFilterNorm)
-                      ->orWhere('banco', $bankFilterNorm)
-                      ->orWhereRaw('UPPER(TRIM(banco)) = ?', [$bankFilterNorm]);
+                        ->orWhere('banco', $bankFilterNorm)
+                        ->orWhereRaw('UPPER(TRIM(banco)) = ?', [$bankFilterNorm]);
                 });
             }
 
@@ -109,7 +110,7 @@ class ReconciliationController extends Controller
 
             // 2) Cargar reconciliation_records del mismo rango para comparar
             $recQuery = ReconciliationRecord::query()
-                ->select(['id','bank','reference','amount','date','status']);
+                ->select(['id', 'bank', 'reference', 'amount', 'date', 'status']);
 
             if ($from) {
                 $recQuery->whereDate('date', '>=', $from);
@@ -121,9 +122,9 @@ class ReconciliationController extends Controller
             // CORREGIDO: Simplificado el filtro por banco
             if ($bankFilterNorm) {
                 $aliases = $this->getBankAliases($bankFilterNorm);
-                $recQuery->where(function($q) use ($aliases) {
-                    foreach($aliases as $alias) {
-                        $q->orWhere('bank', 'LIKE', '%'.$alias.'%');
+                $recQuery->where(function ($q) use ($aliases) {
+                    foreach ($aliases as $alias) {
+                        $q->orWhere('bank', 'LIKE', '%' . $alias . '%');
                     }
                 });
             }
@@ -165,16 +166,16 @@ class ReconciliationController extends Controller
                         'index'  => $i++,
                         'input'  => [
                             'carnet'      => $estudiantePrograma->prospecto->carnet ?? '',
-                            'alumno'      => $estudiantePrograma->prospecto->nombre ?? $estudiantePrograma->prospecto->primer_nombre.' '.$estudiantePrograma->prospecto->primer_apellido ?? '',
+                            'alumno'      => $estudiantePrograma->prospecto->nombre ?? $estudiantePrograma->prospecto->primer_nombre . ' ' . $estudiantePrograma->prospecto->primer_apellido ?? '',
                             'carrera'     => $estudiantePrograma->programa->nombre_del_programa ?? '',
                             'banco'       => $pago->banco ?? $bankNorm,
                             'recibo'      => $pago->numero_boleta ?? $receiptNorm,
                             'monto'       => $amount,
                             'fechaPago'   => $dateYmd,
-                            'autorizacion'=> null,
+                            'autorizacion' => null,
                         ],
                         'status' => 'sin_coincidencia',
-                        'message'=> 'No existe registro equivalente en reconciliation_records',
+                        'message' => 'No existe registro equivalente en reconciliation_records',
                         'kardex_id' => $pago->id,
                         'cuota_id' => $pago->cuota_id,
                     ];
@@ -196,9 +197,8 @@ class ReconciliationController extends Controller
                 'summary' => $summary,
                 'message' => 'Pendientes derivados de Kardex sin match en reconciliation_records',
             ]);
-
         } catch (\Exception $e) {
-           // \Log::error('Error en kardexNoConciliados: ' . $e->getMessage());
+            // \Log::error('Error en kardexNoConciliados: ' . $e->getMessage());
 
             return response()->json([
                 'ok'      => false,
@@ -218,31 +218,56 @@ class ReconciliationController extends Controller
     /** POST /api/conciliacion/import
      * Importa CSV/XLSX a reconciliation_records (ignora prospecto_id).
      */
+    // ReconciliationController@import
+
+    // ReconciliationController.php
+
     public function import(Request $request)
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv,txt|max:10240', // 10MB
+            'file' => 'required|file|mimes:xlsx,csv,txt|max:10240',
         ]);
 
+        // 1) tomar el user id (autenticado o por header/campo opcional)
+        $uploaderId = auth()->id()
+            ?? optional($request->user())->id
+            ?? $request->integer('uploaded_by')
+            ?? $request->integer('X-User-Id'); // si lo mandas por header
+
+        if (!$uploaderId) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Falta el usuario que sube el archivo (uploaded_by).',
+            ], 422);
+        }
+
         try {
-            Excel::import(new BankStatementImport, $request->file('file'));
+            // 2) pasar el uploaderId al import
+            Excel::import(new BankStatementImport(uploaderId: $uploaderId), $request->file('file'));
 
             $summary = session('reconciliation_import_summary', [
-                'created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0,
+                'created' => 0,
+                'updated' => 0,
+                'skipped' => 0,
+                'errors' => 0,
             ]);
+            $details = session('reconciliation_import_details', []); // <- si ya guardas detalles
 
             return response()->json([
                 'ok' => true,
                 'message' => 'Importación completada',
                 'summary' => $summary,
+                'details' => $details,
             ]);
         } catch (\Throwable $e) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Error al importar: '.$e->getMessage(),
+                'message' => 'Error al importar: ' . $e->getMessage(),
             ], 500);
         }
     }
+
+
 
     /** GET /api/conciliacion/template
      * Descarga plantilla con encabezados correctos.
@@ -273,12 +298,140 @@ class ReconciliationController extends Controller
     private function getBankAliases(string $bankNorm): array
     {
         return match ($bankNorm) {
-            'BANCO INDUSTRIAL' => ['BI','INDUSTRIAL', 'BANCO INDUSTRIAL'],
-            'BANRURAL'         => ['BAN RURAL','RURAL', 'BANRURAL'],
+            'BANCO INDUSTRIAL' => ['BI', 'INDUSTRIAL', 'BANCO INDUSTRIAL'],
+            'BANRURAL'         => ['BAN RURAL', 'RURAL', 'BANRURAL'],
             'BAM'              => ['BANCO AGROMERCANTIL', 'BAM'],
-            'G&T CONTINENTAL'  => ['G&T','G Y T','GYT', 'G&T CONTINENTAL'],
+            'G&T CONTINENTAL'  => ['G&T', 'G Y T', 'GYT', 'G&T CONTINENTAL'],
             'PROMERICA'        => ['PROMERICA'],
             default            => [$bankNorm],
         };
+    }
+
+    // App\Http\Controllers\Api\ReconciliationController.php
+
+    public function kardexConciliados(Request $request)
+    {
+        try {
+            $from = $request->query('from');
+            $to   = $request->query('to');
+            $bank = $request->query('banco');
+            $bankFilterNorm = $bank ? $this->normalizeBank($bank) : null;
+
+            // 1) Traer pagos del kardex (mismos filtros que "pendientes")
+            $kardexQuery = KardexPago::query()->select([
+                'id',
+                'estudiante_programa_id',
+                'cuota_id',
+                'fecha_pago',
+                'monto_pagado',
+                'numero_boleta',
+                'banco',
+                'numero_boleta_normalizada',
+                'banco_normalizado',
+            ]);
+            if ($from) $kardexQuery->whereDate('fecha_pago', '>=', $from);
+            if ($to)   $kardexQuery->whereDate('fecha_pago', '<=', $to);
+            if ($bankFilterNorm) {
+                $kardexQuery->where(function ($q) use ($bankFilterNorm) {
+                    $q->where('banco_normalizado', $bankFilterNorm)
+                        ->orWhere('banco', $bankFilterNorm)
+                        ->orWhereRaw('UPPER(TRIM(banco)) = ?', [$bankFilterNorm]);
+                });
+            }
+            $kardex = $kardexQuery->orderBy('fecha_pago', 'desc')->get();
+
+            // 2) Reconciliation records del mismo rango (y banco)
+            $recQuery = ReconciliationRecord::query()->select([
+                'id',
+                'bank',
+                'reference',
+                'amount',
+                'date',
+                'auth_number',
+                'status'
+            ]);
+            if ($from) $recQuery->whereDate('date', '>=', $from);
+            if ($to)   $recQuery->whereDate('date', '<=', $to);
+            if ($bankFilterNorm) {
+                $aliases = $this->getBankAliases($bankFilterNorm);
+                $recQuery->where(function ($q) use ($aliases) {
+                    foreach ($aliases as $alias) {
+                        $q->orWhere('bank', 'LIKE', '%' . $alias . '%');
+                    }
+                });
+            }
+            $recs = $recQuery->get();
+
+            // 3) Map por fingerprint para “match”
+            $recMap = [];
+            foreach ($recs as $r) {
+                $bn = $this->normalizeBank((string)$r->bank);
+                $rn = $this->normalizeReceiptNumber((string)$r->reference);
+                $fp = $this->makeFingerprint($bn, $rn, (float)$r->amount, Carbon::parse($r->date)->format('Y-m-d'));
+                $recMap[$fp] = $r;
+            }
+
+            // 4) Armar respuesta UI (solo los que SI tienen match)
+            $out = [];
+            $i = 1;
+            $sum = 0;
+
+            foreach ($kardex as $p) {
+                $bn = $p->banco_normalizado ?: $this->normalizeBank((string)$p->banco);
+                $rn = $p->numero_boleta_normalizada ?: $this->normalizeReceiptNumber((string)$p->numero_boleta);
+                $amt = (float)$p->monto_pagado;
+                $ymd = Carbon::parse($p->fecha_pago)->format('Y-m-d');
+
+                $fp = $this->makeFingerprint($bn, $rn, $amt, $ymd);
+                if (!isset($recMap[$fp])) continue; // solo concilios exactos
+
+                $est = $p->estudiantePrograma()->with(['prospecto', 'programa'])->first();
+
+                $out[] = [
+                    'index' => $i++,
+                    'input' => [
+                        'carnet'       => $est->prospecto->carnet ?? '',
+                        'alumno'       => $est->prospecto->nombre ?? (($est->prospecto->primer_nombre ?? '') . ' ' . ($est->prospecto->primer_apellido ?? '')),
+                        'carrera'      => $est->programa->nombre_del_programa ?? '',
+                        'banco'        => $p->banco ?? $bn,
+                        'recibo'       => $p->numero_boleta ?? $rn,
+                        'monto'        => $amt,
+                        'fechaPago'    => $ymd,
+                        'autorizacion' => $recMap[$fp]->auth_number ?? null,
+                    ],
+                    'status'   => 'conciliado',
+                    'message'  => 'Match exacto (bank, referencia, monto, fecha).',
+                    'kardex_id' => $p->id,
+                    'cuota_id' => $p->cuota_id,
+                ];
+                $sum += $amt;
+            }
+
+            return response()->json([
+                'ok' => true,
+                'results' => $out,
+                'summary' => [
+                    'conciliados'      => count($out),
+                    'monto_conciliado' => $sum,
+                    'con_diferencia'   => 0,
+                    'rechazados'       => 0,
+                    'sin_coincidencia' => 0,
+                ],
+                'message' => 'Conciliados (intersección Kardex ↔ reconciliation_records)',
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'results' => [],
+                'summary' => [
+                    'conciliados' => 0,
+                    'monto_conciliado' => 0,
+                    'con_diferencia' => 0,
+                    'rechazados' => 0,
+                    'sin_coincidencia' => 0,
+                ],
+                'message' => 'Error: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

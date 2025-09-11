@@ -5,17 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\UserPermisos;
-use App\Models\ModulesViews;
-use App\Models\Permisos;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class UserPermisosController extends Controller
 {
-    /**
-     * Lista los permisos asignados a un usuario.
-     */
     public function index(Request $request)
     {
         $user_id = $request->query('user_id');
@@ -38,7 +33,6 @@ class UserPermisosController extends Controller
     }
 
     /**
-     * Asigna o actualiza los permisos de un usuario.
      * Espera:
      * {
      *   "user_id": 123,
@@ -47,28 +41,23 @@ class UserPermisosController extends Controller
      */
     public function store(Request $request)
     {
-        // Loguea el payload crudo para depurar 422
         Log::info('UserPermisos.store payload', ['payload' => $request->all()]);
 
-        // Asegura que "permissions" sea un array plano de enteros
+        // Normaliza "permissions" a un array plano de enteros únicos
         $incoming = $request->all();
         $permissions = $incoming['permissions'] ?? [];
         if (is_array($permissions)) {
             $permissions = array_values(array_filter(array_map(function ($v) {
-                // Soporta objetos {id: X}, strings "X"
-                if (is_array($v) && isset($v['id'])) return (int)$v['id'];
-                return is_numeric($v) ? (int)$v : null;
-            }, $permissions), function ($v) {
-                return !is_null($v);
-            }));
+                if (is_array($v) && isset($v['id'])) return (int) $v['id'];
+                return is_numeric($v) ? (int) $v : null;
+            }, $permissions), fn ($v) => !is_null($v)));
+            $permissions = array_values(array_unique($permissions));
         } else {
             $permissions = [];
         }
-        $request->merge([
-            'permissions' => $permissions
-        ]);
+        $request->merge(['permissions' => $permissions]);
 
-        // Valida
+        // Valida entrada
         $validator = Validator::make($request->all(), [
             'user_id'       => 'required|exists:users,id',
             'permissions'   => 'required|array',
@@ -86,60 +75,63 @@ class UserPermisosController extends Controller
             ], 422);
         }
 
+        $userId = (int) $request->input('user_id');
+        $moduleviewIds = $request->input('permissions', []);
+
+        // Mapea TODOS los moduleview_id -> permission_id con JOIN correcto sobre "permissions as p"
+        $permMap = DB::table('permissions as p')
+            ->join('moduleviews as mv', 'mv.view_path', '=', 'p.route_path')
+            ->whereIn('mv.id', $moduleviewIds)
+            ->where('p.action', '=', 'view')
+            ->where('p.is_enabled', '=', true)
+            ->pluck('p.id', 'mv.id')   // [mv_id => perm_id]
+            ->toArray();
+
+        // Si falta alguno, no borres nada y responde 422
+        $missingMvIds = array_values(array_diff($moduleviewIds, array_keys($permMap)));
+        if (!empty($missingMvIds)) {
+            Log::warning('UserPermisos.store missing view permissions', [
+                'missing_moduleview_ids' => $missingMvIds
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => "Algunas vistas seleccionadas no tienen permiso 'view' configurado o habilitado.",
+                'errors'  => [
+                    'permissions' => array_map(
+                        fn ($id) => "moduleview_id {$id} no tiene permiso 'view' configurado en permissions o está deshabilitado.",
+                        $missingMvIds
+                    )
+                ]
+            ], 422);
+        }
+
         DB::beginTransaction();
         try {
-            $userId = (int) $request->input('user_id');
-            $moduleviewIds = $request->input('permissions', []);
+            // Bloquea filas actuales del usuario para evitar carreras
+            DB::table((new UserPermisos)->getTable())
+                ->where('user_id', $userId)
+                ->lockForUpdate()
+                ->get();
 
-            // Limpia previos
-            UserPermisos::where('user_id', $userId)->delete();
+            // Limpia previos e inserta nuevos
+            DB::table((new UserPermisos)->getTable())->where('user_id', $userId)->delete();
 
-            // Mapea cada moduleview_id → permission.id (action='view')
             $now = now();
             $rows = [];
-
             foreach ($moduleviewIds as $mvId) {
-                $mv = ModulesViews::find($mvId);
-                if (!$mv) {
-                    // Safety: debería estar cubierto por la validación exists
-                    continue;
-                }
-
-                $permId = Permisos::query()
-                    ->where('route_path', $mv->view_path)
-                    ->where('action', 'view') // aquí defines qué action representa “acceso a la vista”
-                    ->where('is_enabled', true)
-                    ->value('id');
-
-                if (!$permId) {
-                    // Si no existe el permiso 'view' para esa vista, puedes:
-                    // (a) saltarlo, (b) crearlo, o (c) disparar 422
-                    Log::warning('No existe permiso view para la vista', [
-                        'moduleview_id' => $mvId,
-                        'view_path' => $mv->view_path
-                    ]);
-                    return response()->json([
-                        'success' => false,
-                        'message' => "No existe permiso 'view' para la vista seleccionada.",
-                        'errors'  => ['permissions' => ["moduleview_id {$mvId} no tiene permiso 'view' configurado en permissions."]]
-                    ], 422);
-                }
-
                 $rows[] = [
                     'user_id'       => $userId,
-                    'permission_id' => $permId,  // <<<<< guarda permissions.id
+                    'permission_id' => $permMap[$mvId],
                     'assigned_at'   => $now,
                     'scope'         => 'self'
                 ];
             }
-
             if (!empty($rows)) {
-                UserPermisos::insert($rows);
+                DB::table((new UserPermisos)->getTable())->insert($rows);
             }
 
             DB::commit();
 
-            // Eager load correcto
             $updated = UserPermisos::with('permission.moduleView.module')
                 ->where('user_id', $userId)
                 ->get();
@@ -169,7 +161,7 @@ class UserPermisosController extends Controller
             'scope' => 'nullable|string'
         ]);
 
-        $userPermiso = UserPermisos::findOrFail($id);
+        $userPermiso = \App\Models\UserPermisos::findOrFail($id);
         $userPermiso->update($validated);
 
         return response()->json([
@@ -181,7 +173,7 @@ class UserPermisosController extends Controller
 
     public function destroy($id)
     {
-        $userPermiso = UserPermisos::findOrFail($id);
+        $userPermiso = \App\Models\UserPermisos::findOrFail($id);
         $userPermiso->delete();
 
         return response()->json([

@@ -1,27 +1,147 @@
 <?php
-// app/Imports/BankStatementImport.php
 
 namespace App\Imports;
 
 use App\Models\ReconciliationRecord;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Auth;
-use Maatwebsite\Excel\Concerns\ToCollection;
-use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
+use Maatwebsite\Excel\Row;
+use Maatwebsite\Excel\Concerns\OnEachRow;
+use Maatwebsite\Excel\Concerns\WithHeadingRow;
+use Maatwebsite\Excel\Concerns\WithChunkReading;
+use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
+use Throwable;
 
-class BankStatementImport implements ToCollection, WithHeadingRow
+class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
 {
-    /** Normaliza número de boleta/referencia */
-    protected function normalizeReceiptNumber(string $n): string
+    public int $created = 0, $updated = 0, $skipped = 0, $errors = 0;
+    public array $details = [];
+    private int $rowCounter = 0;
+
+    public function __construct(private int $uploaderId) {}
+
+    public function headingRow(): int { return 1; }
+    public function chunkSize(): int { return 1000; }
+
+    public function onRow(Row $row)
+    {
+        $this->rowCounter++;
+        $rowNum = $this->rowCounter + 1; // +1 porque el encabezado está en la fila 1
+
+        try {
+            $r = $row->toArray();
+
+            $bank       = $this->pick($r, ['banco','bank','entidad']);
+            $reference  = $this->pick($r, ['referencia','referencia/boleta','referencia_boleta','boleta','numero de recibo','número de recibo','no. referencia','reference']);
+            $amountRaw  = $this->pick($r, ['monto','importe','valor','amount']);
+            $dateRaw    = $this->pick($r, ['fecha','fecha de pago','fecha_pago','date']);
+            $auth       = $this->pick($r, ['numero de autorizacion','número de autorización','autorizacion','auth','auth_number']);
+
+            // Si todos los campos están vacíos, saltar la fila
+            if ($bank === null && $reference === null && $amountRaw === null && $dateRaw === null) {
+                $this->skipped++;
+                return;
+            }
+
+            // Validar campos requeridos
+            if (!$bank || !$reference || $amountRaw === null || !$dateRaw) {
+                $this->errors++;
+                $this->details[] = ['row' => $rowNum, 'message' => 'Faltan campos requeridos (Banco, Referencia, Monto, Fecha)'];
+                Log::warning('Recon import: campos faltantes', compact('rowNum','bank','reference','amountRaw','dateRaw'));
+                return;
+            }
+
+            // Normalizar y validar datos
+            $bankNorm  = $this->normalizeBank((string)$bank);
+            $refNorm   = $this->normalizeReceiptNumber((string)$reference);
+            $amount    = $this->toNumber($amountRaw);
+            $dateYmd   = $this->parseDate($dateRaw);
+
+            if ($amount === null || $dateYmd === null) {
+                $this->errors++;
+                $this->details[] = ['row' => $rowNum, 'message' => 'Monto o Fecha inválidos'];
+                Log::warning('Recon import: monto/fecha inválidos', compact('rowNum','amountRaw','dateRaw'));
+                return;
+            }
+
+            $fp = $this->makeFingerprint($bankNorm, $refNorm, $amount, $dateYmd);
+
+            // Crear o actualizar registro
+            $model = ReconciliationRecord::updateOrCreate(
+                ['fingerprint' => $fp],
+                [
+                    'bank'                  => (string)$bank,
+                    'bank_normalized'       => $bankNorm,
+                    'reference'             => (string)$reference,
+                    'reference_normalized'  => $refNorm,
+                    'amount'                => $amount,
+                    'date'                  => $dateYmd,
+                    'auth_number'           => $auth,
+                    'status'                => 'imported',
+                    'uploaded_by'           => $this->uploaderId,
+                ]
+            );
+
+            $model->wasRecentlyCreated ? $this->created++ : $this->updated++;
+
+            // Guardar resumen en sesión cada 100 filas procesadas
+            if ($this->rowCounter % 100 === 0) {
+                $this->saveProgressToSession();
+            }
+
+        } catch (Throwable $e) {
+            $this->errors++;
+            $this->details[] = ['row' => $rowNum, 'message' => $e->getMessage()];
+            Log::error('Recon import: excepción por fila', ['row' => $rowNum, 'error' => $e->getMessage()]);
+        }
+    }
+
+    public function __destruct()
+    {
+        // Guardar resumen final al terminar el procesamiento
+        $this->saveProgressToSession();
+
+        Log::info('Reconciliation import finalizado', [
+            'created' => $this->created, 'updated' => $this->updated,
+            'skipped' => $this->skipped, 'errors' => $this->errors
+        ]);
+    }
+
+    private function saveProgressToSession(): void
+    {
+        session()->put('reconciliation_import_summary', [
+            'created' => $this->created,
+            'updated' => $this->updated,
+            'skipped' => $this->skipped,
+            'errors'  => $this->errors,
+        ]);
+        session()->put('reconciliation_import_details', $this->details);
+    }
+
+    /** -------- Helpers -------- */
+
+    private function pick($row, array $candidates)
+    {
+        foreach ($candidates as $k) {
+            foreach ([
+                $k,
+                strtolower($k),
+                str_replace(' ', '_', strtolower($k)),
+                str_replace([' ', '.'], '', strtolower($k)),
+            ] as $cand) {
+                if (isset($row[$cand]) && $row[$cand] !== '' && $row[$cand] !== null) return $row[$cand];
+            }
+        }
+        return null;
+    }
+
+    private function normalizeReceiptNumber(string $n): string
     {
         $n = mb_strtoupper($n, 'UTF-8');
         return preg_replace('/[^A-Z0-9]/u', '', $n);
     }
 
-    /** Normaliza banco a canon */
-    protected function normalizeBank(string $bank): string
+    private function normalizeBank(string $bank): string
     {
         $b = mb_strtoupper(trim($bank), 'UTF-8');
         $map = [
@@ -37,163 +157,59 @@ class BankStatementImport implements ToCollection, WithHeadingRow
         return $b;
     }
 
-    /** Convierte Q-montos comunes GT a float (1.234,56 | 1,234.56 | 1234) */
-    protected function parseAmount($v): float
+    private function makeFingerprint(string $bankNorm, string $receiptNorm, float $amount, string $dateYmd): string
     {
-        if (is_null($v)) return 0.0;
-        if (is_numeric($v)) return (float) $v;
-        $s = strtoupper(trim((string) $v));
-        $s = str_replace(['Q',' ','\u{00A0}'], '', $s);
-        if (str_contains($s, ',') && str_contains($s, '.')) {
-            // "1.234,56" -> "1234.56"
-            $s = str_replace('.', '', $s);
-            $s = str_replace(',', '.', $s);
-        } else {
-            // "1,234" -> "1.234"
-            $s = str_replace(',', '.', $s);
-        }
-        return (float) (is_numeric($s) ? $s : 0.0);
+        return $bankNorm.'|'.$receiptNorm.'|'.number_format($amount, 2, '.', '').'|'.$dateYmd;
     }
 
-    /** Acepta yyyy-mm-dd, dd/mm/yyyy, Excel serial, etc. */
-    protected function parseDate($v): ?string
+    private function toNumber($v): ?float
     {
-        if (is_null($v) || $v === '') return null;
+        if (is_numeric($v)) return (float)$v;
+        $s = trim((string)$v);
+        if ($s === '') return null;
+        // quita símbolos y deja dígitos + separadores
+        $s = preg_replace('/[^\d,.\-]/', '', $s);
 
-        // Excel serial
+        if (strpos($s, ',') !== false && strpos($s, '.') !== false) {
+            // patrón "1.234,56" => quita puntos (miles) y usa coma como decimal
+            if (preg_match('/\.\d{3}(,|$)/', $s)) {
+                $s = str_replace('.', '', $s);
+                $s = str_replace(',', '.', $s);
+            } else {
+                // patrón "1,234.56"
+                $s = str_replace(',', '', $s);
+            }
+        } elseif (strpos($s, ',') !== false) {
+            // "1234,56" => decimal con coma
+            $s = str_replace(',', '.', $s);
+        }
+        return is_numeric($s) ? (float)$s : null;
+    }
+
+    private function parseDate($v): ?string
+    {
+        if ($v instanceof \DateTimeInterface) return Carbon::instance($v)->format('Y-m-d');
+
         if (is_numeric($v)) {
             try {
-                $dt = ExcelDate::excelToDateTimeObject((float)$v);
+                $dt = ExcelDate::excelToDateTimeObject($v);
                 return Carbon::instance($dt)->format('Y-m-d');
-            } catch (\Throwable $e) {}
+            } catch (\Throwable) {}
         }
 
-        $s = trim((string) $v);
+        $s = trim((string)$v);
+        if ($s === '') return null;
 
-        // dd/mm/yyyy
-        if (preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})$#', $s, $m)) {
-            return Carbon::createFromFormat('d/m/Y', $s)->format('Y-m-d');
+        foreach (['Y-m-d','d/m/Y','d-m-Y','m/d/Y'] as $fmt) {
+            try {
+                return Carbon::createFromFormat($fmt, $s)->format('Y-m-d');
+            } catch (\Throwable) {}
         }
 
-        // yyyy-mm-dd
-        if (preg_match('#^\d{4}-\d{2}-\d{2}$#', $s)) {
-            return Carbon::parse($s)->format('Y-m-d');
-        }
-
-        // Intento general
         try {
             return Carbon::parse($s)->format('Y-m-d');
-        } catch (\Throwable $e) {
-            return null;
-        }
-    }
+        } catch (\Throwable) {}
 
-    /** Mapea encabezados variados a claves canónicas */
-    protected function mapHeader(string $h): ?string
-    {
-        $h = mb_strtolower(trim($h), 'UTF-8');
-        return match (true) {
-            str_contains($h, 'banco')                       => 'bank',
-            str_contains($h, 'referencia')                  => 'reference',
-            str_contains($h, 'boleta')                      => 'reference',
-            str_contains($h, 'volante') || str_contains($h, 'voucher') => 'reference',
-            str_contains($h, 'monto') || str_contains($h, 'importe')    => 'amount',
-            str_contains($h, 'fecha')                       => 'date',
-            str_contains($h, 'autoriz')                     => 'auth_number',
-            default                                         => null,
-        };
-    }
-
-    /** Construye fingerprint lógico: bank|reference|amount|date */
-    protected function makeFingerprint(string $bankNorm, string $refNorm, float $amount, ?string $dateYmd): string
-    {
-        $amt = number_format($amount, 2, '.', '');
-        $dateYmd = $dateYmd ?: '0000-00-00';
-        return "{$bankNorm}|{$refNorm}|{$amt}|{$dateYmd}";
-    }
-
-    public function headingRow(): int
-    {
-        return 1; // Primera fila como encabezados
-    }
-
-    public function collection(Collection $rows)
-    {
-        // Normaliza encabezados a canónicos
-        // $rows viene como colección de arrays asociativos (por WithHeadingRow)
-        $created = 0; $updated = 0; $skipped = 0; $errors = 0;
-
-        $userId = Auth::id();
-
-        foreach ($rows as $row) {
-            try {
-                // 1) Renombra claves a canónicas
-                $canonical = [
-                    'bank'        => null,
-                    'reference'   => null,
-                    'amount'      => null,
-                    'date'        => null,
-                    'auth_number' => null,
-                ];
-
-                foreach ($row as $key => $val) {
-                    $mapped = $this->mapHeader((string)$key);
-                    if ($mapped && array_key_exists($mapped, $canonical)) {
-                        $canonical[$mapped] = $val;
-                    }
-                }
-
-                // Requeridos mínimos
-                if (empty($canonical['bank']) || empty($canonical['reference']) || is_null($canonical['amount'])) {
-                    $skipped++;
-                    continue;
-                }
-
-                // 2) Parseos/normalizaciones
-                $bankNorm = $this->normalizeBank((string)$canonical['bank']);
-                $refNorm  = $this->normalizeReceiptNumber((string)$canonical['reference']);
-                $amount   = $this->parseAmount($canonical['amount']);
-                $dateYmd  = $this->parseDate($canonical['date']);
-
-                // 3) Fingerprint
-                $finger  = $this->makeFingerprint($bankNorm, $refNorm, $amount, $dateYmd);
-
-                // 4) Upsert por fingerprint (ignora prospecto_id)
-                $payload = [
-                    'bank'                 => (string)$canonical['bank'],
-                    'reference'            => (string)$canonical['reference'],
-                    'amount'               => $amount,
-                    'date'                 => $dateYmd,
-                    'auth_number'          => $canonical['auth_number'] ? (string)$canonical['auth_number'] : null,
-                    'status'               => 'uploaded', // o 'pendiente_revision'
-                    'uploaded_by'          => $userId,
-                    // derivados
-                    'bank_normalized'      => $bankNorm,
-                    'reference_normalized' => $refNorm,
-                    'fingerprint'          => $finger,
-                ];
-
-                $rec = ReconciliationRecord::query()->where('fingerprint', $finger)->first();
-
-                if ($rec) {
-                    $rec->fill($payload);
-                    if ($rec->isDirty()) {
-                        $rec->save();
-                        $updated++;
-                    } else {
-                        $skipped++; // ya existía idéntico
-                    }
-                } else {
-                    ReconciliationRecord::create($payload);
-                    $created++;
-                }
-            } catch (\Throwable $e) {
-                $errors++;
-            }
-        }
-
-        // Puedes guardar un log/summary si quieres
-        session()->flash('reconciliation_import_summary', compact('created','updated','skipped','errors'));
+        return null;
     }
 }
-

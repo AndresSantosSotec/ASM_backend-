@@ -137,10 +137,7 @@ Route::get('/health', function () {
     }
 });
 
-Route::post('/conciliacion/import', [ReconciliationController::class, 'import']);
-Route::get('/conciliacion/template', [ReconciliationController::class, 'downloadTemplate']);
-Route::get('/conciliacion/export', [ReconciliationController::class, 'export']);
-Route::get('/conciliacion/pendientes-desde-kardex', [ReconciliationController::class, 'kardexNoConciliados']);
+
 // Rutas de autenticación
 Route::post('/login', [LoginController::class, 'login'])->name('login');
 Route::post('/logout', [LoginController::class, 'logout'])->middleware('auth:sanctum');
@@ -161,6 +158,12 @@ Route::get('/fichas/{id}', [InscripcionController::class, 'show'])
  * Rutas Protegidas (Requieren auth:sanctum)
  */
 Route::middleware('auth:sanctum')->group(function () {
+
+
+    Route::post('/conciliacion/import', [ReconciliationController::class, 'import']);
+    Route::get('/conciliacion/template', [ReconciliationController::class, 'downloadTemplate']);
+    Route::get('/conciliacion/export', [ReconciliationController::class, 'export']);
+    Route::get('/conciliacion/pendientes-desde-kardex', [ReconciliationController::class, 'kardexNoConciliados']);
 
     // Usuario autenticado
     Route::get('/user', function (Request $request) {
@@ -592,6 +595,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/reconciliation/upload', [ReconciliationController::class, 'upload']);
     Route::get('/reconciliation/pending', [ReconciliationController::class, 'pending']);
     Route::post('/reconciliation/process', [ReconciliationController::class, 'process']);
+
+    Route::get('/conciliacion/conciliados-desde-kardex', [ReconciliationController::class, 'kardexConciliados']);
+
+
+
+
     //rutas nuevas para la concilaicion
 
 
