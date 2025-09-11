@@ -351,6 +351,7 @@ Route::prefix('users')->group(function () {
     Route::post('/bulk-delete', [UserController::class, 'bulkDelete']);
     Route::get('/export', [UserController::class, 'export']);
     Route::get('/role/{roleId}', [UserController::class, 'getUsersByRole']);
+    Route::post('/{id}/assign-permissions', [UserController::class, 'assignPermissions']); // New route for debugging
 });
 
 // ----------------------
