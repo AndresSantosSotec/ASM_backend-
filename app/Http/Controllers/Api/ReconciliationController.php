@@ -9,6 +9,10 @@ use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 use App\Models\KardexPago;
 use App\Models\ReconciliationRecord;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Imports\BankStatementImport;
+use App\Exports\ReconciliationTemplateExport;
+use App\Exports\ReconciliationRecordsExport;
 
 class ReconciliationController extends Controller
 {
@@ -224,5 +228,57 @@ class ReconciliationController extends Controller
             'PROMERICA'        => ['PROMERICA'],
             default            => [$bankNorm],
         };
+    }
+
+    /** POST /api/conciliacion/import
+     * Importa CSV/XLSX a reconciliation_records (ignora prospecto_id).
+     */
+    public function import(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,csv,txt|max:10240', // 10MB
+        ]);
+
+        try {
+            Excel::import(new BankStatementImport, $request->file('file'));
+
+            $summary = session('reconciliation_import_summary', [
+                'created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0,
+            ]);
+
+            return response()->json([
+                'ok' => true,
+                'message' => 'Importación completada',
+                'summary' => $summary,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Error al importar: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /** GET /api/conciliacion/template
+     * Descarga plantilla con encabezados correctos.
+     */
+    public function downloadTemplate()
+    {
+        return Excel::download(new ReconciliationTemplateExport, 'plantilla_conciliacion.xlsx');
+    }
+
+    /** GET /api/conciliacion/export
+     * Exporta registros de reconciliation_records según filtros.
+     * Query: from=YYYY-MM-DD&to=YYYY-MM-DD&bank=...&status=...
+     */
+    public function export(Request $request)
+    {
+        $from   = $request->query('from');
+        $to     = $request->query('to');
+        $bank   = $request->query('bank');
+        $status = $request->query('status');
+
+        $export = new ReconciliationRecordsExport($from, $to, $bank, $status);
+        return Excel::download($export, 'reconciliation_records.xlsx');
     }
 }

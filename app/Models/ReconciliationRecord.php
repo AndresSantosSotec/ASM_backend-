@@ -18,6 +18,9 @@ class ReconciliationRecord extends Model
         'auth_number',
         'status',
         'uploaded_by',
+        'bank_normalized',
+        'reference_normalized', 
+        'fingerprint',
     ];
 
     protected $casts = [

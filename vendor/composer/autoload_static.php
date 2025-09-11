@@ -364,13 +364,13 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         ),
         'Spatie\\LaravelIgnition\\' => 
         array (
-            0 => __DIR__ . '/..' . '/spatie/error-solutions/legacy/laravel-ignition',
-            1 => __DIR__ . '/..' . '/spatie/laravel-ignition/src',
+            0 => __DIR__ . '/..' . '/spatie/laravel-ignition/src',
+            1 => __DIR__ . '/..' . '/spatie/error-solutions/legacy/laravel-ignition',
         ),
         'Spatie\\Ignition\\' => 
         array (
-            0 => __DIR__ . '/..' . '/spatie/error-solutions/legacy/ignition',
-            1 => __DIR__ . '/..' . '/spatie/ignition/src',
+            0 => __DIR__ . '/..' . '/spatie/ignition/src',
+            1 => __DIR__ . '/..' . '/spatie/error-solutions/legacy/ignition',
         ),
         'Spatie\\FlareClient\\' => 
         array (
@@ -702,6 +702,7 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         'App\\Exports\\UserEscport' => __DIR__ . '/../..' . '/app/Exports/UserEscport.php',
         'App\\Exports\\UserExport' => __DIR__ . '/../..' . '/app/Exports/UserExport.php',
         'App\\Http\\Controllers\\Api\\ActividadesController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ActividadesController.php',
+        'App\\Http\\Controllers\\Api\\AdminEstudiantePagosController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/AdminEstudiantePagosController.php',
         'App\\Http\\Controllers\\Api\\AdvisorCommissionRateController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/AdvisorCommissionRateController.php',
         'App\\Http\\Controllers\\Api\\ApprovalFlowController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ApprovalFlowController.php',
         'App\\Http\\Controllers\\Api\\ApprovalStageController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ApprovalStageController.php',
@@ -718,6 +719,7 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         'App\\Http\\Controllers\\Api\\CuotaController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/CuotaController.php',
         'App\\Http\\Controllers\\Api\\DashboardFinancieroController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/DashboardFinancieroController.php',
         'App\\Http\\Controllers\\Api\\DuplicateRecordController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/DuplicateRecordController.php',
+        'App\\Http\\Controllers\\Api\\EmailController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/EmailController.php',
         'App\\Http\\Controllers\\Api\\EstudiantePagosController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/EstudiantePagosController.php',
         'App\\Http\\Controllers\\Api\\EstudianteProgramaController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/EstudianteProgramaController.php',
         'App\\Http\\Controllers\\Api\\EstudiantesImportController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/EstudiantesImportController.php',
@@ -783,6 +785,7 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         'App\\Imports\\UserImport' => __DIR__ . '/../..' . '/app/Imports/UserImport.php',
         'App\\Jobs\\ExportReportJob' => __DIR__ . '/../..' . '/app/Jobs/ExportReportJob.php',
         'App\\Mail\\CorreoMailable' => __DIR__ . '/../..' . '/app/Mail/CorreoMailable.php',
+        'App\\Mail\\GenericHtmlMail' => __DIR__ . '/../..' . '/app/Mail/GenericHtmlMail.php',
         'App\\Mail\\HelloMail' => __DIR__ . '/../..' . '/app/Mail/HelloMail.php',
         'App\\Mail\\SendContractPdf' => __DIR__ . '/../..' . '/app/Mail/SendContractPdf.php',
         'App\\Mail\\welcomeEmail' => __DIR__ . '/../..' . '/app/Mail/welcomeEmail.php',
@@ -851,10 +854,12 @@ class ComposerStaticInit9c491b8531eec05ba41a11d9276a5749
         'App\\Providers\\EventServiceProvider' => __DIR__ . '/../..' . '/app/Providers/EventServiceProvider.php',
         'App\\Providers\\RouteServiceProvider' => __DIR__ . '/../..' . '/app/Providers/RouteServiceProvider.php',
         'App\\Services\\EffectivePermissionsService' => __DIR__ . '/../..' . '/app/Services/EffectivePermissionsService.php',
+        'App\\Services\\EmailService' => __DIR__ . '/../..' . '/app/Services/EmailService.php',
         'App\\Services\\MoodleQueryService' => __DIR__ . '/../..' . '/app/Services/MoodleQueryService.php',
         'App\\Services\\MoodleService' => __DIR__ . '/../..' . '/app/Services/MoodleService.php',
         'App\\Services\\PermissionService' => __DIR__ . '/../..' . '/app/Services/PermissionService.php',
         'App\\Services\\RolePermissionService' => __DIR__ . '/../..' . '/app/Services/RolePermissionService.php',
+        'App\\Support\\BankReceiptNormalizer' => __DIR__ . '/../..' . '/app/Support/BankReceiptNormalizer.php',
         'Attribute' => __DIR__ . '/..' . '/symfony/polyfill-php80/Resources/stubs/Attribute.php',
         'Barryvdh\\DomPDF\\Facade\\Pdf' => __DIR__ . '/..' . '/barryvdh/laravel-dompdf/src/Facade/Pdf.php',
         'Barryvdh\\DomPDF\\PDF' => __DIR__ . '/..' . '/barryvdh/laravel-dompdf/src/PDF.php',

@@ -42,7 +42,7 @@
                     "dev-master": "3.0-dev"
                 }
             },
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Barryvdh\\DomPDF\\": "src"
@@ -253,7 +253,7 @@
                     "dev-main": "3.x-dev"
                 }
             },
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Composer\\Pcre\\": "src"
@@ -326,7 +326,7 @@
                     "dev-main": "3.x-dev"
                 }
             },
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Composer\\Semver\\": "src"
@@ -506,7 +506,7 @@
                 "bin/doctrine-dbal"
             ],
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Doctrine\\DBAL\\": "src"
@@ -609,7 +609,7 @@
             },
             "time": "2025-04-07T20:06:18+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Doctrine\\Deprecations\\": "src"
@@ -656,7 +656,7 @@
             },
             "time": "2024-05-22T20:47:39+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Doctrine\\Common\\": "src"
@@ -935,7 +935,7 @@
             },
             "time": "2025-01-15T14:09:04+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Dompdf\\": "src/"
@@ -986,7 +986,7 @@
             },
             "time": "2024-12-02T14:37:59+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "FontLib\\": "src/FontLib"
@@ -1035,7 +1035,7 @@
             },
             "time": "2024-04-29T13:26:35+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Svg\\": "src/Svg"
@@ -1227,7 +1227,7 @@
             },
             "time": "2024-11-01T03:51:45+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "files": [
                     "library/HTMLPurifier.composer.php"
@@ -2056,7 +2056,7 @@
                     ]
                 }
             },
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "KitLoong\\MigrationsGenerator\\": "src"
@@ -3137,7 +3137,7 @@
                     ]
                 }
             },
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Maatwebsite\\Excel\\": "src/"
@@ -3216,7 +3216,7 @@
             },
             "time": "2024-10-10T12:33:01+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "ZipStream\\": "src/"
@@ -3287,7 +3287,7 @@
             },
             "time": "2022-12-06T16:21:08+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Complex\\": "classes/src/"
@@ -3345,7 +3345,7 @@
             },
             "time": "2022-12-02T22:17:43+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Matrix\\": "classes/src/"
@@ -3403,7 +3403,7 @@
                     "dev-master": "2.7-dev"
                 }
             },
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Masterminds\\": "src"
@@ -4651,7 +4651,7 @@
             },
             "time": "2025-02-08T02:56:14+00:00",
             "type": "library",
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "PhpOffice\\PhpSpreadsheet\\": "src/PhpSpreadsheet"
@@ -5446,7 +5446,7 @@
                     "dev-master": "1.0.x-dev"
                 }
             },
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Psr\\Cache\\": "src/"
@@ -6308,7 +6308,7 @@
                     "dev-main": "9.0.x-dev"
                 }
             },
-            "installation-source": "dist",
+            "installation-source": "source",
             "autoload": {
                 "psr-4": {
                     "Sabberworm\\CSS\\": "src/"
