@@ -84,6 +84,25 @@ Route::get('/time', function () {
     return response()->json(['time' => now()->toDateTimeString()]);
 });
 
+
+Route::get('/db-status', function () {
+    try {
+        DB::connection()->getPdo();
+        return response()->json([
+            'db'     => 'connected',
+            'status' => 'ok',
+            'time'   => now()->toDateTimeString(),
+        ]);
+    } catch (\Throwable $e) {
+        return response()->json([
+            'db'     => 'disconnected',
+            'status' => 'error',
+            'error'  => 'No se pudo conectar a la base de datos',
+            'time'   => now()->toDateTimeString(),
+        ], 500);
+    }
+});
+
 Route::post('/emails/send', [EmailController::class, 'send']);          // síncrono
 Route::post('/emails/send-queued', [EmailController::class, 'sendQueued']); // opcional: en cola
 

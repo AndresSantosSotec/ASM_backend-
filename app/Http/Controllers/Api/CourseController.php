@@ -8,7 +8,8 @@ use App\Models\Prospecto;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use App\Models\Programa;
-
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 
 class CourseController extends Controller
 {
@@ -44,9 +45,9 @@ class CourseController extends Controller
         $data = $request->all();
 
         $validator = Validator::make($data, [
-            'moodle_id'      => 'nullable|integer|unique:courses',
+            'moodle_id'      => 'nullable|integer|unique:courses,moodle_id',
             'name'           => 'required|string|max:255',
-            'code'           => 'required|string|max:50|unique:courses',
+            'code'           => 'required|string|max:50|unique:courses,code',
             'area'           => 'required|in:common,specialty',
             'credits'        => 'required|integer|min:1|max:10',
             'start_date'     => 'required|date',
@@ -62,15 +63,12 @@ class CourseController extends Controller
             return response()->json($validator->errors(), 422);
         }
 
-        // Creamos el curso
         $course = Course::create($validator->validated());
 
-        // Sincronizamos la pivote programa_course
         if (!empty($data['program_ids'])) {
             $course->programas()->sync($data['program_ids']);
         }
 
-        // Cargamos relaciones para la respuesta
         $course->load(['programas', 'facilitator']);
 
         return response()->json($course, 201);
@@ -94,9 +92,9 @@ class CourseController extends Controller
         $data   = $request->all();
 
         $validator = Validator::make($data, [
-            'moodle_id'      => "sometimes|integer|unique:courses,moodle_id,{$course->id}",
+            'moodle_id'      => ["sometimes","integer", Rule::unique('courses','moodle_id')->ignore($course->id)],
             'name'           => 'sometimes|required|string|max:255',
-            'code'           => "sometimes|required|string|max:50|unique:courses,code,{$course->id}",
+            'code'           => ["sometimes","required","string","max:50", Rule::unique('courses','code')->ignore($course->id)],
             'area'           => 'sometimes|required|in:common,specialty',
             'credits'        => 'sometimes|required|integer|min:1|max:10',
             'start_date'     => 'sometimes|required|date',
@@ -113,15 +111,12 @@ class CourseController extends Controller
             return response()->json($validator->errors(), 422);
         }
 
-        // Actualizamos datos básicos
         $course->update($validator->validated());
 
-        // Si mandan program_ids, sincronizamos; si mandan vacío, desvincula todos
         if (array_key_exists('program_ids', $data)) {
             $course->programas()->sync($data['program_ids'] ?? []);
         }
 
-        // Cargamos relaciones
         $course->load(['programas', 'facilitator']);
 
         return response()->json($course);
@@ -138,7 +133,7 @@ class CourseController extends Controller
     }
 
     /**
-     * Approve course for the Falilitador module
+     * Approve course for the facilitator module
      */
     public function approve(string $id)
     {
@@ -155,7 +150,7 @@ class CourseController extends Controller
     }
 
     /**
-     * Sync course to Moodle
+     * Sync course to Moodle (single).
      */
     public function syncToMoodle(string $id)
     {
@@ -190,50 +185,266 @@ class CourseController extends Controller
     }
 
     /**
-     * Sync multiple Moodle courses by ID.
+     * Sync multiple Moodle courses by ID or course-objects.
+     *
+     * Acepta:
+     * - {"moodle_ids":[1442,1464,...]}
+     * - [{"moodle_id":1442,"fullname":"...","shortname":"..."}]
+     * - [{"id":1442,"fullname":"...","shortname":"..."}]
+     * - {"id":1442,"fullname":"...","shortname":"..."}
      */
     public function bulkSyncToMoodle(Request $request)
     {
-        $data = $request->all();
+        // Diagnóstico básico del request
+        Log::info('[bulkSyncToMoodle] Content-Type: ' . ($request->header('Content-Type') ?? 'N/A'));
+        Log::info('[bulkSyncToMoodle] Raw body: ' . $request->getContent());
 
-        $ids = [];
-        // 1) Si vienen explícitamente moodle_ids: [1405, 1406, …]
+        $data = $request->all();
+        Log::info('Datos recibidos en bulkSyncToMoodle (parsed):', is_array($data) ? $data : ['_non_array_' => $data]);
+
+        $coursesToSync = [];
+
+        // 1) moodle_ids: [1405, 1406, …]
         if (isset($data['moodle_ids']) && is_array($data['moodle_ids'])) {
-            $ids = array_filter($data['moodle_ids'], fn($id) => is_numeric($id));
+            $ids = array_values(array_filter($data['moodle_ids'], fn($id) => is_numeric($id)));
+            foreach ($ids as $id) {
+                $coursesToSync[] = ['moodle_id' => (int)$id];
+            }
         }
-        // 2) Si vienen como array de objetos en raíz
-        elseif (isset($data[0]) && is_array($data)) {
-            foreach ($data as $item) {
+        // 2) Array de objetos
+        elseif (is_array($data) && array_is_list($data)) {
+            foreach ($data as $idx => $item) {
                 if (!is_array($item)) {
+                    Log::warning("Elemento #{$idx} no es array; se ignora");
                     continue;
                 }
-                // Prioridad: moodle_id
-                if (isset($item['moodle_id']) && is_numeric($item['moodle_id'])) {
-                    $ids[] = (int) $item['moodle_id'];
+                $normalized = $this->normalizeMoodlePayloadItem($item);
+                if ($normalized['moodle_id'] === null) {
+                    Log::warning("Elemento #{$idx} sin moodle_id/id; se ignora", $item);
+                    continue;
                 }
-                // Fallback: id
-                elseif (isset($item['id']) && is_numeric($item['id'])) {
-                    $ids[] = (int) $item['id'];
+                if (empty($normalized['fullname'])) {
+                    Log::notice("Elemento #{$idx} sin fullname; se intentará sync solo por ID", ['moodle_id' => $normalized['moodle_id']]);
                 }
+                $coursesToSync[] = $normalized;
+            }
+        }
+        // 3) Objeto plano
+        elseif (is_array($data) && (isset($data['id']) || isset($data['moodle_id']))) {
+            $normalized = $this->normalizeMoodlePayloadItem($data);
+            if ($normalized['moodle_id'] !== null) {
+                $coursesToSync[] = $normalized;
             }
         }
 
-        if (empty($ids)) {
-            return response()->json(['message' => 'moodle_ids required'], 422);
+        if (empty($coursesToSync)) {
+            Log::warning('No se encontraron cursos válidos para sincronizar (post-normalización)');
+            return response()->json(['message' => 'No hay cursos válidos para sincronizar'], 422);
         }
+
+        Log::info('Cursos a sincronizar (normalizados):', $coursesToSync);
 
         $service = app(\App\Services\MoodleService::class);
         $synced = [];
+        $errors = [];
 
-        foreach ($ids as $moodleId) {
-            if ($course = $service->syncCourse($moodleId)) {
-                $synced[] = $course;
+        foreach ($coursesToSync as $courseData) {
+            try {
+                $nonEmpty = array_filter($courseData, fn($v) => $v !== null && $v !== '');
+                if (count($nonEmpty) === 1 && isset($courseData['moodle_id'])) {
+                    // Solo ID → usa método clásico
+                    $result = $service->syncCourse($courseData['moodle_id']);
+                } else {
+                    // Crear/actualizar local con datos
+                    $result = $this->syncCourseFromData($courseData, $service);
+                }
+
+                if ($result) {
+                    $synced[] = $result;
+                    Log::info('Curso sincronizado exitosamente:', ['course_id' => is_object($result) ? $result->id : $result]);
+                } else {
+                    $msg = "No se pudo sincronizar el curso ID: " . ($courseData['moodle_id'] ?? 'unknown');
+                    $errors[] = $msg;
+                    Log::error($msg, $courseData);
+                }
+            } catch (\Exception $e) {
+                $errorMsg = "Error sincronizando curso ID " . ($courseData['moodle_id'] ?? 'unknown') . ": " . $e->getMessage();
+                $errors[] = $errorMsg;
+                Log::error($errorMsg, ['exception' => $e]);
             }
         }
 
-        return response()->json($synced);
+        $response = [
+            'synced'          => $synced,
+            'synced_count'    => count($synced),
+            'total_attempted' => count($coursesToSync),
+        ];
+
+        if (!empty($errors)) {
+            $response['errors'] = $errors;
+        }
+
+        return response()->json($response);
     }
 
+    /**
+     * Normaliza un item de curso recibido desde el frontend/Moodle.
+     * Acepta tanto 'id' como 'moodle_id'.
+     */
+    private function normalizeMoodlePayloadItem(array $item): array
+    {
+        $moodleId = null;
+
+        if (isset($item['moodle_id']) && is_numeric($item['moodle_id'])) {
+            $moodleId = (int)$item['moodle_id'];
+        } elseif (isset($item['id']) && is_numeric($item['id'])) {
+            $moodleId = (int)$item['id'];
+        }
+
+        return [
+            'moodle_id'   => $moodleId,
+            'fullname'    => $item['fullname'] ?? null,
+            'shortname'   => $item['shortname'] ?? null,
+            'summary'     => $item['summary'] ?? '',
+            'categoryid'  => isset($item['categoryid']) && is_numeric($item['categoryid']) ? (int)$item['categoryid'] : null,
+            'numsections' => isset($item['numsections']) && is_numeric($item['numsections']) ? (int)$item['numsections'] : null,
+            'timecreated' => isset($item['timecreated']) && is_numeric($item['timecreated']) ? (int)$item['timecreated'] : null,
+        ];
+    }
+
+    private function syncCourseFromData(array $courseData, $moodleService)
+    {
+        try {
+            if (empty($courseData['moodle_id'])) {
+                Log::warning('syncCourseFromData llamado sin moodle_id; se aborta', $courseData);
+                return null;
+            }
+
+            // ¿ya existe por moodle_id?
+            $existingCourse = Course::where('moodle_id', $courseData['moodle_id'])->first();
+            if ($existingCourse) {
+                Log::info('Curso ya existe, no se duplica. Retornando existente.', [
+                    'moodle_id' => $courseData['moodle_id'],
+                    'course_id' => $existingCourse->id
+                ]);
+                return $existingCourse;
+            }
+
+            // Evitar colisión por nombre (case-insensitive)
+            if (!empty($courseData['fullname'])) {
+                $duplicateName = Course::whereRaw('LOWER(name) = ?', [mb_strtolower(trim($courseData['fullname']))])->first();
+                if ($duplicateName) {
+                    Log::warning('Ya existe un curso con el mismo nombre; se omite creación.', ['name' => $courseData['fullname']]);
+                    return null;
+                }
+            }
+
+            // === NUEVO: generar code canónico (BBA14, etc.) o fallback limpio ===
+            $nameForCode = $courseData['shortname'] ?: ($courseData['fullname'] ?? ('COURSE'.$courseData['moodle_id']));
+            $baseCode = $this->generateCourseCode(
+                $nameForCode,
+                $courseData['fullname'] ?? null
+            );
+            $code = $baseCode;
+            $counter = 1;
+            while (Course::where('code', $code)->exists()) {
+                $code = $baseCode . '-' . $counter;
+                $counter++;
+            }
+
+            // Fechas por defecto
+            $start = now();
+            $end   = (clone $start)->addMonths(4);
+
+            $newCourse = Course::create([
+                'moodle_id'  => $courseData['moodle_id'],
+                'name'       => $courseData['fullname'] ?: ('Curso '.$courseData['moodle_id']),
+                'code'       => $code,
+                'area'       => 'common',
+                'credits'    => 3,
+                'start_date' => $start,
+                'end_date'   => $end,
+                'schedule'   => 'Por definir',
+                'duration'   => '4 meses',
+                'status'     => 'draft',
+                'origen'     => 'moodle',
+            ]);
+
+            Log::info('Curso creado desde datos de Moodle', [
+                'course_id' => $newCourse->id,
+                'moodle_id' => $courseData['moodle_id'],
+            ]);
+
+            return $newCourse;
+        } catch (\Exception $e) {
+            Log::error('Error creando curso desde datos de Moodle:', [
+                'courseData' => $courseData,
+                'error'      => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Quita prefijos de Mes[/Día] Año y deja el título canónico.
+     * "Octubre Sábado 2025 BBA Contabilidad Aplicada" -> "BBA Contabilidad Aplicada"
+     */
+    private function canonicalTitle(string $name): string
+    {
+        $n = trim(preg_replace('/\s+/', ' ', $name));
+
+        $meses = '(Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre)';
+        $dias  = '(Lunes|Martes|Miércoles|Miercoles|Jueves|Viernes|Sábado|Sabado|Domingo)';
+        $pattern = "/^{$meses}(?:\s+{$dias})?\s+\d{4}\s+/iu";
+
+        $canon = preg_replace($pattern, '', $n);
+        return $canon ?: $n;
+    }
+
+    /**
+     * Tabla de mapeos canónicos -> código fijo.
+     * Puedes mover esto a config('courses.code_map') si prefieres.
+     */
+    private function codeMap(): array
+    {
+        return [
+            // === BBA ===
+            'BBA Contabilidad Aplicada'   => 'BBA14',
+            // Agrega el resto cuando los confirmes, por ejemplo:
+            // 'BBA Contabilidad Financiera' => 'BBA13',
+            // 'BBA Excel Ejecutivo'         => 'BBA12',
+            // 'BBA Power BI'                => 'BBA16',
+        ];
+    }
+
+    /**
+     * Genera un código de curso:
+     * 1) Usa mapeo fijo si el título canónico coincide (BBA14).
+     * 2) Si no hay mapeo, usa fallback "limpio" desde shortname/fullname (A-Z0-9).
+     * 3) Limita a 50 chars (columna `code`) y no devuelve vacío.
+     */
+    private function generateCourseCode(string $shortnameOrFullname, ?string $fullname = null): string
+    {
+        $title = $this->canonicalTitle($fullname ?: $shortnameOrFullname);
+        $map = $this->codeMap();
+
+        if (isset($map[$title])) {
+            $base = $map[$title];
+        } else {
+            $src  = $shortnameOrFullname ?: $title;
+            $base = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $src));
+            if ($base === '') {
+                $base = 'COURSE' . time();
+            }
+        }
+
+        $maxLen = 50;
+        if (strlen($base) > $maxLen) {
+            $base = substr($base, 0, $maxLen);
+        }
+
+        return $base;
+    }
 
     /**
      * Assign facilitator to course
@@ -320,26 +531,17 @@ class CourseController extends Controller
             'program_ids.*' => 'exists:tb_programas,id',
         ]);
 
-
         $courses = Course::select('courses.*')
             ->join('programa_course', 'courses.id', '=', 'programa_course.course_id')
             ->whereIn('programa_course.programa_id', $data['program_ids'])
             ->distinct()
             ->get();
 
-
         return response()->json($courses);
     }
 
-    //traer cursos displnipes por programa, por estudiante que puede llevar
-    // los cursos, y para asiganacion masiva si se seleciona mas de
-    //traer los cursos que se puedan asignar a ambos
-    //por medio de la tabla pivote couse program que es dede donde se resghirtarn esos cursos pro programa
     /**
      * Get available courses for students/prospectos
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
      */
     public function getAvailableCourses(Request $request)
     {
@@ -350,14 +552,10 @@ class CourseController extends Controller
 
         $prospectoIds = $request->prospecto_ids;
 
-        // Si es solo un estudiante
         if (count($prospectoIds) === 1) {
             $prospecto = Prospecto::with('programas.programa.courses')->find($prospectoIds[0]);
-
-            // Cursos ya asignados al estudiante
             $assignedCourseIds = $prospecto->courses()->pluck('courses.id')->toArray();
 
-            // Cursos disponibles según sus programas
             $availableCourses = collect();
             foreach ($prospecto->programas as $estudiantePrograma) {
                 if ($estudiantePrograma->programa) {
@@ -365,7 +563,6 @@ class CourseController extends Controller
                 }
             }
 
-            // Eliminar duplicados y cursos ya asignados
             $availableCourses = $availableCourses->unique('id')
                 ->whereNotIn('id', $assignedCourseIds)
                 ->values();
@@ -373,7 +570,6 @@ class CourseController extends Controller
             return response()->json($availableCourses);
         }
 
-        // Para múltiples estudiantes - intersectamos los cursos de sus programas
         $commonCourses = null;
 
         foreach ($prospectoIds as $prospectoId) {
@@ -395,7 +591,6 @@ class CourseController extends Controller
             }
         }
 
-        // Obtenemos los cursos comunes que no estén asignados a TODOS los estudiantes
         $assignedToAll = Course::whereHas('prospectos', function ($query) use ($prospectoIds) {
             $query->whereIn('prospecto_id', $prospectoIds);
         }, '=', count($prospectoIds))->pluck('id')->toArray();
