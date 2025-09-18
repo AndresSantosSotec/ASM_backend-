@@ -13,17 +13,28 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
-            BasicPermissionsSeeder::class,
+            // Primero los datos base
             CoursesSeeder::class,
-            ModulesSeeder::class,
-            ModuleViewsSeeder::class,
-            PermissionsSeeder::class,
             PrecioProgramasSeeder::class,
             ProgramasSeeder::class,
+            
+            // Luego módulos y vistas
+            ModulesSeeder::class,
+            ModuleViewsSeeder::class,
+            
+            // Después permisos (primero los automáticos, luego los básicos)
+            PermissionsSeeder::class,
+            BasicPermissionsSeeder::class,
+            
+            // Roles y configuración de permisos
+            RolesSeeder::class,
             RolePermissionsConfigSeeder::class,
             RolePermissionsSeeder::class,
-            RolesSeeder::class,
+            
+            // Finalmente usuario SuperAdmin
             SuperAdminUserSeeder::class,
+            
+            // Verificación al final
             VerifySeederResults::class,
         ]);
     }

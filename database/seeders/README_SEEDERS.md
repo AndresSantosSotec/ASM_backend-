@@ -94,11 +94,28 @@ php artisan db:seed --class=VerifySeederResults
 
 ### Ejecutar en orden específico
 ```bash
+# 1. Datos base
+php artisan db:seed --class=CoursesSeeder
+php artisan db:seed --class=PrecioProgramasSeeder
+php artisan db:seed --class=ProgramasSeeder
+
+# 2. Módulos y vistas
 php artisan db:seed --class=ModulesSeeder
 php artisan db:seed --class=ModuleViewsSeeder
-php artisan db:seed --class=RolesSeeder
+
+# 3. Permisos (IMPORTANTE: PermissionsSeeder antes que BasicPermissionsSeeder)
+php artisan db:seed --class=PermissionsSeeder
 php artisan db:seed --class=BasicPermissionsSeeder
+
+# 4. Roles y configuración
+php artisan db:seed --class=RolesSeeder
+php artisan db:seed --class=RolePermissionsConfigSeeder
+php artisan db:seed --class=RolePermissionsSeeder
+
+# 5. Usuario SuperAdmin
 php artisan db:seed --class=SuperAdminUserSeeder
+
+# 6. Verificación
 php artisan db:seed --class=VerifySeederResults
 ```
 
@@ -163,12 +180,31 @@ Asegúrate de que los archivos de seeder estén en la carpeta correcta y ejecuta
 composer dump-autoload
 ```
 
+### Error: "Undefined column: module does not exist"
+Este error ocurre cuando `BasicPermissionsSeeder` se ejecuta antes que `PermissionsSeeder`. 
+
+**Solución:**
+1. Ejecuta primero `PermissionsSeeder` para crear los permisos automáticos
+2. Luego ejecuta `BasicPermissionsSeeder` para agregar permisos adicionales
+
+```bash
+php artisan db:seed --class=PermissionsSeeder
+php artisan db:seed --class=BasicPermissionsSeeder
+```
+
 ### Error: "Foreign key constraint"
 Ejecuta los seeders en el orden correcto:
-1. ModulesSeeder (primero)
-2. ModuleViewsSeeder (segundo)
-3. RolesSeeder (tercero)
-4. SuperAdminUserSeeder (último)
+1. Datos base (Courses, Precios, Programas)
+2. Módulos y vistas
+3. Permisos (PermissionsSeeder primero)
+4. Roles y configuración
+5. SuperAdminUserSeeder (último)
 
 ### Error: "Permission not found"
 Asegúrate de que la tabla `permissions` tenga datos antes de ejecutar `SuperAdminUserSeeder`.
+
+### Error: "Table permissions doesn't exist"
+Si la tabla `permissions` no existe, ejecuta las migraciones primero:
+```bash
+php artisan migrate
+```
