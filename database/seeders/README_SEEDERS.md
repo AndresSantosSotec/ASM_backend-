@@ -203,22 +203,28 @@ php artisan db:seed --class=QuickFixSeeder
 php artisan db:seed --class=FixUserModelSeeder
 ```
 
-### Error: "column users.deleted_at does not exist"
-Este error ocurre cuando el modelo User usa SoftDeletes pero la tabla no tiene la columna `deleted_at`.
+### Error: "column username/password_hash does not exist"
+Este error ocurre por diferencias entre la estructura de Laravel y PostgreSQL.
+
+**Estructura PostgreSQL vs Laravel:**
+- PostgreSQL: `username`, `password_hash`, `first_name`, `last_name`, `email_verified`, `deleted_at`
+- Laravel: `name`, `password`, `email_verified_at`
 
 **Solución aplicada:**
-- ✅ Removido `SoftDeletes` del modelo User temporalmente
-- ✅ Comentado cast de `deleted_at`
-- ✅ SuperAdminUserSeeder usa consultas directas DB en lugar de Eloquent
-- ✅ VerifySeederResults usa consultas directas DB
+- ✅ SuperAdminUserSeeder detecta automáticamente las columnas disponibles
+- ✅ Se adapta a cualquier estructura (PostgreSQL o Laravel)
+- ✅ SoftDeletes habilitado (deleted_at existe en PostgreSQL)
+- ✅ Mapeo inteligente de campos
 
-**Para solución permanente:**
+**Verificación de estructura:**
 ```bash
-# Opción 1: Crear migración para agregar deleted_at
-php artisan make:migration add_deleted_at_to_users_table
-
-# Opción 2: Mantener sin SoftDeletes (recomendado si no se necesita)
+php artisan db:seed --class=SyncUserTableSeeder
 ```
+
+**Mapeo automático:**
+- `username` → `username` (o `name` si no existe)
+- `password_hash` → `password_hash` (o `password` si no existe)
+- `email_verified` → `email_verified` (o `email_verified_at` si no existe)
 
 ### Error: "Foreign key constraint"
 Ejecuta los seeders en el orden correcto:

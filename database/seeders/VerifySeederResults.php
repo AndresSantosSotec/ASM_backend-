@@ -67,11 +67,26 @@ class VerifySeederResults extends Seeder
         if ($superAdmin) {
             $this->command->info("👑 USUARIO SUPERADMIN ENCONTRADO:");
             $this->command->info("   - ID: {$superAdmin->id}");
-            $this->command->info("   - Username: {$superAdmin->username}");
+            
+            // Mostrar campos según disponibilidad
+            if (isset($superAdmin->username)) {
+                $this->command->info("   - Username: {$superAdmin->username}");
+            }
+            if (isset($superAdmin->name)) {
+                $this->command->info("   - Name: {$superAdmin->name}");
+            }
             $this->command->info("   - Email: {$superAdmin->email}");
             $this->command->info("   - Carnet: {$superAdmin->carnet}");
-            $this->command->info("   - Activo: " . ($superAdmin->is_active ? 'Sí' : 'No'));
-            $this->command->info("   - Email verificado: " . ($superAdmin->email_verified ? 'Sí' : 'No'));
+            
+            if (isset($superAdmin->is_active)) {
+                $this->command->info("   - Activo: " . ($superAdmin->is_active ? 'Sí' : 'No'));
+            }
+            if (isset($superAdmin->email_verified)) {
+                $this->command->info("   - Email verificado: " . ($superAdmin->email_verified ? 'Sí' : 'No'));
+            }
+            if (isset($superAdmin->email_verified_at)) {
+                $this->command->info("   - Email verificado at: " . ($superAdmin->email_verified_at ? 'Sí' : 'No'));
+            }
             
             // Verificar rol asignado
             $userRole = DB::table('userroles')

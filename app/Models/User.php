@@ -6,11 +6,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-// use Illuminate\Database\Eloquent\SoftDeletes; // Comentado temporalmente - columna deleted_at no existe
+use Illuminate\Database\Eloquent\SoftDeletes; // Habilitado - la columna deleted_at SÍ existe en PostgreSQL
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable; // , SoftDeletes; // Removido temporalmente
+    use HasApiTokens, HasFactory, Notifiable, SoftDeletes; // Habilitado nuevamente
 
     /**
      * The attributes that are mass assignable.
@@ -52,7 +52,7 @@ class User extends Authenticatable
         'created_at'        => 'datetime',
         'updated_at'        => 'datetime',
         'last_login'        => 'datetime',
-        // 'deleted_at'        => 'datetime', // Comentado - columna no existe
+        'deleted_at'        => 'datetime', // Habilitado - la columna SÍ existe en PostgreSQL
     ];
 
     /**

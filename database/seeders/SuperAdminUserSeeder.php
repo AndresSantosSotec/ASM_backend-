@@ -9,6 +9,7 @@ use App\Models\Role;
 use App\Models\Permisos;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class SuperAdminUserSeeder extends Seeder
 {
@@ -17,38 +18,62 @@ class SuperAdminUserSeeder extends Seeder
      */
     public function run(): void
     {
-        // Crear el usuario SuperAdmin usando consulta directa para evitar SoftDeletes
+        // Verificar qué columnas existen realmente en la tabla users
+        $columns = Schema::getColumnListing('users');
+        $this->command->info('Columnas disponibles en users: ' . implode(', ', $columns));
+
+        // Crear el usuario SuperAdmin adaptándose a la estructura real
         $existingUser = DB::table('users')->where('email', 'superadmin@blueatlas.com')->first();
         
+        // Preparar datos según las columnas que existen
+        $userData = [
+            'email' => 'superadmin@blueatlas.com',
+            'carnet' => 'SUPERADMIN001',
+            'updated_at' => now()
+        ];
+
+        // Agregar campos según disponibilidad
+        if (in_array('username', $columns)) {
+            $userData['username'] = 'superadmin';
+        }
+        if (in_array('name', $columns)) {
+            $userData['name'] = 'Super Administrador';
+        }
+        if (in_array('password_hash', $columns)) {
+            $userData['password_hash'] = Hash::make('SuperAdmin123!');
+        }
+        if (in_array('password', $columns)) {
+            $userData['password'] = Hash::make('SuperAdmin123!');
+        }
+        if (in_array('first_name', $columns)) {
+            $userData['first_name'] = 'Super';
+        }
+        if (in_array('last_name', $columns)) {
+            $userData['last_name'] = 'Administrador';
+        }
+        if (in_array('is_active', $columns)) {
+            $userData['is_active'] = true;
+        }
+        if (in_array('email_verified', $columns)) {
+            $userData['email_verified'] = true;
+        }
+        if (in_array('email_verified_at', $columns)) {
+            $userData['email_verified_at'] = now();
+        }
+        if (in_array('mfa_enabled', $columns)) {
+            $userData['mfa_enabled'] = false;
+        }
+
         if ($existingUser) {
             // Actualizar usuario existente
-            DB::table('users')->where('email', 'superadmin@blueatlas.com')->update([
-                'username' => 'superadmin',
-                'password_hash' => Hash::make('SuperAdmin123!'),
-                'first_name' => 'Super',
-                'last_name' => 'Administrador',
-                'carnet' => 'SUPERADMIN001',
-                'is_active' => true,
-                'email_verified' => true,
-                'mfa_enabled' => false,
-                'updated_at' => now()
-            ]);
+            DB::table('users')->where('email', 'superadmin@blueatlas.com')->update($userData);
             $superAdminId = $existingUser->id;
+            $this->command->info('Usuario SuperAdmin actualizado');
         } else {
             // Crear nuevo usuario
-            $superAdminId = DB::table('users')->insertGetId([
-                'username' => 'superadmin',
-                'email' => 'superadmin@blueatlas.com',
-                'password_hash' => Hash::make('SuperAdmin123!'),
-                'first_name' => 'Super',
-                'last_name' => 'Administrador',
-                'carnet' => 'SUPERADMIN001',
-                'is_active' => true,
-                'email_verified' => true,
-                'mfa_enabled' => false,
-                'created_at' => now(),
-                'updated_at' => now()
-            ]);
+            $userData['created_at'] = now();
+            $superAdminId = DB::table('users')->insertGetId($userData);
+            $this->command->info('Usuario SuperAdmin creado');
         }
 
         $superAdmin = (object) ['id' => $superAdminId];
