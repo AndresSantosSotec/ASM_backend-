@@ -6,11 +6,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use Illuminate\Database\Eloquent\SoftDeletes;
+// use Illuminate\Database\Eloquent\SoftDeletes; // Comentado temporalmente - columna deleted_at no existe
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
+    use HasApiTokens, HasFactory, Notifiable; // , SoftDeletes; // Removido temporalmente
 
     /**
      * The attributes that are mass assignable.
@@ -52,7 +52,7 @@ class User extends Authenticatable
         'created_at'        => 'datetime',
         'updated_at'        => 'datetime',
         'last_login'        => 'datetime',
-        'deleted_at'        => 'datetime',
+        // 'deleted_at'        => 'datetime', // Comentado - columna no existe
     ];
 
     /**

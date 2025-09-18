@@ -17,10 +17,26 @@ class SuperAdminUserSeeder extends Seeder
      */
     public function run(): void
     {
-        // Crear el usuario SuperAdmin
-        $superAdmin = User::updateOrCreate(
-            ['email' => 'superadmin@blueatlas.com'],
-            [
+        // Crear el usuario SuperAdmin usando consulta directa para evitar SoftDeletes
+        $existingUser = DB::table('users')->where('email', 'superadmin@blueatlas.com')->first();
+        
+        if ($existingUser) {
+            // Actualizar usuario existente
+            DB::table('users')->where('email', 'superadmin@blueatlas.com')->update([
+                'username' => 'superadmin',
+                'password_hash' => Hash::make('SuperAdmin123!'),
+                'first_name' => 'Super',
+                'last_name' => 'Administrador',
+                'carnet' => 'SUPERADMIN001',
+                'is_active' => true,
+                'email_verified' => true,
+                'mfa_enabled' => false,
+                'updated_at' => now()
+            ]);
+            $superAdminId = $existingUser->id;
+        } else {
+            // Crear nuevo usuario
+            $superAdminId = DB::table('users')->insertGetId([
                 'username' => 'superadmin',
                 'email' => 'superadmin@blueatlas.com',
                 'password_hash' => Hash::make('SuperAdmin123!'),
@@ -32,8 +48,10 @@ class SuperAdminUserSeeder extends Seeder
                 'mfa_enabled' => false,
                 'created_at' => now(),
                 'updated_at' => now()
-            ]
-        );
+            ]);
+        }
+
+        $superAdmin = (object) ['id' => $superAdminId];
 
         // Obtener el rol de SuperAdmin (ID 11)
         $superAdminRole = Role::find(11);

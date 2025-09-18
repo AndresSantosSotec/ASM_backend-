@@ -200,6 +200,24 @@ Este error ocurre cuando los seeders esperan una estructura de tabla diferente a
 **Verificación rápida:**
 ```bash
 php artisan db:seed --class=QuickFixSeeder
+php artisan db:seed --class=FixUserModelSeeder
+```
+
+### Error: "column users.deleted_at does not exist"
+Este error ocurre cuando el modelo User usa SoftDeletes pero la tabla no tiene la columna `deleted_at`.
+
+**Solución aplicada:**
+- ✅ Removido `SoftDeletes` del modelo User temporalmente
+- ✅ Comentado cast de `deleted_at`
+- ✅ SuperAdminUserSeeder usa consultas directas DB en lugar de Eloquent
+- ✅ VerifySeederResults usa consultas directas DB
+
+**Para solución permanente:**
+```bash
+# Opción 1: Crear migración para agregar deleted_at
+php artisan make:migration add_deleted_at_to_users_table
+
+# Opción 2: Mantener sin SoftDeletes (recomendado si no se necesita)
 ```
 
 ### Error: "Foreign key constraint"

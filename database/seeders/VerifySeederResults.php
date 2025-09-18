@@ -61,8 +61,8 @@ class VerifySeederResults extends Seeder
         $this->command->info("🔐 Permisos creados: {$permissionsCount}");
         $this->command->info('');
 
-        // Verificar Usuario SuperAdmin
-        $superAdmin = User::where('email', 'superadmin@blueatlas.com')->first();
+        // Verificar Usuario SuperAdmin usando consulta directa
+        $superAdmin = DB::table('users')->where('email', 'superadmin@blueatlas.com')->first();
         
         if ($superAdmin) {
             $this->command->info("👑 USUARIO SUPERADMIN ENCONTRADO:");
