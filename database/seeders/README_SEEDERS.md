@@ -180,7 +180,7 @@ Asegúrate de que los archivos de seeder estén en la carpeta correcta y ejecuta
 composer dump-autoload
 ```
 
-### Error: "Undefined column: module/route_path does not exist"
+### Error: "Undefined column: module/route_path/is_enabled does not exist"
 Este error ocurre cuando los seeders esperan una estructura de tabla diferente a la real.
 
 **Estructura real de la tabla permissions:**
@@ -191,12 +191,15 @@ Este error ocurre cuando los seeders esperan una estructura de tabla diferente a
 - `description` (string, nullable)
 - `timestamps`
 
-**Solución:**
-Los seeders han sido actualizados para usar la estructura correcta. Ejecuta:
+**Seeders corregidos:**
+- ✅ `PermissionsSeeder` - Usa `moduleview_id` y `action`
+- ✅ `BasicPermissionsSeeder` - Crea permisos globales con `name` único
+- ✅ `RolePermissionsSeeder` - Usa JOIN con moduleviews para filtrar por rutas
+- ✅ `SuperAdminUserSeeder` - Obtiene todos los permisos sin filtros obsoletos
 
+**Verificación rápida:**
 ```bash
-php artisan db:seed --class=PermissionsSeeder
-php artisan db:seed --class=BasicPermissionsSeeder
+php artisan db:seed --class=QuickFixSeeder
 ```
 
 ### Error: "Foreign key constraint"

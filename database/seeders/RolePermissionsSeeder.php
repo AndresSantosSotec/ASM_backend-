@@ -12,6 +12,7 @@ class RolePermissionsSeeder extends Seeder
     {
         $mapping = [
             'Administrador' => '*',
+            'SuperAdmin' => '*',
             'Docente' => [
                 '/docente%'   => ['view','create','edit','export'],
                 '/academico%' => ['view','create','edit','export'],
@@ -51,28 +52,31 @@ class RolePermissionsSeeder extends Seeder
                 continue;
             }
 
-            // Si '*' → todos los permisos habilitados
+            // Si '*' → todos los permisos (incluyendo globales)
             if ($rules === '*') {
                 $permissionIds = DB::table('permissions')
-                    ->where('is_enabled', true)
                     ->pluck('id')
                     ->all();
+                
+                $this->command->info("Asignando {$role->name}: " . count($permissionIds) . " permisos (todos)");
             } else {
                 $permissionIds = [];
                 foreach ($rules as $routePrefixLike => $actions) {
                     foreach ($actions as $action) {
-                        // ¡Clave!: filtrar por action + route_path (ya no 'name')
+                        // Filtrar por action y moduleview que coincida con la ruta
                         $ids = DB::table('permissions')
-                            ->where('action', $action)
-                            ->where('route_path', 'like', $routePrefixLike)
-                            ->where('is_enabled', true)
-                            ->pluck('id')
+                            ->join('moduleviews', 'permissions.moduleview_id', '=', 'moduleviews.id')
+                            ->where('permissions.action', $action)
+                            ->where('moduleviews.view_path', 'like', $routePrefixLike)
+                            ->pluck('permissions.id')
                             ->all();
 
                         $permissionIds = array_merge($permissionIds, $ids);
                     }
                 }
                 $permissionIds = array_values(array_unique($permissionIds));
+                
+                $this->command->info("Asignando {$role->name}: " . count($permissionIds) . " permisos específicos");
             }
 
             // Upsert en tabla pivote rolepermissions
