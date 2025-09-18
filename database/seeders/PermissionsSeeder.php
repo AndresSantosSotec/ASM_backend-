@@ -17,10 +17,10 @@ class PermissionsSeeder extends Seeder
         // Trae lo que necesitas de moduleviews
         $moduleviews = DB::table('moduleviews')->get(['id', 'view_path', 'menu', 'submenu']);
 
-        // Trae pares existentes (action + route_path) para no duplicar
+        // Trae pares existentes (action + moduleview_id) para no duplicar
         $existing = DB::table('permissions')
-            ->get(['action', 'route_path'])
-            ->map(fn ($r) => "{$r->action}|{$r->route_path}")
+            ->get(['action', 'moduleview_id'])
+            ->map(fn ($r) => "{$r->action}|{$r->moduleview_id}")
             ->flip(); // para búsquedas O(1)
 
         $now = now();
@@ -28,25 +28,18 @@ class PermissionsSeeder extends Seeder
 
         foreach ($moduleviews as $mv) {
             foreach (self::ACTIONS as $action) {
-                $key = "{$action}|{$mv->view_path}";
+                $key = "{$action}|{$mv->id}";
                 if (isset($existing[$key])) {
                     continue; // ya existe, no lo insertamos de nuevo
                 }
 
                 $records[] = [
-                    'module'      => $mv->menu,                // mapea a tu columna module
-                    'section'     => $mv->submenu,             // mapea a tu columna section
-                    'resource'    => Str::afterLast($mv->view_path, '/'), // algo representativo
-                    'action'      => $action,                  // también lo guardamos aquí
-                    'level'       => $action,                  // cumple el CHECK constraint
-                    'effect'      => 'allow',                  // por defecto
-                    'description' => sprintf('%s sobre %s/%s (%s)', $action, $mv->menu, $mv->submenu, $mv->view_path),
-                    'route_path'  => $mv->view_path,
-                    'file_name'   => null,
-                    'object_id'   => null,
-                    'is_enabled'  => true,
-                    'created_at'  => $now,
-                    'updated_at'  => $now,
+                    'action'        => $action,
+                    'moduleview_id' => $mv->id,
+                    'name'          => sprintf('%s_%s_%d', $action, Str::slug($mv->menu), $mv->id),
+                    'description'   => sprintf('%s sobre %s/%s (%s)', ucfirst($action), $mv->menu, $mv->submenu, $mv->view_path),
+                    'created_at'    => $now,
+                    'updated_at'    => $now,
                 ];
             }
         }

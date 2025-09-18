@@ -33,32 +33,36 @@ class BasicPermissionsSeeder extends Seeder
         $this->command->info('Columnas disponibles en permissions: ' . implode(', ', $columns));
 
         $basicPermissions = [
-            // Permisos básicos del sistema adaptados a la estructura existente
+            // Permisos básicos del sistema adaptados a la estructura real
             [
-                'module' => 'Sistema',
-                'section' => 'SuperAdmin',
-                'resource' => 'superadmin',
-                'action' => 'all',
-                'level' => 'all',
-                'effect' => 'allow',
-                'description' => 'Acceso completo de SuperAdmin a todo el sistema',
-                'route_path' => '/*',
-                'file_name' => null,
-                'object_id' => null,
-                'is_enabled' => true
+                'action' => 'view',
+                'moduleview_id' => null, // Permiso global
+                'name' => 'superadmin_global_access',
+                'description' => 'Acceso completo de SuperAdmin a todo el sistema'
             ],
             [
-                'module' => 'Sistema',
-                'section' => 'Dashboard',
-                'resource' => 'dashboard',
-                'action' => 'view',
-                'level' => 'view',
-                'effect' => 'allow',
-                'description' => 'Ver dashboard principal del sistema',
-                'route_path' => '/dashboard',
-                'file_name' => null,
-                'object_id' => null,
-                'is_enabled' => true
+                'action' => 'create',
+                'moduleview_id' => null, // Permiso global
+                'name' => 'superadmin_global_create',
+                'description' => 'Permiso global de creación para SuperAdmin'
+            ],
+            [
+                'action' => 'edit',
+                'moduleview_id' => null, // Permiso global
+                'name' => 'superadmin_global_edit',
+                'description' => 'Permiso global de edición para SuperAdmin'
+            ],
+            [
+                'action' => 'delete',
+                'moduleview_id' => null, // Permiso global
+                'name' => 'superadmin_global_delete',
+                'description' => 'Permiso global de eliminación para SuperAdmin'
+            ],
+            [
+                'action' => 'export',
+                'moduleview_id' => null, // Permiso global
+                'name' => 'superadmin_global_export',
+                'description' => 'Permiso global de exportación para SuperAdmin'
             ]
         ];
 
@@ -77,8 +81,7 @@ class BasicPermissionsSeeder extends Seeder
 
                 DB::table('permissions')->updateOrInsert(
                     [
-                        'route_path' => $permission['route_path'],
-                        'action' => $permission['action']
+                        'name' => $permission['name']
                     ],
                     $filteredPermission
                 );

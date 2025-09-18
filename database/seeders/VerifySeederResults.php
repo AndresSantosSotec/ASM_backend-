@@ -57,8 +57,8 @@ class VerifySeederResults extends Seeder
         $this->command->info('');
 
         // Verificar Permisos
-        $permissionsCount = Permisos::where('is_enabled', true)->count();
-        $this->command->info("🔐 Permisos habilitados: {$permissionsCount}");
+        $permissionsCount = Permisos::count();
+        $this->command->info("🔐 Permisos creados: {$permissionsCount}");
         $this->command->info('');
 
         // Verificar Usuario SuperAdmin

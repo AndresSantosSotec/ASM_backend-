@@ -180,12 +180,19 @@ Asegúrate de que los archivos de seeder estén en la carpeta correcta y ejecuta
 composer dump-autoload
 ```
 
-### Error: "Undefined column: module does not exist"
-Este error ocurre cuando `BasicPermissionsSeeder` se ejecuta antes que `PermissionsSeeder`. 
+### Error: "Undefined column: module/route_path does not exist"
+Este error ocurre cuando los seeders esperan una estructura de tabla diferente a la real.
+
+**Estructura real de la tabla permissions:**
+- `id` (increments)
+- `action` (enum: view, create, edit, delete, export)
+- `moduleview_id` (referencia a moduleviews, nullable)
+- `name` (string, unique)
+- `description` (string, nullable)
+- `timestamps`
 
 **Solución:**
-1. Ejecuta primero `PermissionsSeeder` para crear los permisos automáticos
-2. Luego ejecuta `BasicPermissionsSeeder` para agregar permisos adicionales
+Los seeders han sido actualizados para usar la estructura correcta. Ejecuta:
 
 ```bash
 php artisan db:seed --class=PermissionsSeeder

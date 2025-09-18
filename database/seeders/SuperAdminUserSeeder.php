@@ -55,7 +55,7 @@ class SuperAdminUserSeeder extends Seeder
         }
 
         // Obtener todos los permisos disponibles
-        $allPermissions = Permisos::where('is_enabled', true)->get();
+        $allPermissions = Permisos::all();
 
         // Asignar todos los permisos al usuario SuperAdmin en la tabla userpermissions
         foreach ($allPermissions as $permission) {
@@ -78,6 +78,6 @@ class SuperAdminUserSeeder extends Seeder
         $this->command->info('Password: SuperAdmin123!');
         $this->command->info('Carnet: SUPERADMIN001');
         $this->command->info('Rol asignado: SuperAdmin');
-        $this->command->info('Permisos asignados: ' . $allPermissions->count() . ' permisos globales');
+        $this->command->info('Permisos asignados: ' . $allPermissions->count() . ' permisos');
     }
 }
