@@ -12,18 +12,19 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // \App\Models\User::factory(10)->create();
-
-        // \App\Models\User::factory()->create([
-        //     'name' => 'Test User',
-        //     'email' => 'test@example.com',
-        // ]);
-        // $this->call(ApprovalFlowSeeder::class);
         $this->call([
-            // ProgramasSeeder::class,
-            // PrecioProgramasSeeder::class,
-            // CoursesSeeder::class,
-            //RankingDemoSeeder::class,
+            BasicPermissionsSeeder::class,
+            CoursesSeeder::class,
+            ModulesSeeder::class,
+            ModuleViewsSeeder::class,
+            PermissionsSeeder::class,
+            PrecioProgramasSeeder::class,
+            ProgramasSeeder::class,
+            RolePermissionsConfigSeeder::class,
+            RolePermissionsSeeder::class,
+            RolesSeeder::class,
+            SuperAdminUserSeeder::class,
+            VerifySeederResults::class,
         ]);
     }
 }
