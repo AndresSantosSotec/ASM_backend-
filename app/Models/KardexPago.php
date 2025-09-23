@@ -24,10 +24,12 @@ class KardexPago extends Model
         'banco_normalizado',
         'boleta_fingerprint',
         'archivo_hash',
+        'fecha_recibo',
     ];
 
     protected $casts = [
         'fecha_pago'   => 'datetime',
+        'fecha_recibo' => 'date', // ⬅️ NUEVO
         'monto_pagado' => 'decimal:2',
     ];
 

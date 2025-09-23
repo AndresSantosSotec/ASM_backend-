@@ -20,8 +20,14 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
 
     public function __construct(private int $uploaderId) {}
 
-    public function headingRow(): int { return 1; }
-    public function chunkSize(): int { return 1000; }
+    public function headingRow(): int
+    {
+        return 1;
+    }
+    public function chunkSize(): int
+    {
+        return 1000;
+    }
 
     public function onRow(Row $row)
     {
@@ -31,11 +37,31 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
         try {
             $r = $row->toArray();
 
-            $bank       = $this->pick($r, ['banco','bank','entidad']);
-            $reference  = $this->pick($r, ['referencia','referencia/boleta','referencia_boleta','boleta','numero de recibo','número de recibo','no. referencia','reference']);
-            $amountRaw  = $this->pick($r, ['monto','importe','valor','amount']);
-            $dateRaw    = $this->pick($r, ['fecha','fecha de pago','fecha_pago','date']);
-            $auth       = $this->pick($r, ['numero de autorizacion','número de autorización','autorizacion','auth','auth_number']);
+            $bank       = $this->pick($r, ['banco', 'bank', 'entidad']);
+            $reference = $this->pick($r, [
+                'referencia',
+                'referencia/boleta',
+                'referencia_boleta',
+                'boleta',
+                'numero de recibo',
+                'número de recibo',
+                'numero_recibo',
+                'número_recibo',
+                'no. referencia',
+                'no referencia',
+                'no_referencia',
+                'numero de boleta',
+                'número de boleta',
+                'boleta numero',
+                'reference',
+                'ref',
+                'num',
+                'número',
+                'numero',
+            ]);
+            $amountRaw  = $this->pick($r, ['monto', 'importe', 'valor', 'amount']);
+            $dateRaw    = $this->pick($r, ['fecha', 'fecha de pago', 'fecha_pago', 'date']);
+            $auth       = $this->pick($r, ['numero de autorizacion', 'número de autorización', 'autorizacion', 'auth', 'auth_number']);
 
             // Si todos los campos están vacíos, saltar la fila
             if ($bank === null && $reference === null && $amountRaw === null && $dateRaw === null) {
@@ -47,7 +73,7 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
             if (!$bank || !$reference || $amountRaw === null || !$dateRaw) {
                 $this->errors++;
                 $this->details[] = ['row' => $rowNum, 'message' => 'Faltan campos requeridos (Banco, Referencia, Monto, Fecha)'];
-                Log::warning('Recon import: campos faltantes', compact('rowNum','bank','reference','amountRaw','dateRaw'));
+                Log::warning('Recon import: campos faltantes', compact('rowNum', 'bank', 'reference', 'amountRaw', 'dateRaw'));
                 return;
             }
 
@@ -60,7 +86,7 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
             if ($amount === null || $dateYmd === null) {
                 $this->errors++;
                 $this->details[] = ['row' => $rowNum, 'message' => 'Monto o Fecha inválidos'];
-                Log::warning('Recon import: monto/fecha inválidos', compact('rowNum','amountRaw','dateRaw'));
+                Log::warning('Recon import: monto/fecha inválidos', compact('rowNum', 'amountRaw', 'dateRaw'));
                 return;
             }
 
@@ -88,7 +114,6 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
             if ($this->rowCounter % 100 === 0) {
                 $this->saveProgressToSession();
             }
-
         } catch (Throwable $e) {
             $this->errors++;
             $this->details[] = ['row' => $rowNum, 'message' => $e->getMessage()];
@@ -102,8 +127,10 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
         $this->saveProgressToSession();
 
         Log::info('Reconciliation import finalizado', [
-            'created' => $this->created, 'updated' => $this->updated,
-            'skipped' => $this->skipped, 'errors' => $this->errors
+            'created' => $this->created,
+            'updated' => $this->updated,
+            'skipped' => $this->skipped,
+            'errors' => $this->errors
         ]);
     }
 
@@ -123,12 +150,14 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
     private function pick($row, array $candidates)
     {
         foreach ($candidates as $k) {
-            foreach ([
-                $k,
-                strtolower($k),
-                str_replace(' ', '_', strtolower($k)),
-                str_replace([' ', '.'], '', strtolower($k)),
-            ] as $cand) {
+            foreach (
+                [
+                    $k,
+                    strtolower($k),
+                    str_replace(' ', '_', strtolower($k)),
+                    str_replace([' ', '.'], '', strtolower($k)),
+                ] as $cand
+            ) {
                 if (isset($row[$cand]) && $row[$cand] !== '' && $row[$cand] !== null) return $row[$cand];
             }
         }
@@ -145,10 +174,10 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
     {
         $b = mb_strtoupper(trim($bank), 'UTF-8');
         $map = [
-            'BANCO INDUSTRIAL' => ['BI','BANCO INDUSTRIAL','INDUSTRIAL'],
-            'BANRURAL'         => ['BANRURAL','BAN RURAL','RURAL'],
-            'BAM'              => ['BAM','BANCO AGROMERCANTIL'],
-            'G&T CONTINENTAL'  => ['G&T','G Y T','GYT','G&T CONTINENTAL'],
+            'BANCO INDUSTRIAL' => ['BI', 'BANCO INDUSTRIAL', 'INDUSTRIAL'],
+            'BANRURAL'         => ['BANRURAL', 'BAN RURAL', 'RURAL'],
+            'BAM'              => ['BAM', 'BANCO AGROMERCANTIL'],
+            'G&T CONTINENTAL'  => ['G&T', 'G Y T', 'GYT', 'G&T CONTINENTAL'],
             'PROMERICA'        => ['PROMERICA'],
         ];
         foreach ($map as $canon => $aliases) {
@@ -159,7 +188,7 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
 
     private function makeFingerprint(string $bankNorm, string $receiptNorm, float $amount, string $dateYmd): string
     {
-        return $bankNorm.'|'.$receiptNorm.'|'.number_format($amount, 2, '.', '').'|'.$dateYmd;
+        return $bankNorm . '|' . $receiptNorm . '|' . number_format($amount, 2, '.', '') . '|' . $dateYmd;
     }
 
     private function toNumber($v): ?float
@@ -194,21 +223,24 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
             try {
                 $dt = ExcelDate::excelToDateTimeObject($v);
                 return Carbon::instance($dt)->format('Y-m-d');
-            } catch (\Throwable) {}
+            } catch (\Throwable) {
+            }
         }
 
         $s = trim((string)$v);
         if ($s === '') return null;
 
-        foreach (['Y-m-d','d/m/Y','d-m-Y','m/d/Y'] as $fmt) {
+        foreach (['Y-m-d', 'd/m/Y', 'd-m-Y', 'm/d/Y'] as $fmt) {
             try {
                 return Carbon::createFromFormat($fmt, $s)->format('Y-m-d');
-            } catch (\Throwable) {}
+            } catch (\Throwable) {
+            }
         }
 
         try {
             return Carbon::parse($s)->format('Y-m-d');
-        } catch (\Throwable) {}
+        } catch (\Throwable) {
+        }
 
         return null;
     }

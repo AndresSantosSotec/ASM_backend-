@@ -30,10 +30,10 @@ class EstudiantePagosController extends Controller
         $b = mb_strtoupper(trim($bank), 'UTF-8');
 
         $map = [
-            'BANCO INDUSTRIAL' => ['BI', 'BANCO INDUSTRIAL', 'INDUSTRIAL'],
-            'BANRURAL'         => ['BANRURAL', 'BAN RURAL', 'RURAL'],
-            'BAM'              => ['BAM', 'BANCO AGROMERCANTIL'],
-            'G&T CONTINENTAL'  => ['G&T', 'G Y T', 'GYT', 'G&T CONTINENTAL'],
+            'BANCO INDUSTRIAL' => ['BI','BANCO INDUSTRIAL','INDUSTRIAL'],
+            'BANRURAL'         => ['BANRURAL','BAN RURAL','RURAL'],
+            'BAM'              => ['BAM','BANCO AGROMERCANTIL'],
+            'G&T CONTINENTAL'  => ['G&T','G Y T','GYT','G&T CONTINENTAL'],
             'PROMERICA'        => ['PROMERICA'],
         ];
 
@@ -67,8 +67,10 @@ class EstudiantePagosController extends Controller
         $lateFeeTotal = 0.0;
         if ($monthsOverdue > 0 && $lateFeePerMonth > 0) {
             if ($lateFeePerMonth <= 1) {
+                // porcentaje mensual
                 $lateFeeTotal = (float) $cuota->monto * $lateFeePerMonth * $monthsOverdue;
             } else {
+                // monto fijo mensual
                 $lateFeeTotal = $lateFeePerMonth * $monthsOverdue;
             }
         }
@@ -238,7 +240,8 @@ class EstudiantePagosController extends Controller
 
     /**
      * POST /api/estudiante/pagos/subir-recibo
-     * VERSIÓN MEJORADA con hotfix de duplicados de archivo
+     * VERSIÓN MEJORADA: fecha_recibo y siempre en revisión manual.
+     * Además, actualiza la cuota a 'en_revision' en cualquier caso de alta/reuso.
      */
     public function subirReciboPago(Request $request)
     {
@@ -247,6 +250,7 @@ class EstudiantePagosController extends Controller
             'numero_boleta'  => 'required|string|max:120',
             'banco'          => 'required|string|max:120',
             'monto'          => 'required|numeric|min:0',
+            'fecha_recibo'   => 'required|date',
             'comprobante'    => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120',
         ]);
 
@@ -268,12 +272,12 @@ class EstudiantePagosController extends Controller
         $file        = $request->file('comprobante');
         $archivoHash = hash_file('sha256', $file->getRealPath());
 
-        $STRICT_DUP_FILE_BLOCK = (bool) env('STRICT_DUP_FILE_BLOCK', false); // [HOTFIX] flag
+        $STRICT_DUP_FILE_BLOCK = (bool) env('STRICT_DUP_FILE_BLOCK', false);
 
         return DB::transaction(function () use (
             $request, $user, $now, $rule, $numeroNorm, $bancoNorm, $boletaFp, $file, $archivoHash, $STRICT_DUP_FILE_BLOCK
         ) {
-            // 1) Verificar cuota pertenece al estudiante y está pendiente
+            // 1) Verificar cuota pertenece al estudiante y NO está pagada
             $cuota = CuotaProgramaEstudiante::whereHas('estudiantePrograma.prospecto', function ($q) use ($user) {
                     $q->where('carnet', $user->carnet);
                 })
@@ -281,7 +285,7 @@ class EstudiantePagosController extends Controller
                 ->lockForUpdate()
                 ->first();
 
-            if (!$cuota || $cuota->estado !== 'pendiente') {
+            if (!$cuota || $cuota->estado === 'pagado') {
                 return response()->json([
                     'success' => false,
                     'code' => 'CUOTA_NOT_AVAILABLE',
@@ -289,7 +293,7 @@ class EstudiantePagosController extends Controller
                 ], 404);
             }
 
-            // 2) Verificar si ya hay un pago aprobado para esta cuota
+            // 2) Evitar pagos duplicados aprobados
             $yaAprobado = KardexPago::where('cuota_id', $cuota->id)
                 ->where('estado_pago', 'aprobado')
                 ->exists();
@@ -302,7 +306,7 @@ class EstudiantePagosController extends Controller
                 ], 409);
             }
 
-            // 3) VALIDACIÓN PRINCIPAL: boleta duplicada (siempre estricta)
+            // 3) Duplicado de BOLETA (estricto)
             $existingPayment = KardexPago::where('boleta_fingerprint', $boletaFp)
                 ->whereIn('estado_pago', ['pendiente_revision', 'aprobado'])
                 ->with(['cuota', 'estudiantePrograma.programa'])
@@ -329,20 +333,16 @@ class EstudiantePagosController extends Controller
                 ], 409);
             }
 
-            // 4) [HOTFIX] Verificar archivo duplicado con política relajada
-            //    - Si STRICT_DUP_FILE_BLOCK = true -> bloquea cualquier duplicado (comportamiento original).
-            //    - Si false -> solo bloquea si el archivo ya fue usado por otro estudiante u otra cuota.
-            $dupArchivoQuery = KardexPago::where('archivo_hash', $archivoHash)
-                ->whereIn('estado_pago', ['pendiente_revision','aprobado']);
-
-            $dupArchivo = $dupArchivoQuery->first();
+            // 4) Duplicado de ARCHIVO (relajado por flag)
+            $dupArchivo = KardexPago::where('archivo_hash', $archivoHash)
+                ->whereIn('estado_pago', ['pendiente_revision','aprobado'])
+                ->first();
 
             if ($dupArchivo) {
                 $esMismoEstudiante = ($dupArchivo->estudiante_programa_id === $cuota->estudiante_programa_id);
                 $esMismaCuota      = ($dupArchivo->cuota_id === $cuota->id);
 
                 if ($STRICT_DUP_FILE_BLOCK) {
-                    // Política estricta: siempre bloquea
                     return response()->json([
                         'success' => false,
                         'code' => 'DUPLICATE_RECEIPT_FILE',
@@ -362,164 +362,125 @@ class EstudiantePagosController extends Controller
                     ], 409);
                 }
 
-                // Política relajada:
-                // - Si es el MISMO estudiante y MISMA cuota:
-                //   -> si el anterior está pendiente_revision, lo reusamos (lo actualizamos);
-                //   -> si está aprobado, entonces ya quedó pagado y no se debe re-subir (que caiga por CUOTA_ALREADY_PAID arriba).
-                if ($esMismoEstudiante && $esMismaCuota) {
-                    if ($dupArchivo->estado_pago === 'pendiente_revision') {
-                        // Reusar: actualizamos el registro existente en vez de crear otro
-                        $nombreArchivo = 'recibo_' . $user->carnet . '_' . $cuota->id . '_' . time() . '.' . $file->getClientOriginalExtension();
-                        $rutaArchivo   = $file->storeAs('recibos_pago', $nombreArchivo, 'public');
+                // Reuso permitido: mismo estudiante y misma cuota, y el registro anterior sigue en revisión
+                if ($esMismoEstudiante && $esMismaCuota && $dupArchivo->estado_pago === 'pendiente_revision') {
+                    $nombreArchivo = 'recibo_' . $user->carnet . '_' . $cuota->id . '_' . time() . '.' . $file->getClientOriginalExtension();
+                    $rutaArchivo   = $file->storeAs('recibos_pago', $nombreArchivo, 'public');
 
-                        // Recalcular expected
-                        $calc = $this->computeExpectedWithLate($cuota, $rule, $now);
-                        $expectedTotal = $calc['expected_total'];
-                        $tolerance     = 0.05;
-                        $montoCliente  = (float) $request->monto;
-                        $difference    = round(abs($montoCliente - $expectedTotal), 2);
-                        $autoApprove   = ($difference <= $tolerance);
+                    // Info de cálculo (solo informativo)
+                    $calc = $this->computeExpectedWithLate($cuota, $rule, $now);
+                    $expectedTotal = $calc['expected_total'];
+                    $montoCliente  = (float) $request->monto;
+                    $difference    = round(abs($montoCliente - $expectedTotal), 2);
 
-                        $dupArchivo->update([
-                            'fecha_pago'          => $now,
-                            'monto_pagado'        => $montoCliente,
-                            'metodo_pago'         => 'transferencia_bancaria',
-                            'numero_boleta'       => $request->numero_boleta,
-                            'banco'               => $request->banco,
-                            'archivo_comprobante' => $rutaArchivo,
-                            'estado_pago'         => $autoApprove ? 'aprobado' : 'pendiente_revision',
-                            'observaciones'       => $autoApprove
-                                ? 'Pago aprobado automáticamente (monto validado) [reupload same cuota]'
-                                : 'Diferencia vs. monto esperado: Q' . number_format($difference, 2) . ' [reupload same cuota]',
-                            'numero_boleta_normalizada' => $numeroNorm,
-                            'banco_normalizado'         => $bancoNorm,
-                            'boleta_fingerprint'        => $boletaFp,
-                            'archivo_hash'              => $archivoHash,
-                        ]);
+                    $dupArchivo->update([
+                        'fecha_pago'          => $now,
+                        'fecha_recibo'        => $request->fecha_recibo,
+                        'monto_pagado'        => $montoCliente,
+                        'metodo_pago'         => 'transferencia_bancaria',
+                        'numero_boleta'       => $request->numero_boleta,
+                        'banco'               => $request->banco,
+                        'archivo_comprobante' => $rutaArchivo,
+                        'estado_pago'         => 'pendiente_revision',
+                        'observaciones'       => 'Recibo resubido. En espera de revisión manual. Diferencia vs. monto esperado: Q' . number_format($difference, 2),
+                        'numero_boleta_normalizada' => $numeroNorm,
+                        'banco_normalizado'         => $bancoNorm,
+                        'boleta_fingerprint'        => $boletaFp,
+                        'archivo_hash'              => $archivoHash,
+                    ]);
 
-                        if ($autoApprove) {
-                            $cuota->update([
-                                'estado'     => 'pagado',
-                                'fecha_pago' => $now,
-                            ]);
+                    // 🔹 Siempre que haya un recibo subido o resubido, la cuota queda en revisión
+                    $cuota->update([
+                        'estado'  => 'en_revision',
+                        'paid_at' => null,
+                    ]);
 
-                            return response()->json([
-                                'success' => true,
-                                'code' => 'PAYMENT_APPROVED',
-                                'message' => 'Pago procesado y aprobado automáticamente',
-                                'pago_id' => $dupArchivo->id,
-                                'estado_cuota' => 'pagado',
-                                'expected_total' => $expectedTotal,
-                                'late_fee_total' => $calc['late_fee_total'],
-                                'months_overdue' => $calc['months_overdue'],
-                                'fecha_procesamiento' => $now->format('Y-m-d H:i:s'),
-                            ], 201);
-                        }
+                    return response()->json([
+                        'success' => true,
+                        'code' => 'RECEIPT_UPDATED',
+                        'message' => 'Recibo actualizado y enviado a revisión',
+                        'pago_id' => $dupArchivo->id,
+                        'estado_pago' => 'pendiente_revision',
+                        'estado_cuota' => 'en_revision',
+                        'expected_total' => $expectedTotal,
+                        'monto_enviado' => $montoCliente,
+                        'difference' => $difference,
+                        'late_fee_total' => $calc['late_fee_total'],
+                        'months_overdue' => $calc['months_overdue'],
+                        'fecha_procesamiento' => $now->format('Y-m-d H:i:s'),
+                    ], 201);
+                }
 
-                        return response()->json([
-                            'success' => false,
-                            'code' => 'AMOUNT_MISMATCH_UNDER_REVIEW',
-                            'message' => 'Recibo actualizado, pero el monto no coincide exactamente. Se revisará manualmente',
+                // Otro estudiante u otra cuota => bloquea
+                return response()->json([
+                    'success' => false,
+                    'code' => 'DUPLICATE_RECEIPT_FILE',
+                    'message' => 'Este archivo ya fue presentado anteriormente',
+                    'error_details' => [
+                        'tipo_error' => 'ARCHIVO_DUPLICADO',
+                        'archivo_original' => [
                             'pago_id' => $dupArchivo->id,
-                            'estado_pago' => 'pendiente_revision',
-                            'expected_total' => $expectedTotal,
-                            'monto_enviado' => $montoCliente,
-                            'difference' => $difference,
-                            'late_fee_total' => $calc['late_fee_total'],
-                            'months_overdue' => $calc['months_overdue'],
-                        ], 202);
-                    }
-
-                    // Si está aprobado para esa misma cuota, ya se habría detenido por CUOTA_ALREADY_PAID.
-                } else {
-                    // Es otro estudiante u otra cuota -> sí bloqueamos
-                    return response()->json([
-                        'success' => false,
-                        'code' => 'DUPLICATE_RECEIPT_FILE',
-                        'message' => 'Este archivo ya fue presentado anteriormente',
-                        'error_details' => [
-                            'tipo_error' => 'ARCHIVO_DUPLICADO',
-                            'archivo_original' => [
-                                'pago_id' => $dupArchivo->id,
-                                'estudiante_programa_id' => $dupArchivo->estudiante_programa_id,
-                                'cuota_id' => $dupArchivo->cuota_id,
-                                'fecha_uso' => $dupArchivo->fecha_pago->format('d/m/Y H:i'),
-                                'boleta_numero' => $dupArchivo->numero_boleta,
-                                'monto_original' => $dupArchivo->monto_pagado,
-                            ]
-                        ],
-                        'user_message' => 'Este comprobante ya fue presentado anteriormente. Por favor, use un archivo diferente.'
-                    ], 409);
-                }
+                            'estudiante_programa_id' => $dupArchivo->estudiante_programa_id,
+                            'cuota_id' => $dupArchivo->cuota_id,
+                            'fecha_uso' => $dupArchivo->fecha_pago->format('d/m/Y H:i'),
+                            'boleta_numero' => $dupArchivo->numero_boleta,
+                            'monto_original' => $dupArchivo->monto_pagado,
+                        ]
+                    ],
+                    'user_message' => 'Este comprobante ya fue presentado anteriormente. Por favor, use un archivo diferente.'
+                ], 409);
             }
 
-            // 5) Cálculo de mora / total esperado
+            // 5) Calcular info (solo informativa)
             $calc = $this->computeExpectedWithLate($cuota, $rule, $now);
             $expectedTotal = $calc['expected_total'];
-            $tolerance     = 0.05; // Q0.05 de tolerancia
-
-            $montoCliente = (float) $request->monto;
-            $difference   = round(abs($montoCliente - $expectedTotal), 2);
+            $montoCliente  = (float) $request->monto;
+            $difference    = round(abs($montoCliente - $expectedTotal), 2);
 
             // 6) Guardar archivo
             $nombreArchivo = 'recibo_' . $user->carnet . '_' . $cuota->id . '_' . time() . '.' . $file->getClientOriginalExtension();
             $rutaArchivo   = $file->storeAs('recibos_pago', $nombreArchivo, 'public');
 
-            // 7) Determinar estado del pago
-            $autoApprove = ($difference <= $tolerance);
-
+            // 7) Crear KardexPago (siempre en revisión)
             $pago = KardexPago::create([
                 'estudiante_programa_id'    => $cuota->estudiante_programa_id,
                 'cuota_id'                  => $cuota->id,
                 'fecha_pago'                => $now,
+                'fecha_recibo'              => $request->fecha_recibo,
                 'monto_pagado'              => $montoCliente,
                 'metodo_pago'               => 'transferencia_bancaria',
                 'numero_boleta'             => $request->numero_boleta,
                 'banco'                     => $request->banco,
                 'archivo_comprobante'       => $rutaArchivo,
-                'estado_pago'               => $autoApprove ? 'aprobado' : 'pendiente_revision',
-                'observaciones'             => $autoApprove
-                    ? 'Pago aprobado automáticamente (monto validado)'
-                    : 'Diferencia vs. monto esperado: Q' . number_format($difference, 2),
+                'estado_pago'               => 'pendiente_revision',
+                'observaciones'             => 'Recibo ingresado. En espera de revisión manual. Diferencia vs. monto esperado: Q' . number_format($difference, 2),
                 'numero_boleta_normalizada' => $numeroNorm,
                 'banco_normalizado'         => $bancoNorm,
                 'boleta_fingerprint'        => $boletaFp,
                 'archivo_hash'              => $archivoHash,
             ]);
 
-            if ($autoApprove) {
-                // Marcar cuota como pagada
-                $cuota->update([
-                    'estado'     => 'pagado',
-                    'fecha_pago' => $now,
-                ]);
+            // 8) Dejar la cuota en revisión también aquí
+            $cuota->update([
+                'estado'  => 'en_revision',
+                'paid_at' => null,
+            ]);
 
-                return response()->json([
-                    'success' => true,
-                    'code' => 'PAYMENT_APPROVED',
-                    'message' => 'Pago procesado y aprobado automáticamente',
-                    'pago_id' => $pago->id,
-                    'estado_cuota' => 'pagado',
-                    'expected_total' => $expectedTotal,
-                    'late_fee_total' => $calc['late_fee_total'],
-                    'months_overdue' => $calc['months_overdue'],
-                    'fecha_procesamiento' => $now->format('Y-m-d H:i:s'),
-                ], 201);
-            }
-
-            // En revisión
+            // 9) Respuesta
             return response()->json([
-                'success' => false,
-                'code' => 'AMOUNT_MISMATCH_UNDER_REVIEW',
-                'message' => 'Recibo recibido, pero el monto no coincide exactamente. Se revisará manualmente',
+                'success' => true,
+                'code' => 'RECEIPT_SUBMITTED',
+                'message' => 'Recibo registrado y enviado a revisión',
                 'pago_id' => $pago->id,
                 'estado_pago' => 'pendiente_revision',
+                'estado_cuota' => 'en_revision',
                 'expected_total' => $expectedTotal,
                 'monto_enviado' => $montoCliente,
                 'difference' => $difference,
                 'late_fee_total' => $calc['late_fee_total'],
                 'months_overdue' => $calc['months_overdue'],
-            ], 202);
+                'fecha_procesamiento' => $now->format('Y-m-d H:i:s'),
+            ], 201);
         });
     }
 }
