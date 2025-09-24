@@ -72,8 +72,20 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
             // Validar campos requeridos
             if (!$bank || !$reference || $amountRaw === null || !$dateRaw) {
                 $this->errors++;
-                $this->details[] = ['row' => $rowNum, 'message' => 'Faltan campos requeridos (Banco, Referencia, Monto, Fecha)'];
-                Log::warning('Recon import: campos faltantes', compact('rowNum', 'bank', 'reference', 'amountRaw', 'dateRaw'));
+                $this->details[] = [
+                    'row' => $rowNum,
+                    'message' => 'Faltan campos requeridos (Banco, Referencia, Monto, Fecha)',
+                    'rowData' => $r
+                ];
+                Log::warning('Recon import: campos faltantes', [
+                    'rowNum'    => $rowNum,
+                    'bank'      => $bank,
+                    'reference' => $reference,
+                    'amountRaw' => $amountRaw,
+                    'dateRaw'   => $dateRaw,
+                    'rowData'   => $r,   // 👈 toda la fila cruda
+                    'keys'      => array_keys($r), // 👈 nombres exactos de columnas
+                ]);
                 return;
             }
 
@@ -155,14 +167,18 @@ class BankStatementImport implements OnEachRow, WithHeadingRow, WithChunkReading
                     $k,
                     strtolower($k),
                     str_replace(' ', '_', strtolower($k)),
-                    str_replace([' ', '.'], '', strtolower($k)),
+                    str_replace([' ', '.', '/'], '_', strtolower($k)), // 👈 agregado `/`
+                    str_replace([' ', '.', '/'], '', strtolower($k)),  // 👈 agregado `/`
                 ] as $cand
             ) {
-                if (isset($row[$cand]) && $row[$cand] !== '' && $row[$cand] !== null) return $row[$cand];
+                if (isset($row[$cand]) && $row[$cand] !== '' && $row[$cand] !== null) {
+                    return $row[$cand];
+                }
             }
         }
         return null;
     }
+
 
     private function normalizeReceiptNumber(string $n): string
     {

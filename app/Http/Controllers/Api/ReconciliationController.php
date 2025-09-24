@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 use App\Models\KardexPago;
 use App\Models\ReconciliationRecord;
@@ -51,6 +52,31 @@ class ReconciliationController extends Controller
     }
 
     /**
+     * Método mejorado para extraer fecha consistente
+     */
+    protected function extractDateFromKardex($kardexRecord): string
+    {
+        // Prioridad: fecha_recibo, luego fecha_pago
+        $fechaRecibo = $kardexRecord->fecha_recibo;
+        $fechaPago   = $kardexRecord->fecha_pago;
+
+        if ($fechaRecibo) {
+            return $fechaRecibo instanceof Carbon
+                ? $fechaRecibo->format('Y-m-d')
+                : Carbon::parse($fechaRecibo)->format('Y-m-d');
+        }
+
+        if ($fechaPago) {
+            return $fechaPago instanceof Carbon
+                ? $fechaPago->format('Y-m-d')
+                : Carbon::parse($fechaPago)->format('Y-m-d');
+        }
+
+        // Último recurso (no debería ocurrir)
+        return Carbon::now()->format('Y-m-d');
+    }
+
+    /**
      * GET /api/conciliacion/pendientes-desde-kardex
      */
     public function kardexNoConciliados(Request $request)
@@ -62,7 +88,14 @@ class ReconciliationController extends Controller
 
             $bankFilterNorm = $bank ? $this->normalizeBank($bank) : null;
 
-            // 1) Kardex
+            Log::info('kardexNoConciliados: filtros recibidos', [
+                'from' => $from,
+                'to' => $to,
+                'bank' => $bank,
+                'bank_norm' => $bankFilterNorm
+            ]);
+
+            // 1) Kardex - usando DATE para evitar problemas de timezone
             $kardexQuery = KardexPago::query()
                 ->select([
                     'id',
@@ -77,17 +110,23 @@ class ReconciliationController extends Controller
                     'banco_normalizado',
                 ]);
 
-            if ($from) $kardexQuery->whereDate('fecha_pago', '>=', $from);
-            if ($to)   $kardexQuery->whereDate('fecha_pago', '<=', $to);
+            // Usar COALESCE para priorizar fecha_recibo sobre fecha_pago en filtros
+            if ($from) {
+                $kardexQuery->whereRaw('DATE(COALESCE(fecha_recibo, fecha_pago)) >= ?', [$from]);
+            }
+            if ($to) {
+                $kardexQuery->whereRaw('DATE(COALESCE(fecha_recibo, fecha_pago)) <= ?', [$to]);
+            }
+
             if ($bankFilterNorm) {
                 $kardexQuery->where(function ($q) use ($bankFilterNorm) {
                     $q->where('banco_normalizado', $bankFilterNorm)
-                      ->orWhere('banco', $bankFilterNorm)
-                      ->orWhereRaw('UPPER(TRIM(banco)) = ?', [$bankFilterNorm]);
+                        ->orWhere('banco', $bankFilterNorm)
+                        ->orWhereRaw('UPPER(TRIM(banco)) = ?', [$bankFilterNorm]);
                 });
             }
 
-            $kardex = $kardexQuery->orderBy('fecha_pago', 'desc')->get();
+            $kardex = $kardexQuery->orderByRaw('COALESCE(fecha_recibo, fecha_pago) DESC')->get();
 
             // 2) reconciliation_records
             $recQuery = ReconciliationRecord::query()
@@ -104,6 +143,12 @@ class ReconciliationController extends Controller
             }
             $recs = $recQuery->get();
 
+            Log::info('kardexNoConciliados: conteos base', [
+                'kardex_count' => $kardex->count(),
+                'recs_count'   => $recs->count(),
+            ]);
+
+            // Crear mapa de fingerprints de reconciliation_records
             $recFingerprints = [];
             foreach ($recs as $r) {
                 $bn = $this->normalizeBank((string) $r->bank);
@@ -113,27 +158,38 @@ class ReconciliationController extends Controller
                 $recFingerprints[$this->makeFingerprint($bn, $rn, $amt, $ymd)] = true;
             }
 
-            // 3) Pendientes
+            // 3) Buscar pendientes
             $pendientesUi = [];
             $i = 1;
-
             foreach ($kardex as $p) {
-                $bn = $p->banco_normalizado ?: $this->normalizeBank((string) $p->banco);
-                $rn = $p->numero_boleta_normalizada ?: $this->normalizeReceiptNumber((string) $p->numero_boleta);
+                $bn  = $p->banco_normalizado ?: $this->normalizeBank((string) $p->banco);
+                $rn  = $p->numero_boleta_normalizada ?: $this->normalizeReceiptNumber((string) $p->numero_boleta);
                 $amt = (float) $p->monto_pagado;
-                $ymd = $p->fecha_recibo
-                    ? Carbon::parse($p->fecha_recibo)->format('Y-m-d')
-                    : Carbon::parse($p->fecha_pago)->format('Y-m-d');
+
+                $ymd = $this->extractDateFromKardex($p);
 
                 $fp = $this->makeFingerprint($bn, $rn, $amt, $ymd);
 
                 if (!isset($recFingerprints[$fp])) {
+                    // (Opcional) log de muestra para diagnosticar (no loguear todos si hay miles)
+                    if ($i <= 5) {
+                        Log::debug('kardexNoConciliados: sin match fingerprint (muestra)', [
+                            'kardex_id' => $p->id,
+                            'fp'        => $fp,
+                            'bn'        => $bn,
+                            'rn'        => $rn,
+                            'amt'       => $amt,
+                            'ymd'       => $ymd,
+                        ]);
+                    }
+
                     $est = $p->estudiantePrograma()->with(['prospecto', 'programa'])->first();
                     $pendientesUi[] = [
                         'index'  => $i++,
                         'input'  => [
                             'carnet'  => $est->prospecto->carnet ?? '',
-                            'alumno'  => $est->prospecto->nombre ?? (($est->prospecto->primer_nombre ?? '') . ' ' . ($est->prospecto->primer_apellido ?? '')),
+                            'alumno'  => $est->prospecto->nombre
+                                ?? (($est->prospecto->primer_nombre ?? '') . ' ' . ($est->prospecto->primer_apellido ?? '')),
                             'carrera' => $est->programa->nombre_del_programa ?? '',
                             'banco'   => $p->banco ?? $bn,
                             'recibo'  => $p->numero_boleta ?? $rn,
@@ -145,9 +201,14 @@ class ReconciliationController extends Controller
                         'message' => 'No existe registro equivalente en reconciliation_records',
                         'kardex_id' => $p->id,
                         'cuota_id'  => $p->cuota_id,
+                        'debug_fingerprint' => $fp,
                     ];
                 }
             }
+
+            Log::info('kardexNoConciliados: resultado', [
+                'pendientes' => count($pendientesUi),
+            ]);
 
             return response()->json([
                 'ok' => true,
@@ -162,6 +223,7 @@ class ReconciliationController extends Controller
                 'message' => 'Pendientes derivados de Kardex sin match en reconciliation_records',
             ]);
         } catch (\Throwable $e) {
+            Log::error('kardexNoConciliados: error', ['exception' => $e]);
             return response()->json([
                 'ok' => false,
                 'results' => [],
@@ -177,7 +239,7 @@ class ReconciliationController extends Controller
         }
     }
 
-    /** POST /api/conciliacion/import */
+    /** POST /api/conciliacion/import (rápido y funcional) */
     public function import(Request $request)
     {
         $request->validate([
@@ -197,75 +259,120 @@ class ReconciliationController extends Controller
         }
 
         try {
-            Excel::import(new BankStatementImport(uploaderId: $uploaderId), $request->file('file'));
+            // 1) Importar filas
+            $import = new BankStatementImport(uploaderId: $uploaderId);
+            Excel::import($import, $request->file('file'));
 
+            // 2) Tomar registros recién importados (o pendientes), no los ya conciliados
             $recs = ReconciliationRecord::where('uploaded_by', $uploaderId)
-                ->whereNull('status')
+                ->where(function ($q) {
+                    $q->whereNull('status')
+                        ->orWhereIn('status', ['imported', 'rechazado']); // procesar los “pendientes”
+                })
                 ->get();
 
             $conciliados = 0;
-            $montoConciliado = 0;
+            $montoConciliado = 0.0;
             $conciliadosList = [];
 
             foreach ($recs as $r) {
+                // Validación mínima de campos
                 if (!$r->bank || !$r->reference || !$r->amount || !$r->date) {
                     $r->update(['status' => 'rechazado']);
                     continue;
                 }
 
-                $bn = $this->normalizeBank((string)$r->bank);
-                $rn = $this->normalizeReceiptNumber((string)$r->reference);
+                // Normalizaciones
+                $bn  = $this->normalizeBank((string)$r->bank);
+                $rn  = $this->normalizeReceiptNumber((string)$r->reference);
                 $amt = (float)$r->amount;
                 $ymd = Carbon::parse($r->date)->format('Y-m-d');
 
-                $kardex = KardexPago::where('banco_normalizado', $bn)
-                    ->where('numero_boleta_normalizada', $rn)
-                    ->whereDate(DB::raw("COALESCE(fecha_recibo, fecha_pago)"), $ymd)
+                // 3) Buscar el kardex a conciliar (acepta ambos estados de revisión)
+                $kardex = KardexPago::where(function ($q) use ($bn) {
+                    $q->where('banco_normalizado', $bn)
+                        ->orWhereRaw('UPPER(TRIM(banco)) = ?', [$bn]);
+                })
+                    ->where(function ($q) use ($rn) {
+                        // si ya está normalizado o si solo tienen el número original
+                        $q->where('numero_boleta_normalizada', $rn)
+                            ->orWhere('numero_boleta', $rn);
+                    })
+                    ->whereRaw("DATE(COALESCE(fecha_recibo, fecha_pago)) = ?", [$ymd])
                     ->where('monto_pagado', $amt)
-                    ->where('estado_pago', 'pendiente_revision')
+                    ->whereIn('estado_pago', ['pendiente_revision', 'en_revision'])
                     ->first();
 
-                if ($kardex) {
-                    DB::transaction(function () use ($kardex, $r, $amt, &$conciliados, &$montoConciliado, &$conciliadosList) {
-                        $kardex->update([
-                            'estado_pago'   => 'aprobado',
-                            'observaciones' => 'Conciliado automáticamente con estado de cuenta'
-                        ]);
-
-                        $kardex->cuota()->update([
-                            'estado'  => 'pagado',
-                            'paid_at' => Carbon::now(),
-                        ]);
-
-                        $r->update(['status' => 'conciliado']);
-
-                        $conciliados++;
-                        $montoConciliado += $amt;
-                        $conciliadosList[] = [
-                            'kardex_id' => $kardex->id,
-                            'cuota_id'  => $kardex->cuota_id,
-                            'monto'     => $amt,
-                        ];
-                    });
+                if (!$kardex) {
+                    // No hubo match exacto → lo dejamos como imported para futuro reproceso
+                    // $r->update(['status' => 'imported']); // opcional; ya está en ese estado
+                    continue;
                 }
+
+                // 4) Conciliar y actualizar todo en una transacción
+                DB::transaction(function () use ($kardex, $r, $amt, &$conciliados, &$montoConciliado, &$conciliadosList) {
+                    // a) Kardex aprobado
+                    $kardex->update([
+                        'estado_pago'   => 'aprobado',
+                        'observaciones' => trim(($kardex->observaciones ?? '') . ' Conciliado automáticamente con estado de cuenta'),
+                        'fecha_aprobacion' => now(),
+                        'aprobado_por'  => auth()->id(), // opcional si existe la columna
+                    ]);
+
+                    // b) Cuota pagada (primero por relación; si falla, por SQL directo)
+                    $updated = $kardex->cuota()->update([
+                        'estado'   => 'pagado',
+                        'paid_at'  => Carbon::now(),
+                        'updated_at' => Carbon::now(),
+                    ]);
+
+                    if (!$updated && $kardex->cuota_id) {
+                        DB::table('cuotas_programa_estudiante')
+                            ->where('id', $kardex->cuota_id)
+                            ->update([
+                                'estado'     => 'pagado',
+                                'paid_at'    => Carbon::now(),
+                                'updated_at' => Carbon::now(),
+                            ]);
+                    }
+
+                    // c) ReconciliationRecord marcado como conciliado
+                    $r->update(['status' => 'conciliado']);
+
+                    // d) Resumen
+                    $conciliados++;
+                    $montoConciliado += (float)$r->amount;
+                    $conciliadosList[] = [
+                        'kardex_id' => $kardex->id,
+                        'cuota_id'  => $kardex->cuota_id,
+                        'monto'     => (float)$r->amount,
+                    ];
+                });
             }
 
             return response()->json([
                 'ok' => true,
                 'message' => 'Importación y conciliación completadas',
                 'summary' => [
-                    'conciliados' => $conciliados,
-                    'monto_conciliado' => $montoConciliado,
+                    'conciliados'       => $conciliados,
+                    'monto_conciliado'  => $montoConciliado,
+                    'created'           => $import->created,
+                    'updated'           => $import->updated,
+                    'skipped'           => $import->skipped,
+                    'errors'            => $import->errors,
                 ],
                 'conciliados_list' => $conciliadosList,
+                'errors_detail'    => $import->details,
             ]);
         } catch (\Throwable $e) {
+            Log::error("ReconciliationController import error", ['exception' => $e]);
             return response()->json([
                 'ok' => false,
                 'message' => 'Error al importar: ' . $e->getMessage(),
             ], 500);
         }
     }
+
 
     /** GET /api/conciliacion/template */
     public function downloadTemplate()
@@ -318,25 +425,37 @@ class ReconciliationController extends Controller
                 'numero_boleta_normalizada',
                 'banco_normalizado',
             ]);
-            if ($from) $kardexQuery->whereDate('fecha_pago', '>=', $from);
-            if ($to)   $kardexQuery->whereDate('fecha_pago', '<=', $to);
+
+            if ($from) {
+                $kardexQuery->whereRaw('DATE(COALESCE(fecha_recibo, fecha_pago)) >= ?', [$from]);
+            }
+            if ($to) {
+                $kardexQuery->whereRaw('DATE(COALESCE(fecha_recibo, fecha_pago)) <= ?', [$to]);
+            }
+
             if ($bankFilterNorm) {
                 $kardexQuery->where(function ($q) use ($bankFilterNorm) {
                     $q->where('banco_normalizado', $bankFilterNorm)
-                      ->orWhere('banco', $bankFilterNorm)
-                      ->orWhereRaw('UPPER(TRIM(banco)) = ?', [$bankFilterNorm]);
+                        ->orWhere('banco', $bankFilterNorm)
+                        ->orWhereRaw('UPPER(TRIM(banco)) = ?', [$bankFilterNorm]);
                 });
             }
-            $kardex = $kardexQuery->orderBy('fecha_pago', 'desc')->get();
+            $kardex = $kardexQuery->orderByRaw('COALESCE(fecha_recibo, fecha_pago) DESC')->get();
 
             $recs = ReconciliationRecord::query()->select([
-                'id','bank','reference','amount','date','auth_number','status'
+                'id',
+                'bank',
+                'reference',
+                'amount',
+                'date',
+                'auth_number',
+                'status'
             ])->get();
 
             $recMap = [];
             foreach ($recs as $r) {
-                $bn = $this->normalizeBank((string)$r->bank);
-                $rn = $this->normalizeReceiptNumber((string)$r->reference);
+                $bn  = $this->normalizeBank((string)$r->bank);
+                $rn  = $this->normalizeReceiptNumber((string)$r->reference);
                 $ymd = Carbon::parse($r->date)->format('Y-m-d');
                 $recMap[$this->makeFingerprint($bn, $rn, (float)$r->amount, $ymd)] = $r;
             }
@@ -346,12 +465,11 @@ class ReconciliationController extends Controller
             $sum = 0;
 
             foreach ($kardex as $p) {
-                $bn = $p->banco_normalizado ?: $this->normalizeBank((string)$p->banco);
-                $rn = $p->numero_boleta_normalizada ?: $this->normalizeReceiptNumber((string)$p->numero_boleta);
+                $bn  = $p->banco_normalizado ?: $this->normalizeBank((string)$p->banco);
+                $rn  = $p->numero_boleta_normalizada ?: $this->normalizeReceiptNumber((string)$p->numero_boleta);
                 $amt = (float)$p->monto_pagado;
-                $ymd = $p->fecha_recibo
-                    ? Carbon::parse($p->fecha_recibo)->format('Y-m-d')
-                    : Carbon::parse($p->fecha_pago)->format('Y-m-d');
+
+                $ymd = $this->extractDateFromKardex($p);
 
                 $fp = $this->makeFingerprint($bn, $rn, $amt, $ymd);
                 if (!isset($recMap[$fp])) continue;
@@ -362,7 +480,8 @@ class ReconciliationController extends Controller
                     'index' => $i++,
                     'input' => [
                         'carnet'  => $est->prospecto->carnet ?? '',
-                        'alumno'  => $est->prospecto->nombre ?? (($est->prospecto->primer_nombre ?? '') . ' ' . ($est->prospecto->primer_apellido ?? '')),
+                        'alumno'  => $est->prospecto->nombre
+                            ?? (($est->prospecto->primer_nombre ?? '') . ' ' . ($est->prospecto->primer_apellido ?? '')),
                         'carrera' => $est->programa->nombre_del_programa ?? '',
                         'banco'   => $p->banco ?? $bn,
                         'recibo'  => $p->numero_boleta ?? $rn,
@@ -372,7 +491,7 @@ class ReconciliationController extends Controller
                     ],
                     'status'   => 'conciliado',
                     'message'  => 'Match exacto (bank, referencia, monto, fecha).',
-                    'kardex_id'=> $p->id,
+                    'kardex_id' => $p->id,
                     'cuota_id' => $p->cuota_id,
                 ];
                 $sum += $amt;
@@ -391,6 +510,7 @@ class ReconciliationController extends Controller
                 'message' => 'Conciliados (intersección Kardex ↔ reconciliation_records)',
             ]);
         } catch (\Throwable $e) {
+            Log::error('kardexConciliados: error', ['exception' => $e]);
             return response()->json([
                 'ok' => false,
                 'results' => [],
