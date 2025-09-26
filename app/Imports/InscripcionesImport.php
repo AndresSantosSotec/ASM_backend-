@@ -10,6 +10,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Schema;
 use Maatwebsite\Excel\Concerns\OnEachRow;
 use Maatwebsite\Excel\Concerns\SkipsEmptyRows;
 use Maatwebsite\Excel\Concerns\SkipsErrors;
@@ -39,10 +40,6 @@ class InscripcionesImport implements OnEachRow,
     private const DUMMY_BIRTH_DATE = '2000-01-01';
     private const DEFAULT_MODALIDAD = 'sincronica';
 
-    /**
-     * Mapas de alias para códigos de programa.
-     * Permite reconocer variaciones como "MRRHH" => "MHTM".
-     */
     private const PROGRAM_ALIASES = [
         'MMKD'  => 'MMK',
         'MMK'   => 'MMK',
@@ -50,13 +47,10 @@ class InscripcionesImport implements OnEachRow,
     ];
 
     protected array $rowErrors = [];
-
-    // Nuevas propiedades agregadas
     private ?string $importId = null;
     private int $rowCount = 0;
     private bool $skipErrorsMode = false;
 
-    // Métodos faltantes agregados
     public function setImportId(string $importId): self
     {
         $this->importId = $importId;
@@ -87,7 +81,6 @@ class InscripcionesImport implements OnEachRow,
             $programa = Programa::whereRaw('upper(abreviatura) = ?', [$abrev])->first();
 
             if (!$programa) {
-                // Búsqueda más flexible por prefijo por si hay variaciones
                 $programa = Programa::whereRaw('upper(abreviatura) LIKE ?', [$abrev . '%'])->first();
             }
 
@@ -129,15 +122,17 @@ class InscripcionesImport implements OnEachRow,
 
     public function prepareForValidation($data, $index)
     {
-        // Normalizar nombres de columnas alternativos
         if (!isset($data['carnet']) && isset($data['carne'])) {
             $data['carnet'] = $data['carne'];
         }
         if (!isset($data['valor_q_matricula_inscripcion']) && isset($data['valor_q_matricula_insripcion'])) {
             $data['valor_q_matricula_inscripcion'] = $data['valor_q_matricula_insripcion'];
         }
+        // ✅ Alias mesualidad -> mensualidad
+        if (!isset($data['mensualidad']) && isset($data['mesualidad'])) {
+            $data['mensualidad'] = $data['mesualidad'];
+        }
 
-        // Asegurar valores numéricos
         $numericFields = [
             'numero_de_cuotas',
             'valor_q_matricula_inscripcion',
@@ -154,25 +149,19 @@ class InscripcionesImport implements OnEachRow,
             }
         }
 
-
-        // Asegurar que teléfono sea una cadena para la validación
         if (isset($data['telefono']) && !is_string($data['telefono'])) {
             $data['telefono'] = strval($data['telefono']);
         }
 
-
-        // Proveer apellido por defecto si falta
         if (empty($data['apellido'])) {
             $data['apellido'] = 'Desconocido';
         }
 
-        // Normalizar correo electrónico, usar uno temporal si es inválido
         $carnetBase = $data['carnet'] ?? $data['carne'] ?? null;
         if (empty($data['email']) || !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
             $data['email'] = $this->defaultEmail($this->normalizeCarnet($carnetBase));
         }
 
-        // Convertir fechas inválidas en valores por defecto
         $data['fecha_de_inscripcion'] = $this->parseDate(
             $data['fecha_de_inscripcion'] ?? null,
             Carbon::now()->toDateString()
@@ -195,18 +184,13 @@ class InscripcionesImport implements OnEachRow,
         if (empty($value)) {
             return $default;
         }
-
         try {
-            // Manejar fechas Excel (números seriales)
             if (is_numeric($value)) {
                 return Carbon::instance(ExcelDate::excelToDateTimeObject($value))->toDateString();
             }
-
-            // Manejar formato "24/6/1989"
             if (preg_match('/^\d{1,2}\/\d{1,2}\/\d{4}$/', $value)) {
                 return Carbon::createFromFormat('d/m/Y', $value)->toDateString();
             }
-
             return Carbon::parse($value)->toDateString();
         } catch (\Exception $e) {
             Log::warning("Fecha no válida: {$value} - {$e->getMessage()}");
@@ -219,11 +203,9 @@ class InscripcionesImport implements OnEachRow,
         if (is_null($v)) {
             return 0.0;
         }
-
         if (is_numeric($v)) {
             return (float) $v;
         }
-
         $clean = str_replace(['Q', '$', ',', ' '], '', trim($v));
         return (float) ($clean !== '' ? $clean : 0);
     }
@@ -258,14 +240,10 @@ class InscripcionesImport implements OnEachRow,
         if (empty($code)) {
             return null;
         }
-
         $base = Str::upper(preg_replace('/[^A-Za-z]/', '', $code));
-
-        // Aplicar alias si existe
         if (isset(self::PROGRAM_ALIASES[$base])) {
             return self::PROGRAM_ALIASES[$base];
         }
-
         return $base;
     }
 
@@ -275,7 +253,6 @@ class InscripcionesImport implements OnEachRow,
             return self::DEFAULT_MODALIDAD;
         }
         $m = strtolower(trim($modalidad));
-
         if (str_contains($m, 'elearn') || str_contains($m, 'online') || str_contains($m, 'virtual')) {
             return 'asincronica';
         }
@@ -305,28 +282,20 @@ class InscripcionesImport implements OnEachRow,
             'error' => $e->getMessage(),
             'values' => $row->toArray(),
         ];
-
-        // Log con ID de importación si está disponible
         $logPrefix = $this->importId ? "[Importación {$this->importId}]" : '';
         Log::error("❌ {$logPrefix} Error processing row {$row->getIndex()}: {$e->getMessage()}");
     }
 
     public function onRow(Row $row)
     {
-        // Incrementar contador de filas
         $this->rowCount++;
-
-        // Log con ID de importación si está disponible
         $logPrefix = $this->importId ? "[Importación {$this->importId}]" : '';
         Log::info("🔍 {$logPrefix} Procesando fila #{$row->getIndex()}", $row->toArray());
 
-        $d = array_map(function ($value) {
-            return is_string($value) ? trim($value) : $value;
-        }, $row->toArray());
+        $d = array_map(fn($value) => is_string($value) ? trim($value) : $value, $row->toArray());
 
         try {
             DB::transaction(function () use ($d, $row) {
-                // Normalizar datos básicos
                 $carnet = $this->normalizeCarnet($d['carnet'] ?? $d['carne'] ?? null);
                 $telefono = $this->sanitizeTelefono($d['telefono'] ?? null);
                 $correo = $d['email'] ? strtolower(trim($d['email'])) : $this->defaultEmail($carnet);
@@ -337,7 +306,6 @@ class InscripcionesImport implements OnEachRow,
                     ? Carbon::parse($fechaInscripcion)->addMonths($numCuotas)->toDateString()
                     : Carbon::parse($fechaInscripcion)->addMonths(1)->toDateString();
 
-                // Determinar género
                 $genero = 'No especificado';
                 if (isset($d['m']) && ($d['m'] === '1' || strtolower($d['m']) === 'x')) {
                     $genero = 'Masculino';
@@ -345,7 +313,6 @@ class InscripcionesImport implements OnEachRow,
                     $genero = 'Femenino';
                 }
 
-                // — Prospecto —
                 $prospecto = Prospecto::updateOrCreate(
                     ['carnet' => $carnet],
                     [
@@ -365,25 +332,23 @@ class InscripcionesImport implements OnEachRow,
                         'direccion_residencia' => $d['direccion'] ?? null,
                         'pais_residencia' => $d['pais'] ?? null,
                         'medio_conocimiento_institucion' => $d['medio_por_cual_ingreso'] ?? null,
-                        'monto_inscripcion' => $this->limpiarMonto($d['valor_q_matricula_inscripcion'] ?? $d['valor_q_matricula_insripcion'] ?? '0'),
+                        'monto_inscripcion' => $this->limpiarMonto($d['valor_q_matricula_inscripcion'] ?? '0'),
                         'status' => 'Inscrito',
                         'activo' => true,
                         'created_by' => auth()->id(),
                     ]
                 );
 
-                // — Programa —
                 $claveProg = $d['codigo_carrera'] ?? null;
                 $prog = $this->obtenerPrograma($claveProg);
 
-                // — EstudiantePrograma —
                 $epData = [
                     'prospecto_id' => $prospecto->id,
                     'programa_id' => $prog->id,
                     'fecha_inicio' => $fechaInscripcion,
                     'fecha_fin' => $fechaFin,
                     'convenio_id' => $d['convenio_id'] ?? null,
-                    'inscripcion' => $this->limpiarMonto($d['valor_q_matricula_inscripcion'] ?? $d['valor_q_matricula_insripcion'] ?? '0'),
+                    'inscripcion' => $this->limpiarMonto($d['valor_q_matricula_inscripcion'] ?? '0'),
                     'cuota_mensual' => $this->limpiarMonto($d['mensualidad'] ?? '0'),
                     'certificacion' => $this->limpiarMonto($d['certificacion'] ?? '0'),
                     'inversion_total' => $this->limpiarMonto($d['valor_q_total_de_la_carrera'] ?? '0'),
@@ -396,12 +361,10 @@ class InscripcionesImport implements OnEachRow,
                     $epData
                 );
 
-                // Eliminar cuotas existentes (usando DELETE directo sin softDeletes)
                 DB::table('cuotas_programa_estudiante')
                     ->where('estudiante_programa_id', $ep->id)
                     ->delete();
 
-                // — Cuotas pendientes —
                 if ($numCuotas > 0 && $ep->cuota_mensual > 0) {
                     $cuotas = [];
                     for ($i = 1; $i <= $numCuotas; $i++) {
@@ -409,7 +372,7 @@ class InscripcionesImport implements OnEachRow,
                             ->addMonths($i - 1)
                             ->toDateString();
 
-                        $cuotas[] = [
+                        $cuotaBase = [
                             'estudiante_programa_id' => $ep->id,
                             'numero_cuota' => $i,
                             'fecha_vencimiento' => $fechaVenc,
@@ -417,30 +380,27 @@ class InscripcionesImport implements OnEachRow,
                             'estado' => 'pendiente',
                             'created_at' => now(),
                             'updated_at' => now(),
-                            'created_by' => auth()->id(),
                         ];
-                    }
+                        // ✅ Solo agregar created_by si existe en la tabla
+                        if (Schema::hasColumn('cuotas_programa_estudiante', 'created_by')) {
+                            $cuotaBase['created_by'] = auth()->id() ?? 1;
+                        }
 
-                    // Insertar todas las cuotas en una sola operación
+                        $cuotas[] = $cuotaBase;
+                    }
                     DB::table('cuotas_programa_estudiante')->insert($cuotas);
                 }
             });
         } catch (\Throwable $e) {
-            // Si estamos en modo skip errors, solo agregar el error y continuar
             if ($this->skipErrorsMode) {
                 $this->addRowError($row, $e);
-                return; // Continuar con la siguiente fila
+                return;
             }
-
-            // Si no estamos en modo skip, agregar error y relanzar excepción
             $this->addRowError($row, $e);
             throw $e;
         }
     }
 
-    /**
-     * Manejar errores de validación
-     */
     public function onError(\Throwable $e)
     {
         $logPrefix = $this->importId ? "[Importación {$this->importId}]" : '';
@@ -451,24 +411,14 @@ class InscripcionesImport implements OnEachRow,
         }
     }
 
-    /**
-     * Manejar fallos de validación
-     *
-     * @param Failure[] $failures
-     */
     public function onFailure(Failure ...$failures)
     {
         $logPrefix = $this->importId ? "[Importación {$this->importId}]" : '';
-
-        // Incrementar contador por cada fila fallida y registrar el error
         foreach ($failures as $failure) {
             $this->rowCount++;
             $msg = implode('; ', $failure->errors());
             Log::warning("⚠️ {$logPrefix} Validación fallida en fila {$failure->row()}: {$msg}");
         }
-
-        // Conservar el comportamiento original del trait
         $this->traitOnFailure(...$failures);
     }
-
 }
