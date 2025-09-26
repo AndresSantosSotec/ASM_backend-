@@ -62,5 +62,10 @@ class MoodleConsultasController extends Controller
 
         return response()->json(['data' => $result]);
     }
-}
 
+    public function programacionCursos()
+    {
+        $results = $this->queries->programacionCursos();
+        return response()->json(['data' => $results]);
+    }
+}

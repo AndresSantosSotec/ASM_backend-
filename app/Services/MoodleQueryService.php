@@ -18,6 +18,56 @@ class MoodleQueryService
         $carnet = preg_replace('/^ASM/i', 'asm', $carnet);
         return strtolower($carnet);
     }
+    public function programacionCursos(): array
+    {
+        $sql = <<<'SQL'
+SELECT
+    c.id AS courseid,
+    c.fullname AS coursename,
+    FROM_UNIXTIME(c.startdate) AS fecha_inicio,
+    FROM_UNIXTIME(c.enddate) AS fecha_fin,
+    CASE
+        WHEN LOWER(c.fullname) REGEXP 'lunes' THEN 'Lunes'
+        WHEN LOWER(c.fullname) REGEXP 'martes' THEN 'Martes'
+        WHEN LOWER(c.fullname) REGEXP 'mi[eé]rcoles' THEN 'Miércoles'
+        WHEN LOWER(c.fullname) REGEXP 'jueves' THEN 'Jueves'
+        WHEN LOWER(c.fullname) REGEXP 'viernes' THEN 'Viernes'
+        WHEN LOWER(c.fullname) REGEXP 's[áa]bado' THEN 'Sábado'
+        WHEN LOWER(c.fullname) REGEXP 'domingo' THEN 'Domingo'
+        ELSE 'SIN DÍA'
+    END AS dia_semana,
+    CASE
+        WHEN LOWER(c.fullname) REGEXP 'enero' THEN 'Enero'
+        WHEN LOWER(c.fullname) REGEXP 'febrero' THEN 'Febrero'
+        WHEN LOWER(c.fullname) REGEXP 'marzo' THEN 'Marzo'
+        WHEN LOWER(c.fullname) REGEXP 'abril' THEN 'Abril'
+        WHEN LOWER(c.fullname) REGEXP 'mayo' THEN 'Mayo'
+        WHEN LOWER(c.fullname) REGEXP 'junio' THEN 'Junio'
+        WHEN LOWER(c.fullname) REGEXP 'julio' THEN 'Julio'
+        WHEN LOWER(c.fullname) REGEXP 'agosto' THEN 'Agosto'
+        WHEN LOWER(c.fullname) REGEXP 'septiembre|setiembre' THEN 'Septiembre'
+        WHEN LOWER(c.fullname) REGEXP 'octubre' THEN 'Octubre'
+        WHEN LOWER(c.fullname) REGEXP 'noviembre' THEN 'Noviembre'
+        WHEN LOWER(c.fullname) REGEXP 'diciembre' THEN 'Diciembre'
+        ELSE 'SIN MES'
+    END AS mes,
+    CASE
+        WHEN c.fullname REGEXP '[0-9]{4}' THEN REGEXP_SUBSTR(c.fullname, '[0-9]{4}')
+        ELSE 'SIN AÑO'
+    END AS anio
+FROM mdl_course c
+WHERE c.visible = 1
+ORDER BY anio, mes, dia_semana, coursename
+SQL;
+
+        $results = $this->connection->select($sql);
+
+        foreach ($results as $result) {
+            $result->coursename = $this->cleanCourseName($result->coursename);
+        }
+
+        return $results;
+    }
 
     protected function baseSql(string $extraWhere = ''): string
     {
