@@ -27,7 +27,7 @@ class ModulesViews extends Model
     protected $casts = [
         'status' => 'boolean',
         'order_num' => 'integer',
-        'icon'=> 'string'
+        'icon' => 'string'
     ];
 
     /**
@@ -41,7 +41,6 @@ class ModulesViews extends Model
     // 🔧 Relación correcta: permissions.route_path (FK) ↔ moduleviews.view_path (local key)
     public function permissions()
     {
-        return $this->hasMany(Permisos::class, 'route_path', 'view_path');
+        return $this->hasMany(Permisos::class, 'moduleview_id', 'id');
     }
-
 }

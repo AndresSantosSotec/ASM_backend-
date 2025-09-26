@@ -50,7 +50,7 @@ class UserPermisosController extends Controller
             $permissions = array_values(array_filter(array_map(function ($v) {
                 if (is_array($v) && isset($v['id'])) return (int) $v['id'];
                 return is_numeric($v) ? (int) $v : null;
-            }, $permissions), fn ($v) => !is_null($v)));
+            }, $permissions), fn($v) => !is_null($v)));
             $permissions = array_values(array_unique($permissions));
         } else {
             $permissions = [];
@@ -98,7 +98,7 @@ class UserPermisosController extends Controller
                 'message' => "Algunas vistas seleccionadas no tienen permiso 'view' configurado o habilitado.",
                 'errors'  => [
                     'permissions' => array_map(
-                        fn ($id) => "moduleview_id {$id} no tiene permiso 'view' configurado en permissions o está deshabilitado.",
+                        fn($id) => "moduleview_id {$id} no tiene permiso 'view' configurado en permissions o está deshabilitado.",
                         $missingMvIds
                     )
                 ]

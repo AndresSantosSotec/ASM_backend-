@@ -59,8 +59,9 @@ class Permisos extends Model
      */
     public function moduleView()
     {
-        return $this->belongsTo(ModulesViews::class, 'moduleview_id');
+        return $this->belongsTo(ModulesViews::class, 'moduleview_id', 'id');
     }
+
 
     /**
      * Scope a query to filter by module.
