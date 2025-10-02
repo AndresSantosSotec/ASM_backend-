@@ -1111,7 +1111,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         Log::info("🔍 PASO 1: Buscando prospecto por carnet", ['carnet' => $carnet]);
 
         $prospecto = DB::table('prospectos')
-            ->whereRaw("REPLACE(UPPER(carnet), ' ', '') = ?", [$carnet])
+            ->where(DB::raw("REPLACE(UPPER(carnet), ' ', '')"), '=', $carnet)
             ->first();
 
         if (!$prospecto) {
@@ -1172,7 +1172,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             )
             ->join('estudiante_programa as ep', 'p.id', '=', 'ep.prospecto_id')
             ->leftJoin('tb_programas as prog', 'ep.programa_id', '=', 'prog.id')
-            ->whereRaw("REPLACE(UPPER(p.carnet), ' ', '') = ?", [$carnet])
+            ->where(DB::raw("REPLACE(UPPER(p.carnet), ' ', '')"), '=', $carnet)
             // ✅ NO filtrar por activo en importación histórica
             // ->where('prog.activo', '=', true)
             ->orderBy('ep.created_at', 'desc')
