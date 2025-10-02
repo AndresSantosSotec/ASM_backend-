@@ -184,6 +184,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/conciliacion/export', [ReconciliationController::class, 'export']);
     Route::get('/conciliacion/pendientes-desde-kardex', [ReconciliationController::class, 'kardexNoConciliados']);
 
+
+
     // Usuario autenticado
     Route::get('/user', function (Request $request) {
         return $request->user();
@@ -227,6 +229,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('import', [\App\Http\Controllers\Api\EstudiantesImportController::class, 'uploadExcel'])
             ->name('estudiantes.import');
     });
+    //Importar Pagos CRM
+
 
 
 
@@ -361,7 +365,7 @@ Route::post('/permissions', [PermissionController::class, 'store']);
 
 // ----------------------
 // Usuarios
-// ----------------------
+// ----------------------/me
 Route::prefix('users')->group(function () {
     Route::get('/', [UserController::class, 'index']);
     Route::get('/{id}', [UserController::class, 'show']);
@@ -604,7 +608,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
 
-
     //rutas nuevas para la concilaicion
 
 
@@ -711,4 +714,5 @@ Route::middleware('auth:sanctum')->group(function () {
 
 Route::apiResource('rules', RuleController::class);
 
-Route::get('/payment-rules-current', [RuleController::class, 'current']);//Metodo Global para purebas de las api
+Route::get('/payment-rules-current', [RuleController::class, 'current']); //Metodo Global para purebas de las api
+Route::post('/conciliacion/import-kardex', [ReconciliationController::class, 'ImportarPagosKardex']);

@@ -525,4 +525,211 @@ class ReconciliationController extends Controller
             ], 500);
         }
     }
+
+    /** Exportar Pagos Realizados en histrico */
+
+    public function ImportarPagosKardex(Request $request)
+    {
+        // ✅ Aumentar límites para archivos grandes
+        ini_set('memory_limit', '512M');
+        set_time_limit(600); // 10 minutos
+
+        Log::info('=== INICIO ImportarPagosKardex ===', [
+            'user_id' => auth()->id(),
+            'user_login' => auth()->user()->email ?? 'N/A',
+            'ip' => $request->ip(),
+            'file_original_name' => $request->file('file')?->getClientOriginalName(),
+            'file_size' => $request->file('file')?->getSize(),
+            'file_size_mb' => round($request->file('file')?->getSize() / 1024 / 1024, 2),
+            'memory_limit' => ini_get('memory_limit'),
+            'max_execution_time' => ini_get('max_execution_time'),
+        ]);
+
+        // ✅ Validación mejorada
+        try {
+            $request->validate([
+                'file' => [
+                    'required',
+                    'file',
+                    'mimes:xlsx,xls,csv',
+                    'max:20480', // 20MB
+                ],
+                'tipo_archivo' => 'sometimes|in:cardex_directo,boletas_bancarias',
+            ], [
+                'file.required' => 'El archivo es obligatorio',
+                'file.mimes' => 'El archivo debe ser de tipo Excel (.xlsx, .xls) o CSV',
+                'file.max' => 'El archivo no debe superar 20MB',
+            ]);
+
+            Log::info('✅ Validación exitosa');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            Log::error('❌ Error de validación', [
+                'errors' => $e->errors(),
+                'messages' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'ok' => false,
+                'success' => false,
+                'message' => 'Error de validación del archivo',
+                'errors' => $e->errors()
+            ], 422);
+        }
+
+        // ✅ Obtener uploaded_by con fallback robusto
+        $uploaderId = auth()->id()
+            ?? optional($request->user())->id
+            ?? $request->integer('uploaded_by')
+            ?? 1;
+
+        Log::info('🔑 Uploader ID determinado', [
+            'uploader_id' => $uploaderId,
+            'auth_check' => auth()->check(),
+        ]);
+
+        try {
+            $tipoArchivo = $request->input('tipo_archivo', 'cardex_directo');
+
+            Log::info('🚀 Iniciando importación', [
+                'tipo_archivo' => $tipoArchivo,
+                'uploader_id' => $uploaderId,
+                'timestamp' => now()->toDateTimeString(),
+            ]);
+
+            // ✅ Crear instancia del importador
+            $import = new \App\Imports\PaymentHistoryImport(
+                uploaderId: $uploaderId,
+                tipoArchivo: $tipoArchivo
+            );
+
+            Log::info('📦 Instancia de PaymentHistoryImport creada');
+
+            // ✅ Ejecutar importación
+            $file = $request->file('file');
+
+            Log::info('📂 Ejecutando Excel::import', [
+                'file_path' => $file->getRealPath(),
+                'file_mime' => $file->getMimeType(),
+                'file_extension' => $file->getClientOriginalExtension(),
+            ]);
+
+            // ✅ Importar con manejo de excepciones
+            Excel::import($import, $file);
+
+            Log::info('✅ Excel::import completado exitosamente', [
+                'total_rows' => $import->totalRows,
+                'procesados' => $import->procesados,
+                'kardex_creados' => $import->kardexCreados,
+                'cuotas_actualizadas' => $import->cuotasActualizadas,
+                'conciliaciones' => $import->conciliaciones,
+                'total_amount' => $import->totalAmount,
+                'pagos_parciales' => $import->pagosParciales,
+                'total_discrepancias' => $import->totalDiscrepancias,
+                'errores_count' => count($import->errores),
+                'advertencias_count' => count($import->advertencias),
+            ]);
+
+            // ✅ Respuesta mejorada con TODAS las estadísticas
+            $response = [
+                'ok' => true,
+                'success' => true,
+                'message' => 'Importación de pagos históricos completada exitosamente',
+                'summary' => [
+                    'total_rows' => $import->totalRows,
+                    'procesados' => $import->procesados,
+                    'kardex_creados' => $import->kardexCreados,
+                    'cuotas_actualizadas' => $import->cuotasActualizadas,
+                    'conciliaciones' => $import->conciliaciones,
+                    'errores_count' => count($import->errores),
+                    'advertencias_count' => count($import->advertencias),
+                    'pagos_parciales' => $import->pagosParciales,
+                    'total_discrepancias' => round($import->totalDiscrepancias, 2),
+                ],
+                'stats' => [
+                    'totalTransactions' => $import->totalRows,
+                    'successfulImports' => $import->procesados,
+                    'failedImports' => count($import->errores),
+                    'totalAmount' => round($import->totalAmount, 2), // ✅ CORREGIDO
+                    'pagosParciales' => $import->pagosParciales,
+                    'totalDiscrepancias' => round($import->totalDiscrepancias, 2),
+                ],
+                'errores' => $import->errores,
+                'advertencias' => $import->advertencias,
+                'detalles' => $import->detalles,
+                'meta' => [
+                    'timestamp' => now()->toIso8601String(),
+                    'uploaded_by' => $uploaderId,
+                    'file_name' => $file->getClientOriginalName(),
+                ]
+            ];
+
+            Log::info('=== ✅ FIN ImportarPagosKardex EXITOSO ===', [
+                'resumen' => [
+                    'total' => $import->totalRows,
+                    'exitosos' => $import->procesados,
+                    'errores' => count($import->errores),
+                    'monto_total' => $import->totalAmount,
+                ]
+            ]);
+
+            return response()->json($response, 200);
+        } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
+            $failures = $e->failures();
+
+            Log::error('❌ Error de validación de Excel', [
+                'failures_count' => count($failures),
+                'failures' => collect($failures)->map(fn($f) => [
+                    'row' => $f->row(),
+                    'attribute' => $f->attribute(),
+                    'errors' => $f->errors(),
+                ])->toArray(),
+                'message' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'ok' => false,
+                'success' => false,
+                'message' => 'Error de validación en el contenido del archivo Excel',
+                'errors' => collect($failures)->map(fn($failure) => [
+                    'row' => $failure->row(),
+                    'attribute' => $failure->attribute(),
+                    'errors' => $failure->errors(),
+                    'values' => $failure->values(),
+                ])->toArray()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('=== ❌ ERROR ImportarPagosKardex ===', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'ok' => false,
+                'success' => false,
+                'message' => 'Error al procesar el archivo: ' . $e->getMessage(),
+                'error' => $e->getMessage(),
+                'error_type' => get_class($e),
+                'debug' => config('app.debug') ? [
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 10),
+                ] : null
+            ], 500);
+        } catch (\Throwable $e) {
+            Log::critical('=== 💥 ERROR CRÍTICO ImportarPagosKardex ===', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'ok' => false,
+                'success' => false,
+                'message' => 'Error crítico al procesar el archivo. Contacte al administrador.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Error interno del servidor',
+            ], 500);
+        }
+    }
 }
