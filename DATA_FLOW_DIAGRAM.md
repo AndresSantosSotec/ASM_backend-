@@ -2,6 +2,27 @@
 
 ## Flow Process
 
+The complete data flow for importing historical payment records follows this sequence:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Step 1: Excel File Upload                                          │
+│  ─────────────────────────────────────────────────────────────────  │
+│  Required columns:                                                   │
+│    - carnet (student ID)                                            │
+│    - nombre_estudiante (student name)                               │
+│    - numero_boleta (receipt number)                                 │
+│    - monto (payment amount)                                         │
+│    - fecha_pago (payment date)                                      │
+│    - mensualidad_aprobada (approved monthly fee)                    │
+│  Optional columns:                                                   │
+│    - banco (bank name, defaults to 'EFECTIVO')                      │
+│    - concepto (payment concept)                                     │
+│    - mes_pago (payment month)                                       │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    EXCEL FILE IMPORT PROCESS                        │
@@ -17,20 +38,32 @@
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Step 2: Query Prospecto (Student)                                  │
+│  Step 2: Query Prospecto and Programs (Combined)                    │
 │  ─────────────────────────────────────────────────────────────────  │
-│  Table: prospectos                                                   │
-│  Query: WHERE REPLACE(UPPER(p.carnet), ' ', '') = 'ASM20252962'    │
-│  Returns: prospecto_id, carnet, nombres, apellidos                  │
+│  Tables: prospectos, estudiante_programa, tb_programas               │
+│  Query:                                                              │
+│    SELECT p.id, p.carnet, p.nombre_completo,                        │
+│           ep.id as estudiante_programa_id,                          │
+│           prog.nombre_del_programa, prog.activo                     │
+│    FROM prospectos p                                                 │
+│    INNER JOIN estudiante_programa ep ON p.id = ep.prospecto_id     │
+│    LEFT JOIN tb_programas prog ON ep.programa_id = prog.id         │
+│    WHERE REPLACE(UPPER(p.carnet), ' ', '') = 'ASM20252962'         │
+│      AND prog.activo = true  ✅ FIXED: Check boolean activo field   │
+│    ORDER BY ep.created_at DESC                                      │
+│                                                                      │
+│  Key Fixes:                                                          │
+│    ✅ Use prog.activo (boolean) not ep.estado (doesn't exist)       │
+│    ✅ Use p.nombre_completo (not p.nombres/apellidos)               │
+│    ✅ Use tb_programas table (not programas)                        │
+│    ✅ Use nombre_del_programa (not nombre_programa)                 │
 └─────────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Step 3: Find Active Programs                                       │
 │  ─────────────────────────────────────────────────────────────────  │
-│  Table: estudiante_programa                                          │
-│  Query: WHERE prospecto_id = X AND estado = 'activo' ✅ FIXED       │
-│  Returns: estudiante_programa_id, programa_id, fecha_inscripcion    │
+│  Already retrieved in Step 2 - skipped                              │
 └─────────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
