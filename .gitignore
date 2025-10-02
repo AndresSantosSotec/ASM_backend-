@@ -8,6 +8,8 @@
 .env
 .env.backup
 .env.production
+.env.dev
+.env.*
 .phpunit.result.cache
 Homestead.json
 Homestead.yaml
@@ -19,11 +21,3 @@ yarn-error.log
 /.vscode
 .qodo
 package-lock.json
-
-
-/vendor
-/vendor/*
-/node_modules
-/public/build
-/storage
-/.env, .env.* (ya tienes .env en .gitignore)
