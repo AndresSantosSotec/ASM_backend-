@@ -8,6 +8,7 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use App\Models\KardexPago;
 use App\Models\CuotaProgramaEstudiante;
 use App\Models\ReconciliationRecord;
+use App\Models\PrecioPrograma;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
@@ -608,11 +609,38 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ->where('estado', 'pendiente')
             ->sortBy('fecha_vencimiento');
 
+        // 🔥 NUEVO: Si no hay cuotas, intentar obtener el precio del programa
         if ($cuotasPendientes->isEmpty()) {
             Log::warning("⚠️ No hay cuotas pendientes", [
                 'estudiante_programa_id' => $estudianteProgramaId,
                 'fila' => $numeroFila
             ]);
+            
+            // Intentar obtener el precio del programa para validación
+            $precioPrograma = $this->obtenerPrecioPrograma($estudianteProgramaId);
+            if ($precioPrograma) {
+                Log::info("💰 Precio de programa encontrado para validación", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'cuota_mensual' => $precioPrograma->cuota_mensual,
+                    'inscripcion' => $precioPrograma->inscripcion,
+                    'monto_pago' => $montoPago
+                ]);
+                
+                // Validar si el monto coincide con el precio del programa
+                $tolerancia = max(100, $precioPrograma->cuota_mensual * 0.50);
+                $diferenciaCuota = abs($precioPrograma->cuota_mensual - $montoPago);
+                $diferenciaInscripcion = abs($precioPrograma->inscripcion - $montoPago);
+                
+                if ($diferenciaCuota <= $tolerancia || $diferenciaInscripcion <= $tolerancia) {
+                    Log::info("✅ Monto validado contra precio de programa", [
+                        'monto_pago' => $montoPago,
+                        'cuota_mensual_programa' => $precioPrograma->cuota_mensual,
+                        'inscripcion_programa' => $precioPrograma->inscripcion,
+                        'tolerancia' => $tolerancia
+                    ]);
+                }
+            }
+            
             return null;
         }
 
@@ -624,9 +652,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         ]);
 
         // ✅ PRIORIDAD 1: Coincidencia exacta con mensualidad aprobada
-        // Tolerancia aumentada a 15% o mínimo Q200 para mejor coincidencia histórica
+        // 🔥 TOLERANCIA MÁXIMA: 50% o mínimo Q100 para importación histórica
         if ($mensualidadAprobada > 0) {
-            $tolerancia = max(200, $mensualidadAprobada * 0.15);
+            $tolerancia = max(100, $mensualidadAprobada * 0.50);
             $cuotaExacta = $cuotasPendientes->first(function ($cuota) use ($mensualidadAprobada, $tolerancia) {
                 $diferencia = abs($cuota->monto - $mensualidadAprobada);
                 return $diferencia <= $tolerancia;
@@ -652,8 +680,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
 
         // ✅ PRIORIDAD 2: Coincidencia con monto de pago
-        // Tolerancia aumentada a 20% o mínimo Q500 para mejor coincidencia histórica
-        $tolerancia = max(500, $montoPago * 0.20);
+        // 🔥 TOLERANCIA MÁXIMA: 50% o mínimo Q100 para importación histórica
+        $tolerancia = max(100, $montoPago * 0.50);
         $cuotaPorMonto = $cuotasPendientes->first(function ($cuota) use ($montoPago, $tolerancia) {
             $diferencia = abs($cuota->monto - $montoPago);
             return $diferencia <= $tolerancia;
@@ -676,12 +704,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ]);
         }
 
-        // 🔥 PRIORIDAD 3: PAGO PARCIAL
+        // 🔥 PRIORIDAD 3: PAGO PARCIAL (con tolerancia aumentada)
+        // Ahora acepta desde 30% del monto de la cuota (antes era 50%)
         $cuotaParcial = $cuotasPendientes->first(function ($cuota) use ($montoPago) {
             if ($cuota->monto == 0) return false;
 
             $porcentajePago = ($montoPago / $cuota->monto) * 100;
-            return $porcentajePago >= 50 && $montoPago < $cuota->monto;
+            return $porcentajePago >= 30 && $montoPago < $cuota->monto;
         });
 
         if ($cuotaParcial) {
@@ -718,41 +747,70 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             return $cuotaParcial;
         }
 
-        // ✅ PRIORIDAD 4: Primera cuota pendiente
+        // 🔥 PRIORIDAD 4: CUALQUIER CUOTA PENDIENTE (tolerancia extrema para importación histórica)
+        // Buscar cualquier cuota que esté cerca del monto, con tolerancia del 100%
+        $cuotaToleranciaExtrema = $cuotasPendientes->first(function ($cuota) use ($montoPago) {
+            $diferencia = abs($cuota->monto - $montoPago);
+            $toleranciaExtrema = max($cuota->monto, $montoPago);
+            return $diferencia <= $toleranciaExtrema;
+        });
+
+        if ($cuotaToleranciaExtrema) {
+            $diferencia = abs($cuotaToleranciaExtrema->monto - $montoPago);
+            
+            Log::warning("⚠️ Cuota encontrada con tolerancia extrema (100%)", [
+                'cuota_id' => $cuotaToleranciaExtrema->id,
+                'monto_cuota' => $cuotaToleranciaExtrema->monto,
+                'monto_pago' => $montoPago,
+                'diferencia' => round($diferencia, 2),
+                'porcentaje_diferencia' => $cuotaToleranciaExtrema->monto > 0 
+                    ? round(($diferencia / $cuotaToleranciaExtrema->monto) * 100, 2) 
+                    : 0
+            ]);
+
+            $this->advertencias[] = [
+                'tipo' => 'DIFERENCIA_MONTO_EXTREMA',
+                'fila' => $numeroFila,
+                'advertencia' => sprintf(
+                    'Gran diferencia: Cuota Q%.2f vs Pago Q%.2f (diferencia Q%.2f)',
+                    $cuotaToleranciaExtrema->monto,
+                    $montoPago,
+                    $diferencia
+                ),
+                'cuota_id' => $cuotaToleranciaExtrema->id,
+                'recomendacion' => 'Revisar si el pago corresponde a esta cuota o si hay ajuste de precio'
+            ];
+
+            return $cuotaToleranciaExtrema;
+        }
+
+        // ✅ PRIORIDAD 5: Primera cuota pendiente (sin restricción de monto)
+        // Si llegamos aquí, tomar cualquier cuota pendiente para no perder el pago
         $primeraCuota = $cuotasPendientes->first();
 
         if ($primeraCuota) {
             $diferencia = abs($primeraCuota->monto - $montoPago);
 
-            if ($diferencia > 500) {
-                Log::warning("⚠️ Gran diferencia entre cuota y pago", [
-                    'cuota_id' => $primeraCuota->id,
-                    'monto_cuota' => $primeraCuota->monto,
-                    'monto_pago' => $montoPago,
-                    'diferencia' => round($diferencia, 2)
-                ]);
-
-                $this->advertencias[] = [
-                    'tipo' => 'DIFERENCIA_MONTO',
-                    'fila' => $numeroFila,
-                    'advertencia' => sprintf(
-                        'Diferencia significativa: Cuota Q%.2f vs Pago Q%.2f (diferencia Q%.2f)',
-                        $primeraCuota->monto,
-                        $montoPago,
-                        $diferencia
-                    ),
-                    'cuota_id' => $primeraCuota->id,
-                    'recomendacion' => 'Verificar si el pago corresponde a esta cuota o si hay error en los montos'
-                ];
-            }
-
-            Log::info("⚠️ Usando primera cuota pendiente (cronológico)", [
+            Log::warning("⚠️ Usando primera cuota pendiente sin validación de monto (última opción)", [
                 'cuota_id' => $primeraCuota->id,
                 'fecha_vencimiento' => $primeraCuota->fecha_vencimiento,
                 'monto_cuota' => $primeraCuota->monto,
                 'monto_pago' => $montoPago,
                 'diferencia' => round($diferencia, 2)
             ]);
+
+            $this->advertencias[] = [
+                'tipo' => 'CUOTA_FORZADA',
+                'fila' => $numeroFila,
+                'advertencia' => sprintf(
+                    'Cuota asignada forzadamente: Cuota Q%.2f vs Pago Q%.2f (diferencia Q%.2f)',
+                    $primeraCuota->monto,
+                    $montoPago,
+                    $diferencia
+                ),
+                'cuota_id' => $primeraCuota->id,
+                'recomendacion' => 'Verificar manualmente esta asignación de cuota'
+            ];
 
             return $primeraCuota;
         }
@@ -926,28 +984,50 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'fecha_pago' => $fechaPago->toDateString()
         ]);
 
+        // 🔥 PRIORIDAD 1: Por mensualidad aprobada con tolerancia del 50%
         if ($mensualidadAprobada > 0) {
             foreach ($programas as $programa) {
                 $cuotasPrograma = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
 
-                $cuotaCoincidente = $cuotasPrograma->first(function ($cuota) use ($mensualidadAprobada) {
-                    $diferencia = abs($cuota->monto - $mensualidadAprobada);
-                    $tolerancia = max(500, $mensualidadAprobada * 0.33);
-                    return $diferencia <= $tolerancia;
-                });
+                // Si hay cuotas, intentar coincidir por monto
+                if ($cuotasPrograma->isNotEmpty()) {
+                    $cuotaCoincidente = $cuotasPrograma->first(function ($cuota) use ($mensualidadAprobada) {
+                        $diferencia = abs($cuota->monto - $mensualidadAprobada);
+                        $tolerancia = max(100, $mensualidadAprobada * 0.50);
+                        return $diferencia <= $tolerancia;
+                    });
 
-                if ($cuotaCoincidente) {
-                    Log::info("✅ Programa identificado por mensualidad aprobada", [
-                        'estudiante_programa_id' => $programa->estudiante_programa_id,
-                        'programa' => $programa->nombre_programa,
-                        'mensualidad' => $mensualidadAprobada,
-                        'cuota_monto' => $cuotaCoincidente->monto
-                    ]);
-                    return $programa;
+                    if ($cuotaCoincidente) {
+                        Log::info("✅ Programa identificado por mensualidad aprobada (cuotas)", [
+                            'estudiante_programa_id' => $programa->estudiante_programa_id,
+                            'programa' => $programa->nombre_programa,
+                            'mensualidad' => $mensualidadAprobada,
+                            'cuota_monto' => $cuotaCoincidente->monto
+                        ]);
+                        return $programa;
+                    }
+                } else {
+                    // 🔥 NUEVO: Si no hay cuotas, usar precio del programa
+                    $precioPrograma = $this->obtenerPrecioPrograma($programa->estudiante_programa_id);
+                    if ($precioPrograma) {
+                        $diferencia = abs($precioPrograma->cuota_mensual - $mensualidadAprobada);
+                        $tolerancia = max(100, $mensualidadAprobada * 0.50);
+                        
+                        if ($diferencia <= $tolerancia) {
+                            Log::info("✅ Programa identificado por mensualidad aprobada (precio programa)", [
+                                'estudiante_programa_id' => $programa->estudiante_programa_id,
+                                'programa' => $programa->nombre_programa,
+                                'mensualidad' => $mensualidadAprobada,
+                                'cuota_mensual_programa' => $precioPrograma->cuota_mensual
+                            ]);
+                            return $programa;
+                        }
+                    }
                 }
             }
         }
 
+        // 🔥 PRIORIDAD 2: Por rango de fechas
         foreach ($programas as $programa) {
             $cuotasPrograma = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
 
@@ -972,17 +1052,18 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             }
         }
 
+        // 🔥 PRIORIDAD 3: Por monto de pago con tolerancia del 50%
         foreach ($programas as $programa) {
             $cuotasPrograma = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
 
             $cuotaCoincidente = $cuotasPrograma->first(function ($cuota) use ($montoPago) {
                 $diferencia = abs($cuota->monto - $montoPago);
-                $tolerancia = max(500, $cuota->monto * 0.33);
+                $tolerancia = max(100, $cuota->monto * 0.50);
                 return $diferencia <= $tolerancia;
             });
 
             if ($cuotaCoincidente) {
-                Log::info("⚠️ Programa identificado por monto de pago (fallback)", [
+                Log::info("✅ Programa identificado por monto de pago", [
                     'estudiante_programa_id' => $programa->estudiante_programa_id,
                     'programa' => $programa->nombre_programa,
                     'monto_pago' => $montoPago
@@ -991,6 +1072,29 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             }
         }
 
+        // 🔥 PRIORIDAD 4: Programa con más cuotas pendientes (probablemente el activo)
+        $programaConMasCuotas = $programas->sortByDesc(function ($programa) {
+            return $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id)
+                ->where('estado', 'pendiente')
+                ->count();
+        })->first();
+
+        if ($programaConMasCuotas) {
+            $cuotasPendientes = $this->obtenerCuotasDelPrograma($programaConMasCuotas->estudiante_programa_id)
+                ->where('estado', 'pendiente')
+                ->count();
+            
+            if ($cuotasPendientes > 0) {
+                Log::info("✅ Programa identificado por mayor cantidad de cuotas pendientes", [
+                    'estudiante_programa_id' => $programaConMasCuotas->estudiante_programa_id,
+                    'programa' => $programaConMasCuotas->nombre_programa,
+                    'cuotas_pendientes' => $cuotasPendientes
+                ]);
+                return $programaConMasCuotas;
+            }
+        }
+
+        // 🔥 PRIORIDAD 5: Usar el más reciente (última opción)
         Log::warning("⚠️ No se pudo identificar programa específico, usando el más reciente", [
             'programas_disponibles' => $programas->count()
         ]);
@@ -1149,6 +1253,45 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $this->cuotasPorEstudianteCache[$estudianteProgramaId] = $cuotas;
 
         return $cuotas;
+    }
+
+    /**
+     * 🆕 Obtener precio estándar del programa
+     * Útil cuando no existen cuotas creadas para validar montos
+     */
+    private function obtenerPrecioPrograma(int $estudianteProgramaId)
+    {
+        try {
+            // Obtener programa_id del estudiante_programa
+            $estudiantePrograma = DB::table('estudiante_programa')
+                ->where('id', $estudianteProgramaId)
+                ->first();
+            
+            if (!$estudiantePrograma) {
+                return null;
+            }
+            
+            // Buscar el precio del programa
+            $precioPrograma = PrecioPrograma::where('programa_id', $estudiantePrograma->programa_id)->first();
+            
+            if ($precioPrograma) {
+                Log::debug("💰 Precio de programa encontrado", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'programa_id' => $estudiantePrograma->programa_id,
+                    'cuota_mensual' => $precioPrograma->cuota_mensual,
+                    'inscripcion' => $precioPrograma->inscripcion,
+                    'meses' => $precioPrograma->meses
+                ]);
+            }
+            
+            return $precioPrograma;
+        } catch (\Throwable $ex) {
+            Log::warning("⚠️ Error al obtener precio de programa", [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'error' => $ex->getMessage()
+            ]);
+            return null;
+        }
     }
 
     private function normalizeBank($bank)
