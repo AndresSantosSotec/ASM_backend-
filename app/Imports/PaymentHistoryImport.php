@@ -619,31 +619,44 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         Log::info("🔍 Buscando cuota compatible", [
             'cuotas_pendientes' => $cuotasPendientes->count(),
             'monto_pago' => $montoPago,
-            'mensualidad_aprobada' => $mensualidadAprobada
+            'mensualidad_aprobada' => $mensualidadAprobada,
+            'fila' => $numeroFila
         ]);
 
         // ✅ PRIORIDAD 1: Coincidencia exacta con mensualidad aprobada
+        // Tolerancia aumentada a 15% o mínimo Q200 para mejor coincidencia histórica
         if ($mensualidadAprobada > 0) {
-            $cuotaExacta = $cuotasPendientes->first(function ($cuota) use ($mensualidadAprobada) {
+            $tolerancia = max(200, $mensualidadAprobada * 0.15);
+            $cuotaExacta = $cuotasPendientes->first(function ($cuota) use ($mensualidadAprobada, $tolerancia) {
                 $diferencia = abs($cuota->monto - $mensualidadAprobada);
-                return $diferencia <= 100;
+                return $diferencia <= $tolerancia;
             });
 
             if ($cuotaExacta) {
                 Log::info("✅ Cuota encontrada por mensualidad aprobada", [
                     'cuota_id' => $cuotaExacta->id,
                     'monto_cuota' => $cuotaExacta->monto,
+                    'mensualidad_aprobada' => $mensualidadAprobada,
                     'monto_pago' => $montoPago,
-                    'diferencia' => abs($cuotaExacta->monto - $montoPago)
+                    'diferencia' => abs($cuotaExacta->monto - $mensualidadAprobada),
+                    'tolerancia_usada' => $tolerancia
                 ]);
                 return $cuotaExacta;
+            } else {
+                Log::debug("⚠️ No se encontró cuota por mensualidad aprobada", [
+                    'mensualidad_aprobada' => $mensualidadAprobada,
+                    'tolerancia' => $tolerancia,
+                    'cuotas_disponibles' => $cuotasPendientes->pluck('monto')->toArray()
+                ]);
             }
         }
 
         // ✅ PRIORIDAD 2: Coincidencia con monto de pago
-        $cuotaPorMonto = $cuotasPendientes->first(function ($cuota) use ($montoPago) {
+        // Tolerancia aumentada a 20% o mínimo Q500 para mejor coincidencia histórica
+        $tolerancia = max(500, $montoPago * 0.20);
+        $cuotaPorMonto = $cuotasPendientes->first(function ($cuota) use ($montoPago, $tolerancia) {
             $diferencia = abs($cuota->monto - $montoPago);
-            return $diferencia <= 500;
+            return $diferencia <= $tolerancia;
         });
 
         if ($cuotaPorMonto) {
@@ -651,9 +664,16 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'cuota_id' => $cuotaPorMonto->id,
                 'monto_cuota' => $cuotaPorMonto->monto,
                 'monto_pago' => $montoPago,
-                'diferencia' => abs($cuotaPorMonto->monto - $montoPago)
+                'diferencia' => abs($cuotaPorMonto->monto - $montoPago),
+                'tolerancia_usada' => $tolerancia
             ]);
             return $cuotaPorMonto;
+        } else {
+            Log::debug("⚠️ No se encontró cuota por monto de pago", [
+                'monto_pago' => $montoPago,
+                'tolerancia' => $tolerancia,
+                'cuotas_disponibles' => $cuotasPendientes->pluck('monto')->toArray()
+            ]);
         }
 
         // 🔥 PRIORIDAD 3: PAGO PARCIAL
@@ -1033,6 +1053,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'estudiante_programa_ids' => $estudianteProgramas->pluck('id')->toArray()
         ]);
 
+        // 🔥 CAMBIO CRÍTICO: Para importación histórica, NO filtrar por prog.activo
+        // Los pagos históricos pueden pertenecer a programas que ahora están inactivos
         $programas = DB::table('prospectos as p')
             ->select(
                 'p.id as prospecto_id',
@@ -1047,20 +1069,27 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ->join('estudiante_programa as ep', 'p.id', '=', 'ep.prospecto_id')
             ->leftJoin('tb_programas as prog', 'ep.programa_id', '=', 'prog.id')
             ->whereRaw("REPLACE(UPPER(p.carnet), ' ', '') = ?", [$carnet])
-            ->where('prog.activo', '=', true)
+            // ✅ NO filtrar por activo en importación histórica
+            // ->where('prog.activo', '=', true)
             ->orderBy('ep.created_at', 'desc')
             ->get();
 
         if ($programas->isEmpty()) {
-            Log::warning("❌ PASO 3 FALLIDO: No hay programas activos", [
+            Log::warning("❌ PASO 3 FALLIDO: No hay programas para el estudiante", [
                 'carnet' => $carnet,
                 'prospecto_id' => $prospecto->id,
-                'problema' => 'Los programas existen pero ninguno está activo (prog.activo = false) o no tienen programa_id válido'
+                'problema' => 'No se encontraron programas en estudiante_programa o no tienen programa_id válido en tb_programas'
             ]);
         } else {
-            Log::info("✅ PASO 3 EXITOSO: Programas activos obtenidos", [
+            // Contar activos e inactivos
+            $activos = $programas->where('programa_activo', true)->count();
+            $inactivos = $programas->where('programa_activo', false)->count();
+            
+            Log::info("✅ PASO 3 EXITOSO: Programas obtenidos (incluye activos e inactivos para importación histórica)", [
                 'carnet' => $carnet,
-                'cantidad_programas_activos' => $programas->count(),
+                'total_programas' => $programas->count(),
+                'programas_activos' => $activos,
+                'programas_inactivos' => $inactivos,
                 'programas' => $programas->map(function ($p) {
                     return [
                         'estudiante_programa_id' => $p->estudiante_programa_id,
