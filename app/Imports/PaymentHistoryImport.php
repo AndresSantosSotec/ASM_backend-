@@ -615,7 +615,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'estudiante_programa_id' => $estudianteProgramaId,
                 'fila' => $numeroFila
             ]);
-            
+
             // Intentar obtener el precio del programa para validación
             $precioPrograma = $this->obtenerPrecioPrograma($estudianteProgramaId);
             if ($precioPrograma) {
@@ -625,12 +625,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'inscripcion' => $precioPrograma->inscripcion,
                     'monto_pago' => $montoPago
                 ]);
-                
+
                 // Validar si el monto coincide con el precio del programa
                 $tolerancia = max(100, $precioPrograma->cuota_mensual * 0.50);
                 $diferenciaCuota = abs($precioPrograma->cuota_mensual - $montoPago);
                 $diferenciaInscripcion = abs($precioPrograma->inscripcion - $montoPago);
-                
+
                 if ($diferenciaCuota <= $tolerancia || $diferenciaInscripcion <= $tolerancia) {
                     Log::info("✅ Monto validado contra precio de programa", [
                         'monto_pago' => $montoPago,
@@ -640,7 +640,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     ]);
                 }
             }
-            
+
             return null;
         }
 
@@ -757,14 +757,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         if ($cuotaToleranciaExtrema) {
             $diferencia = abs($cuotaToleranciaExtrema->monto - $montoPago);
-            
+
             Log::warning("⚠️ Cuota encontrada con tolerancia extrema (100%)", [
                 'cuota_id' => $cuotaToleranciaExtrema->id,
                 'monto_cuota' => $cuotaToleranciaExtrema->monto,
                 'monto_pago' => $montoPago,
                 'diferencia' => round($diferencia, 2),
-                'porcentaje_diferencia' => $cuotaToleranciaExtrema->monto > 0 
-                    ? round(($diferencia / $cuotaToleranciaExtrema->monto) * 100, 2) 
+                'porcentaje_diferencia' => $cuotaToleranciaExtrema->monto > 0
+                    ? round(($diferencia / $cuotaToleranciaExtrema->monto) * 100, 2)
                     : 0
             ]);
 
@@ -1012,7 +1012,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     if ($precioPrograma) {
                         $diferencia = abs($precioPrograma->cuota_mensual - $mensualidadAprobada);
                         $tolerancia = max(100, $mensualidadAprobada * 0.50);
-                        
+
                         if ($diferencia <= $tolerancia) {
                             Log::info("✅ Programa identificado por mensualidad aprobada (precio programa)", [
                                 'estudiante_programa_id' => $programa->estudiante_programa_id,
@@ -1083,7 +1083,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $cuotasPendientes = $this->obtenerCuotasDelPrograma($programaConMasCuotas->estudiante_programa_id)
                 ->where('estado', 'pendiente')
                 ->count();
-            
+
             if ($cuotasPendientes > 0) {
                 Log::info("✅ Programa identificado por mayor cantidad de cuotas pendientes", [
                     'estudiante_programa_id' => $programaConMasCuotas->estudiante_programa_id,
@@ -1188,7 +1188,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             // Contar activos e inactivos
             $activos = $programas->where('programa_activo', true)->count();
             $inactivos = $programas->where('programa_activo', false)->count();
-            
+
             Log::info("✅ PASO 3 EXITOSO: Programas obtenidos (incluye activos e inactivos para importación histórica)", [
                 'carnet' => $carnet,
                 'total_programas' => $programas->count(),
@@ -1266,14 +1266,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $estudiantePrograma = DB::table('estudiante_programa')
                 ->where('id', $estudianteProgramaId)
                 ->first();
-            
+
             if (!$estudiantePrograma) {
                 return null;
             }
-            
+
             // Buscar el precio del programa
             $precioPrograma = PrecioPrograma::where('programa_id', $estudiantePrograma->programa_id)->first();
-            
+
             if ($precioPrograma) {
                 Log::debug("💰 Precio de programa encontrado", [
                     'estudiante_programa_id' => $estudianteProgramaId,
@@ -1283,7 +1283,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'meses' => $precioPrograma->meses
                 ]);
             }
-            
+
             return $precioPrograma;
         } catch (\Throwable $ex) {
             Log::warning("⚠️ Error al obtener precio de programa", [
