@@ -774,17 +774,17 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ->select(
                 'p.id as prospecto_id',
                 'p.carnet',
-                'p.nombres',
-                'p.apellidos',
+                'p.nombre_completo',
                 'ep.id as estudiante_programa_id',
                 'ep.programa_id',
                 'ep.created_at as fecha_inscripcion',
-                'prog.nombre_programa'
+                'prog.nombre_del_programa as nombre_programa',
+                'prog.activo as programa_activo'
             )
             ->join('estudiante_programa as ep', 'p.id', '=', 'ep.prospecto_id')
-            ->leftJoin('programas as prog', 'ep.programa_id', '=', 'prog.id')
+            ->leftJoin('tb_programas as prog', 'ep.programa_id', '=', 'prog.id')
             ->whereRaw("REPLACE(UPPER(p.carnet), ' ', '') = ?", [$carnet])
-            ->where('ep.estado', '=', 'activo')
+            ->where('prog.activo', '=', true)
             ->orderBy('ep.created_at', 'desc') // Más recientes primero
             ->get();
 
