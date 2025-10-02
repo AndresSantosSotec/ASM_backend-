@@ -186,3 +186,15 @@ Consider:
 2. Add UI indicator for payments linked to inactive programs
 3. Create report showing inactive programs with recent payments
 4. Add audit trail for quota matching decisions
+
+## Updates
+
+### 2025-10-02: Maximum Tolerance Update
+The tolerance levels have been further increased for historical imports:
+- **Priority 1 & 2**: Increased from 15%/20% to **50%** with minimum Q100 (was Q200/Q500)
+- **Priority 3**: Reduced partial payment threshold from 50% to **30%**
+- **Priority 4 (NEW)**: Added extreme tolerance matching at **100%**
+- **Priority 5 (NEW)**: Added forced quota assignment as last resort
+- **Program Pricing**: Added fallback to `tb_precios_programa` when quotas don't exist
+
+See `TOLERANCE_IMPROVEMENTS.md` for complete details on the maximum tolerance implementation.
