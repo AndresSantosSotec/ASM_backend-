@@ -8,6 +8,7 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use App\Models\KardexPago;
 use App\Models\CuotaProgramaEstudiante;
 use App\Models\ReconciliationRecord;
+use App\Models\PrecioPrograma;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
@@ -608,11 +609,38 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ->where('estado', 'pendiente')
             ->sortBy('fecha_vencimiento');
 
+        // 🔥 NUEVO: Si no hay cuotas, intentar obtener el precio del programa
         if ($cuotasPendientes->isEmpty()) {
             Log::warning("⚠️ No hay cuotas pendientes", [
                 'estudiante_programa_id' => $estudianteProgramaId,
                 'fila' => $numeroFila
             ]);
+            
+            // Intentar obtener el precio del programa para validación
+            $precioPrograma = $this->obtenerPrecioPrograma($estudianteProgramaId);
+            if ($precioPrograma) {
+                Log::info("💰 Precio de programa encontrado para validación", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'cuota_mensual' => $precioPrograma->cuota_mensual,
+                    'inscripcion' => $precioPrograma->inscripcion,
+                    'monto_pago' => $montoPago
+                ]);
+                
+                // Validar si el monto coincide con el precio del programa
+                $tolerancia = max(100, $precioPrograma->cuota_mensual * 0.50);
+                $diferenciaCuota = abs($precioPrograma->cuota_mensual - $montoPago);
+                $diferenciaInscripcion = abs($precioPrograma->inscripcion - $montoPago);
+                
+                if ($diferenciaCuota <= $tolerancia || $diferenciaInscripcion <= $tolerancia) {
+                    Log::info("✅ Monto validado contra precio de programa", [
+                        'monto_pago' => $montoPago,
+                        'cuota_mensual_programa' => $precioPrograma->cuota_mensual,
+                        'inscripcion_programa' => $precioPrograma->inscripcion,
+                        'tolerancia' => $tolerancia
+                    ]);
+                }
+            }
+            
             return null;
         }
 
@@ -961,20 +989,40 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             foreach ($programas as $programa) {
                 $cuotasPrograma = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
 
-                $cuotaCoincidente = $cuotasPrograma->first(function ($cuota) use ($mensualidadAprobada) {
-                    $diferencia = abs($cuota->monto - $mensualidadAprobada);
-                    $tolerancia = max(100, $mensualidadAprobada * 0.50);
-                    return $diferencia <= $tolerancia;
-                });
+                // Si hay cuotas, intentar coincidir por monto
+                if ($cuotasPrograma->isNotEmpty()) {
+                    $cuotaCoincidente = $cuotasPrograma->first(function ($cuota) use ($mensualidadAprobada) {
+                        $diferencia = abs($cuota->monto - $mensualidadAprobada);
+                        $tolerancia = max(100, $mensualidadAprobada * 0.50);
+                        return $diferencia <= $tolerancia;
+                    });
 
-                if ($cuotaCoincidente) {
-                    Log::info("✅ Programa identificado por mensualidad aprobada", [
-                        'estudiante_programa_id' => $programa->estudiante_programa_id,
-                        'programa' => $programa->nombre_programa,
-                        'mensualidad' => $mensualidadAprobada,
-                        'cuota_monto' => $cuotaCoincidente->monto
-                    ]);
-                    return $programa;
+                    if ($cuotaCoincidente) {
+                        Log::info("✅ Programa identificado por mensualidad aprobada (cuotas)", [
+                            'estudiante_programa_id' => $programa->estudiante_programa_id,
+                            'programa' => $programa->nombre_programa,
+                            'mensualidad' => $mensualidadAprobada,
+                            'cuota_monto' => $cuotaCoincidente->monto
+                        ]);
+                        return $programa;
+                    }
+                } else {
+                    // 🔥 NUEVO: Si no hay cuotas, usar precio del programa
+                    $precioPrograma = $this->obtenerPrecioPrograma($programa->estudiante_programa_id);
+                    if ($precioPrograma) {
+                        $diferencia = abs($precioPrograma->cuota_mensual - $mensualidadAprobada);
+                        $tolerancia = max(100, $mensualidadAprobada * 0.50);
+                        
+                        if ($diferencia <= $tolerancia) {
+                            Log::info("✅ Programa identificado por mensualidad aprobada (precio programa)", [
+                                'estudiante_programa_id' => $programa->estudiante_programa_id,
+                                'programa' => $programa->nombre_programa,
+                                'mensualidad' => $mensualidadAprobada,
+                                'cuota_mensual_programa' => $precioPrograma->cuota_mensual
+                            ]);
+                            return $programa;
+                        }
+                    }
                 }
             }
         }
@@ -1205,6 +1253,45 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $this->cuotasPorEstudianteCache[$estudianteProgramaId] = $cuotas;
 
         return $cuotas;
+    }
+
+    /**
+     * 🆕 Obtener precio estándar del programa
+     * Útil cuando no existen cuotas creadas para validar montos
+     */
+    private function obtenerPrecioPrograma(int $estudianteProgramaId)
+    {
+        try {
+            // Obtener programa_id del estudiante_programa
+            $estudiantePrograma = DB::table('estudiante_programa')
+                ->where('id', $estudianteProgramaId)
+                ->first();
+            
+            if (!$estudiantePrograma) {
+                return null;
+            }
+            
+            // Buscar el precio del programa
+            $precioPrograma = PrecioPrograma::where('programa_id', $estudiantePrograma->programa_id)->first();
+            
+            if ($precioPrograma) {
+                Log::debug("💰 Precio de programa encontrado", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'programa_id' => $estudiantePrograma->programa_id,
+                    'cuota_mensual' => $precioPrograma->cuota_mensual,
+                    'inscripcion' => $precioPrograma->inscripcion,
+                    'meses' => $precioPrograma->meses
+                ]);
+            }
+            
+            return $precioPrograma;
+        } catch (\Throwable $ex) {
+            Log::warning("⚠️ Error al obtener precio de programa", [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'error' => $ex->getMessage()
+            ]);
+            return null;
+        }
     }
 
     private function normalizeBank($bank)
