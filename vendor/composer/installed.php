@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'laravel/laravel',
-        'pretty_version' => 'dev-main',
-        'version' => 'dev-main',
-        'reference' => 'fb73cffd3e446bb4719e981fb70de292c4ac49f2',
+        'pretty_version' => 'dev-copilot/fix-385eaef1-42ac-4be6-b89b-f3d5df4b59b1',
+        'version' => 'dev-copilot/fix-385eaef1-42ac-4be6-b89b-f3d5df4b59b1',
+        'reference' => 'b9d9f8754c6ccbe39307b1168e368d78159f4dd8',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -479,9 +479,9 @@
             'dev_requirement' => false,
         ),
         'laravel/laravel' => array(
-            'pretty_version' => 'dev-main',
-            'version' => 'dev-main',
-            'reference' => 'fb73cffd3e446bb4719e981fb70de292c4ac49f2',
+            'pretty_version' => 'dev-copilot/fix-385eaef1-42ac-4be6-b89b-f3d5df4b59b1',
+            'version' => 'dev-copilot/fix-385eaef1-42ac-4be6-b89b-f3d5df4b59b1',
+            'reference' => 'b9d9f8754c6ccbe39307b1168e368d78159f4dd8',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
@@ -973,8 +973,8 @@
         'psr/log-implementation' => array(
             'dev_requirement' => false,
             'provided' => array(
-                0 => '3.0.0',
-                1 => '1.0|2.0|3.0',
+                0 => '1.0|2.0|3.0',
+                1 => '3.0.0',
             ),
         ),
         'psr/simple-cache' => array(

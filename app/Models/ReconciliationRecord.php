@@ -21,6 +21,7 @@ class ReconciliationRecord extends Model
         'bank_normalized',
         'reference_normalized',
         'fingerprint',
+        'kardex_pago_id',
     ];
 
     protected $casts = [
@@ -36,5 +37,10 @@ class ReconciliationRecord extends Model
     public function uploader()
     {
         return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    public function kardexPago()
+    {
+        return $this->belongsTo(KardexPago::class, 'kardex_pago_id');
     }
 }
