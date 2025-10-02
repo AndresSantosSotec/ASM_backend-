@@ -398,6 +398,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     $programaAsignado->nombre_programa ?? 'N/A'
                 );
 
+                // 🔥 CAMBIO CRÍTICO: Removidos 'uploaded_by' y 'created_by'
                 $kardex = KardexPago::create([
                     'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
                     'cuota_id' => $cuota ? $cuota->id : null,
@@ -408,8 +409,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'banco' => $banco,
                     'estado_pago' => 'aprobado',
                     'observaciones' => $observaciones,
-                    'uploaded_by' => $this->uploaderId,
-                    'created_by' => $this->uploaderId,
                 ]);
 
                 $this->kardexCreados++;
@@ -667,6 +666,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
 
         try {
+            // 🔥 CAMBIO: Removido 'uploaded_by' si no existe en reconciliation_records
             ReconciliationRecord::create([
                 'bank' => $banco,
                 'bank_normalized' => $bancoNormalizado,
@@ -676,7 +676,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'date' => $fechaYmd,
                 'fingerprint' => $fingerprint,
                 'status' => 'conciliado',
-                'uploaded_by' => $this->uploaderId,
                 'kardex_pago_id' => $kardex->id,
             ]);
 
@@ -863,12 +862,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
 
         Log::info("🔍 PASO 1: Buscando prospecto por carnet", ['carnet' => $carnet]);
-        
+
         // PASO 1: Buscar prospecto por carnet
         $prospecto = DB::table('prospectos')
             ->whereRaw("REPLACE(UPPER(carnet), ' ', '') = ?", [$carnet])
             ->first();
-        
+
         if (!$prospecto) {
             Log::warning("❌ PASO 1 FALLIDO: Prospecto no encontrado", [
                 'carnet' => $carnet,
@@ -877,7 +876,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $this->estudiantesCache[$carnet] = collect([]);
             return collect([]);
         }
-        
+
         Log::info("✅ PASO 1 EXITOSO: Prospecto encontrado", [
             'carnet' => $carnet,
             'prospecto_id' => $prospecto->id,
@@ -888,11 +887,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         Log::info("🔍 PASO 2: Buscando programas del estudiante", [
             'prospecto_id' => $prospecto->id
         ]);
-        
+
         $estudianteProgramas = DB::table('estudiante_programa')
             ->where('prospecto_id', $prospecto->id)
             ->get();
-        
+
         if ($estudianteProgramas->isEmpty()) {
             Log::warning("❌ PASO 2 FALLIDO: No hay programas para este prospecto", [
                 'carnet' => $carnet,
@@ -902,7 +901,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $this->estudiantesCache[$carnet] = collect([]);
             return collect([]);
         }
-        
+
         Log::info("✅ PASO 2 EXITOSO: Programas encontrados", [
             'prospecto_id' => $prospecto->id,
             'cantidad_programas' => $estudianteProgramas->count(),
@@ -931,7 +930,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ->where('prog.activo', '=', true)
             ->orderBy('ep.created_at', 'desc') // Más recientes primero
             ->get();
-        
+
         if ($programas->isEmpty()) {
             Log::warning("❌ PASO 3 FALLIDO: No hay programas activos", [
                 'carnet' => $carnet,
@@ -981,7 +980,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         } else {
             $pendientes = $cuotas->where('estado', 'pendiente')->count();
             $pagadas = $cuotas->where('estado', 'pagado')->count();
-            
+
             Log::info("✅ PASO 4 EXITOSO: Cuotas encontradas", [
                 'estudiante_programa_id' => $estudianteProgramaId,
                 'total_cuotas' => $cuotas->count(),
