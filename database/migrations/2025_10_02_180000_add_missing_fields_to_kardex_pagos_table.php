@@ -10,12 +10,11 @@ return new class extends Migration
     {
         Schema::table('kardex_pagos', function (Blueprint $table) {
             // Add fecha_recibo column
-            $table->date('fecha_recibo')->nullable()->after('fecha_pago');
-            
+
             // Add uploaded_by column with foreign key
             $table->unsignedBigInteger('uploaded_by')->nullable()->after('created_by');
             $table->foreign('uploaded_by')->references('id')->on('users');
-            
+
             // Add updated_by column with foreign key
             $table->unsignedBigInteger('updated_by')->nullable()->after('uploaded_by');
             $table->foreign('updated_by')->references('id')->on('users');
@@ -28,9 +27,9 @@ return new class extends Migration
             // Drop foreign keys first
             $table->dropForeign(['uploaded_by']);
             $table->dropForeign(['updated_by']);
-            
+
             // Drop columns
-            $table->dropColumn(['fecha_recibo', 'uploaded_by', 'updated_by']);
+            $table->dropColumn([ 'uploaded_by', 'updated_by']);
         });
     }
 };
