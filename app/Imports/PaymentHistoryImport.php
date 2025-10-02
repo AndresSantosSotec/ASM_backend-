@@ -234,7 +234,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $boleta = $this->normalizarBoleta($row['numero_boleta'] ?? '');
         $monto = $this->normalizarMonto($row['monto'] ?? 0);
         $fechaPago = $this->normalizarFecha($row['fecha_pago'] ?? null);
-        $banco = trim((string)($row['banco'] ?? 'No especificado'));
+        $bancoRaw = trim((string)($row['banco'] ?? ''));
+        $banco = empty($bancoRaw) ? 'EFECTIVO' : $bancoRaw;
         $concepto = trim((string)($row['concepto'] ?? 'Cuota mensual'));
         $mesPago = trim((string)($row['mes_pago'] ?? ''));
         $mesInicio = trim((string)($row['mes_inicio'] ?? ''));
@@ -783,7 +784,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ->join('estudiante_programa as ep', 'p.id', '=', 'ep.prospecto_id')
             ->leftJoin('programas as prog', 'ep.programa_id', '=', 'prog.id')
             ->whereRaw("REPLACE(UPPER(p.carnet), ' ', '') = ?", [$carnet])
-            ->where('ep.estado', 'activo')
+            ->where('ep.estado', '=', 'activo')
             ->orderBy('ep.created_at', 'desc') // Más recientes primero
             ->get();
 

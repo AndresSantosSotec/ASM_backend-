@@ -25,6 +25,9 @@ class KardexPago extends Model
         'boleta_fingerprint',
         'archivo_hash',
         'fecha_recibo',
+        'uploaded_by',
+        'created_by',
+        'updated_by',
     ];
 
     protected $casts = [
@@ -81,6 +84,11 @@ class KardexPago extends Model
     public function cuota()
     {
         return $this->belongsTo(CuotaProgramaEstudiante::class, 'cuota_id');
+    }
+
+    public function reconciliationRecords()
+    {
+        return $this->hasMany(ReconciliationRecord::class, 'kardex_pago_id');
     }
 
     public function scopePendientesRevision($q)
