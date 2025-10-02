@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'laravel/laravel',
-        'pretty_version' => 'dev-copilot/fix-05845306-b6ed-4818-ae68-4d9e6dec59f5',
-        'version' => 'dev-copilot/fix-05845306-b6ed-4818-ae68-4d9e6dec59f5',
-        'reference' => 'ec31e0bf43609a3714771f7e03ebce35f28a61c8',
+        'pretty_version' => 'dev-copilot/fix-571fad88-f870-4392-8664-58ff716e0326',
+        'version' => 'dev-copilot/fix-571fad88-f870-4392-8664-58ff716e0326',
+        'reference' => 'a148b61b5edd8ffb639aa4c50ec467aeccc6a027',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -479,9 +479,9 @@
             'dev_requirement' => false,
         ),
         'laravel/laravel' => array(
-            'pretty_version' => 'dev-copilot/fix-05845306-b6ed-4818-ae68-4d9e6dec59f5',
-            'version' => 'dev-copilot/fix-05845306-b6ed-4818-ae68-4d9e6dec59f5',
-            'reference' => 'ec31e0bf43609a3714771f7e03ebce35f28a61c8',
+            'pretty_version' => 'dev-copilot/fix-571fad88-f870-4392-8664-58ff716e0326',
+            'version' => 'dev-copilot/fix-571fad88-f870-4392-8664-58ff716e0326',
+            'reference' => 'a148b61b5edd8ffb639aa4c50ec467aeccc6a027',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
