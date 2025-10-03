@@ -635,7 +635,17 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'line' => $ex->getLine()
             ]);
 
-            throw $ex;
+            // ✅ Add error to array and continue processing (don't re-throw)
+            $this->errores[] = [
+                'tipo' => 'ERROR_PROCESAMIENTO_PAGO',
+                'fila' => $numeroFila,
+                'carnet' => $carnet,
+                'boleta' => $boleta ?? 'N/A',
+                'error' => $ex->getMessage(),
+                'trace' => config('app.debug') ? array_slice(explode("\n", $ex->getTraceAsString()), 0, 3) : null
+            ];
+            
+            // Don't re-throw - allow processing to continue with next payment
         }
     }
 
