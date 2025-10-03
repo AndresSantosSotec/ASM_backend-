@@ -196,7 +196,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'tipos' => $erroresPorTipo->map(function ($errores, $tipo) {
                     return [
                         'cantidad' => $errores->count(),
-                        'ejemplos' => $errores->take(3)->map(function($error) {
+                        'ejemplos' => $errores->take(3)->map(function ($error) {
                             $details = ['mensaje' => $error['error'] ?? 'Error desconocido'];
                             if (isset($error['carnet'])) $details['carnet'] = $error['carnet'];
                             if (isset($error['fila'])) $details['fila'] = $error['fila'];
@@ -208,13 +208,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     ];
                 })->toArray()
             ]);
-            
+
             // Log detailed breakdown for each error type
             foreach ($erroresPorTipo as $tipo => $errores) {
                 Log::warning("🔍 Detalle de {$tipo}", [
                     'total' => $errores->count(),
                     'descripcion' => $this->getErrorTypeDescription($tipo),
-                    'primeros_5_casos' => $errores->take(5)->map(function($error) {
+                    'primeros_5_casos' => $errores->take(5)->map(function ($error) {
                         return [
                             'carnet' => $error['carnet'] ?? 'N/A',
                             'fila' => $error['fila'] ?? 'N/A',
@@ -644,7 +644,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'error' => $ex->getMessage(),
                 'trace' => config('app.debug') ? array_slice(explode("\n", $ex->getTraceAsString()), 0, 3) : null
             ];
-            
+
             // Don't re-throw - allow processing to continue with next payment
         }
     }
@@ -946,6 +946,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'fingerprint' => $fingerprint,
                 'status' => 'conciliado',
                 'kardex_pago_id' => $kardex->id,
+                'uploaded_by' => $this->uploaderId, // 👈 ESTE ES EL FIX
             ]);
 
             $this->conciliaciones++;
@@ -953,7 +954,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             Log::info("✅ PASO 6 EXITOSO: Conciliación creada", [
                 'kardex_id' => $kardex->id,
                 'fingerprint' => $fingerprint,
-                'status' => 'conciliado'
+                'status' => 'conciliado',
+                'uploaded_by' => $this->uploaderId
             ]);
         } catch (\Throwable $e) {
             Log::error("❌ PASO 6 FALLIDO: Error creando conciliación", [
@@ -1606,7 +1608,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'ARCHIVO_VACIO' => 'El archivo Excel no contiene datos',
             'ESTRUCTURA_INVALIDA' => 'El archivo no tiene la estructura de columnas esperada'
         ];
-        
+
         return $descriptions[$tipo] ?? 'Error no categorizado';
     }
 }
