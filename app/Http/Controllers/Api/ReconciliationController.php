@@ -576,11 +576,16 @@ class ReconciliationController extends Controller
             ], 422);
         }
 
-        // ✅ Obtener uploaded_by con fallback robusto
+        // ✅ Forzar siempre un valor (default = 1)
         $uploaderId = auth()->id()
             ?? optional($request->user())->id
             ?? $request->integer('uploaded_by')
             ?? 1;
+
+        // 👇 Aquí forzamos: si es null, vacío o <= 0, usar 1
+        if (empty($uploaderId) || $uploaderId <= 0) {
+            $uploaderId = 1;
+        }
 
         Log::info('🔑 Uploader ID determinado', [
             'uploader_id' => $uploaderId,
@@ -649,7 +654,7 @@ class ReconciliationController extends Controller
                     'totalTransactions' => $import->totalRows,
                     'successfulImports' => $import->procesados,
                     'failedImports' => count($import->errores),
-                    'totalAmount' => round($import->totalAmount, 2), // ✅ CORREGIDO
+                    'totalAmount' => round($import->totalAmount, 2),
                     'pagosParciales' => $import->pagosParciales,
                     'totalDiscrepancias' => round($import->totalDiscrepancias, 2),
                 ],
