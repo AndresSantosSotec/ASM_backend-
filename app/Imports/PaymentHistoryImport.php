@@ -631,18 +631,18 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
             // Intentar generar cuotas automáticamente
             $generado = $this->generarCuotasSiFaltan($estudianteProgramaId, null);
-            
+
             if ($generado) {
                 // Recargar cuotas después de la generación
                 $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
                     ->where('estado', 'pendiente')
                     ->sortBy('fecha_vencimiento');
-                
+
                 Log::info("✅ Cuotas generadas y recargadas", [
                     'estudiante_programa_id' => $estudianteProgramaId,
                     'cuotas_disponibles' => $cuotasPendientes->count()
                 ]);
-                
+
                 // Si aún no hay cuotas después de generar, retornar null
                 if ($cuotasPendientes->isEmpty()) {
                     return null;
@@ -1410,7 +1410,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'estado' => 'pendiente',
                     'created_at' => now(),
                     'updated_at' => now(),
-                    'created_by' => $this->uploaderId
                 ];
             }
 
