@@ -214,9 +214,15 @@ class EstudiantePagosController extends Controller
 
         $numeroNormalizado = $this->normalizeReceiptNumber($request->numero_boleta);
         $bancoNormalizado  = $this->normalizeBank($request->banco);
+        
+        // Note: Pre-validation can't calculate full fingerprint (no student/date yet)
+        // We search for ANY payment with this banco+boleta combination
+        // This is a conservative check - actual duplicate detection happens on submit
         $fingerprint       = hash('sha256', $bancoNormalizado.'|'.$numeroNormalizado);
 
-        $existingPayment = KardexPago::where('boleta_fingerprint', $fingerprint)
+        // Search for payments with matching banco+boleta (old fingerprint format)
+        $existingPayment = KardexPago::where('numero_boleta_normalizada', $numeroNormalizado)
+            ->where('banco_normalizado', $bancoNormalizado)
             ->whereIn('estado_pago', ['pendiente_revision','aprobado'])
             ->with(['cuota', 'estudiantePrograma.programa'])
             ->first();
@@ -267,15 +273,16 @@ class EstudiantePagosController extends Controller
         $rule        = PaymentRule::first();
         $numeroNorm  = $this->normalizeReceiptNumber($request->numero_boleta);
         $bancoNorm   = $this->normalizeBank($request->banco);
-        $boletaFp    = hash('sha256', $bancoNorm.'|'.$numeroNorm);
-
+        // Note: For manual submissions, we use fecha_recibo as the date component
+        $fechaRecibo = Carbon::parse($request->fecha_recibo)->format('Y-m-d');
+        
         $file        = $request->file('comprobante');
         $archivoHash = hash_file('sha256', $file->getRealPath());
 
         $STRICT_DUP_FILE_BLOCK = (bool) env('STRICT_DUP_FILE_BLOCK', false);
 
         return DB::transaction(function () use (
-            $request, $user, $now, $rule, $numeroNorm, $bancoNorm, $boletaFp, $file, $archivoHash, $STRICT_DUP_FILE_BLOCK
+            $request, $user, $now, $rule, $numeroNorm, $bancoNorm, $file, $archivoHash, $STRICT_DUP_FILE_BLOCK, $fechaRecibo
         ) {
             // 1) Verificar cuota pertenece al estudiante y NO está pagada
             $cuota = CuotaProgramaEstudiante::whereHas('estudiantePrograma.prospecto', function ($q) use ($user) {
@@ -307,6 +314,9 @@ class EstudiantePagosController extends Controller
             }
 
             // 3) Duplicado de BOLETA (estricto)
+            // Calculate fingerprint with student and date for proper uniqueness
+            $boletaFp = hash('sha256', $bancoNorm.'|'.$numeroNorm.'|'.$cuota->estudiante_programa_id.'|'.$fechaRecibo);
+            
             $existingPayment = KardexPago::where('boleta_fingerprint', $boletaFp)
                 ->whereIn('estado_pago', ['pendiente_revision', 'aprobado'])
                 ->with(['cuota', 'estudiantePrograma.programa'])

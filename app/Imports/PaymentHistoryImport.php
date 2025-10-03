@@ -493,13 +493,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $mensualidadAprobada,
                 $nombreEstudiante
             ) {
-                // ✅ Verificar duplicado
+                // ✅ Verificar duplicado por boleta y estudiante
                 $kardexExistente = KardexPago::where('numero_boleta', $boleta)
                     ->where('estudiante_programa_id', $programaAsignado->estudiante_programa_id)
                     ->first();
 
                 if ($kardexExistente) {
-                    Log::info("⚠️ Kardex duplicado detectado", [
+                    Log::info("⚠️ Kardex duplicado detectado (por boleta+estudiante)", [
                         'kardex_id' => $kardexExistente->id,
                         'boleta' => $boleta,
                         'estudiante_programa_id' => $programaAsignado->estudiante_programa_id
@@ -511,6 +511,36 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                         'advertencia' => "Pago ya registrado anteriormente",
                         'kardex_id' => $kardexExistente->id,
                         'boleta' => $boleta,
+                        'accion' => 'omitido'
+                    ];
+                    return;
+                }
+
+                // ✅ Verificar duplicado por fingerprint (más preciso, incluye fecha)
+                $bancoNormalizado = $this->normalizeBank($banco);
+                $boletaNormalizada = $this->normalizeReceiptNumber($boleta);
+                $fechaYmd = $fechaPago->format('Y-m-d');
+                $fingerprint = hash('sha256', 
+                    $bancoNormalizado.'|'.$boletaNormalizada.'|'.$programaAsignado->estudiante_programa_id.'|'.$fechaYmd);
+
+                $kardexPorFingerprint = KardexPago::where('boleta_fingerprint', $fingerprint)->first();
+
+                if ($kardexPorFingerprint) {
+                    Log::info("⚠️ Kardex duplicado detectado (por fingerprint)", [
+                        'kardex_id' => $kardexPorFingerprint->id,
+                        'fingerprint' => $fingerprint,
+                        'boleta' => $boleta,
+                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                        'fecha_pago' => $fechaYmd
+                    ]);
+
+                    $this->advertencias[] = [
+                        'tipo' => 'DUPLICADO',
+                        'fila' => $numeroFila,
+                        'advertencia' => "Pago ya registrado anteriormente (mismo fingerprint)",
+                        'kardex_id' => $kardexPorFingerprint->id,
+                        'boleta' => $boleta,
+                        'fingerprint' => substr($fingerprint, 0, 16) . '...',
                         'accion' => 'omitido'
                     ];
                     return;
