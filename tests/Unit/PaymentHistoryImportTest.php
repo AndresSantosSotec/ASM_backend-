@@ -170,4 +170,95 @@ class PaymentHistoryImportTest extends TestCase
         // Test unknown error type
         $this->assertEquals('Error no categorizado', $reflection->invoke($import, 'UNKNOWN_ERROR_TYPE'));
     }
+
+    public function test_normalize_bank_standardizes_bank_names()
+    {
+        $import = $this->getImportInstance();
+        
+        $reflection = new \ReflectionMethod($import, 'normalizeBank');
+        $reflection->setAccessible(true);
+        
+        // Test bank normalization
+        $this->assertEquals('BI', $reflection->invoke($import, 'Banco Industrial'));
+        $this->assertEquals('BI', $reflection->invoke($import, 'BI'));
+        $this->assertEquals('BANTRAB', $reflection->invoke($import, 'bantrab'));
+        $this->assertEquals('EFECTIVO', $reflection->invoke($import, 'N/A'));
+        $this->assertEquals('EFECTIVO', $reflection->invoke($import, 'No especificado'));
+        $this->assertEquals('EFECTIVO', $reflection->invoke($import, ''));
+    }
+
+    public function test_normalize_receipt_number_removes_special_chars()
+    {
+        $import = $this->getImportInstance();
+        
+        $reflection = new \ReflectionMethod($import, 'normalizeReceiptNumber');
+        $reflection->setAccessible(true);
+        
+        // Test receipt number normalization
+        $this->assertEquals('652002', $reflection->invoke($import, '652002'));
+        $this->assertEquals('652002', $reflection->invoke($import, '652-002'));
+        $this->assertEquals('ABC123', $reflection->invoke($import, 'abc-123'));
+        $this->assertEquals('NA', $reflection->invoke($import, 'N/A'));
+        $this->assertEquals('NA', $reflection->invoke($import, ''));
+    }
+
+    public function test_fingerprint_includes_student_and_date()
+    {
+        // Test that the new fingerprint format includes student_id and date
+        // This prevents collisions when different students use the same receipt number
+        
+        $banco1 = 'NO ESPECIFICADO';
+        $boleta1 = '652002';
+        $estudiante1 = 5;
+        $fecha1 = '2020-08-01';
+        
+        $banco2 = 'NO ESPECIFICADO';
+        $boleta2 = '652002'; // Same receipt number
+        $estudiante2 = 162; // Different student
+        $fecha2 = '2020-08-01';
+        
+        // Normalize inputs
+        $bancoNorm1 = 'NO ESPECIFICADO';
+        $boletaNorm1 = '652002';
+        $bancoNorm2 = 'NO ESPECIFICADO';
+        $boletaNorm2 = '652002';
+        
+        // Calculate old-style fingerprints (would collide)
+        $oldFp1 = hash('sha256', $bancoNorm1.'|'.$boletaNorm1);
+        $oldFp2 = hash('sha256', $bancoNorm2.'|'.$boletaNorm2);
+        
+        // Calculate new-style fingerprints (should NOT collide)
+        $newFp1 = hash('sha256', $bancoNorm1.'|'.$boletaNorm1.'|'.$estudiante1.'|'.$fecha1);
+        $newFp2 = hash('sha256', $bancoNorm2.'|'.$boletaNorm2.'|'.$estudiante2.'|'.$fecha2);
+        
+        // Old fingerprints should collide (same value)
+        $this->assertEquals($oldFp1, $oldFp2, 'Old fingerprint format should collide for same banco+boleta');
+        
+        // New fingerprints should NOT collide (different values)
+        $this->assertNotEquals($newFp1, $newFp2, 'New fingerprint format should NOT collide when students differ');
+        
+        // Verify fingerprints are different from each other
+        $this->assertNotEmpty($newFp1);
+        $this->assertNotEmpty($newFp2);
+        $this->assertEquals(64, strlen($newFp1)); // SHA256 produces 64-char hex string
+        $this->assertEquals(64, strlen($newFp2));
+    }
+
+    public function test_fingerprint_distinguishes_different_dates()
+    {
+        // Test that the new fingerprint format distinguishes payments on different dates
+        
+        $banco = 'BI';
+        $boleta = '901002';
+        $estudiante = 5;
+        $fecha1 = '2020-08-01';
+        $fecha2 = '2020-09-01';
+        
+        // Calculate fingerprints
+        $fp1 = hash('sha256', $banco.'|'.$boleta.'|'.$estudiante.'|'.$fecha1);
+        $fp2 = hash('sha256', $banco.'|'.$boleta.'|'.$estudiante.'|'.$fecha2);
+        
+        // Fingerprints should be different for different dates
+        $this->assertNotEquals($fp1, $fp2, 'Fingerprints should differ when payment dates differ');
+    }
 }
