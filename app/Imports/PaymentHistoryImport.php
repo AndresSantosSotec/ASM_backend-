@@ -1250,62 +1250,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         // 🔥 NUEVO: Generar cuotas si no existen
         foreach ($programas as $programa) {
-            $this->generarCuotasSiFaltan($programa->estudiante_programa_id, $row);
+            // Convert Collection to array if needed
+            $rowArray = $row instanceof Collection ? $row->toArray() : $row;
+            $this->generarCuotasSiFaltan($programa->estudiante_programa_id, $rowArray);
         }
 
         $this->estudiantesCache[$carnet] = $programas;
 
         return $programas;
-    }
-
-    /**
-     * 🆕 NUEVO: Generar cuotas si el programa no tiene ninguna
-     */
-    private function generarCuotasSiFaltan(int $estudianteProgramaId, ?array $row)
-    {
-        if (!$row) {
-            return;
-        }
-
-        // Verificar si ya tiene cuotas en caché
-        if (isset($this->cuotasPorEstudianteCache[$estudianteProgramaId])) {
-            $cuotas = $this->cuotasPorEstudianteCache[$estudianteProgramaId];
-            if ($cuotas->count() > 0) {
-                return; // Ya tiene cuotas
-            }
-        } else {
-            $cantidad = DB::table('cuotas_programa_estudiante')
-                ->where('estudiante_programa_id', $estudianteProgramaId)
-                ->count();
-
-            if ($cantidad > 0) {
-                return; // Ya tiene cuotas
-            }
-        }
-
-        Log::warning("⚠️ Programa sin cuotas, generando desde Excel", [
-            'estudiante_programa_id' => $estudianteProgramaId
-        ]);
-
-        $estudiantePrograma = \App\Models\EstudiantePrograma::find($estudianteProgramaId);
-
-        if ($estudiantePrograma) {
-            $cuotasGeneradas = $this->estudianteService->generarCuotasSiNoExisten(
-                $estudiantePrograma,
-                $row,
-                $this->uploaderId
-            );
-
-            if ($cuotasGeneradas > 0) {
-                // Limpiar caché para forzar recarga
-                unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
-
-                                Log::info("✅ Cuotas generadas exitosamente", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'cantidad' => $cuotasGeneradas
-                ]);
-            }
-        }
     }
 
     private function obtenerCuotasDelPrograma(int $estudianteProgramaId)
