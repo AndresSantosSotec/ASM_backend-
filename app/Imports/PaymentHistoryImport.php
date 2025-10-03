@@ -2,6 +2,11 @@
 
 namespace App\Imports;
 
+// ✅ AGREGAR ESTAS LÍNEAS AL INICIO
+ini_set('memory_limit', '2048M'); // 1 GB
+ini_set('max_execution_time', '1500'); // 10 minutos
+
+use App\Services\EstudianteService;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
@@ -34,10 +39,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     private array $estudiantesCache = [];
     private array $cuotasPorEstudianteCache = [];
 
+    // 🆕 NUEVO: Servicio de estudiantes
+    private EstudianteService $estudianteService;
+
     public function __construct(int $uploaderId, string $tipoArchivo = 'cardex_directo')
     {
         $this->uploaderId = $uploaderId;
         $this->tipoArchivo = $tipoArchivo;
+        $this->estudianteService = new EstudianteService();
 
         Log::info('📦 PaymentHistoryImport Constructor', [
             'uploaderId' => $uploaderId,
@@ -297,6 +306,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         ];
 
         $columnasOpcionales = [
+            'plan_estudios',
             'banco',
             'concepto',
             'mes_pago',
@@ -323,6 +333,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         ];
     }
 
+    /**
+     * 🔥 MÉTODO MEJORADO: Ahora crea estudiantes/programas si no existen
+     */
     private function procesarPagosDeEstudiante($carnet, Collection $pagos)
     {
         $carnetNormalizado = $this->normalizarCarnet($carnet);
@@ -331,22 +344,23 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'cantidad_pagos' => $pagos->count()
         ]);
 
-        // ✅ Buscar programas del estudiante
-        $programasEstudiante = $this->obtenerProgramasEstudiante($carnetNormalizado);
+        // 🔥 CAMBIO: Pasar primer pago como contexto para creación
+        $primerPago = $pagos->first();
+        $programasEstudiante = $this->obtenerProgramasEstudiante($carnetNormalizado, $primerPago);
 
         if ($programasEstudiante->isEmpty()) {
             $this->errores[] = [
                 'tipo' => 'ESTUDIANTE_NO_ENCONTRADO',
                 'carnet' => $carnetNormalizado,
-                'error' => 'No se encontró ningún programa activo para este carnet',
+                'error' => 'No se pudo crear ni encontrar programas para este carnet',
                 'cantidad_pagos_afectados' => $pagos->count(),
-                'solucion' => 'Verifica que el carnet esté registrado en el sistema y tenga al menos un programa activo'
+                'solucion' => 'Verifica los datos del Excel y que el carnet sea válido'
             ];
-            Log::warning("⚠️ Estudiante no encontrado: {$carnetNormalizado}");
+            Log::warning("⚠️ Estudiante no encontrado/creado: {$carnetNormalizado}");
             return;
         }
 
-        Log::info("✅ Programas encontrados", [
+        Log::info("✅ Programas encontrados/creados", [
             'carnet' => $carnetNormalizado,
             'cantidad_programas' => $programasEstudiante->count(),
             'programas' => $programasEstudiante->pluck('nombre_programa', 'estudiante_programa_id')->toArray()
@@ -536,7 +550,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     $programaAsignado->nombre_programa ?? 'N/A'
                 );
 
-                // 🔥 CAMBIO CRÍTICO: Removidos 'uploaded_by' y 'created_by'
                 $kardex = KardexPago::create([
                     'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
                     'cuota_id' => $cuota ? $cuota->id : null,
@@ -670,12 +683,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'tolerancia_usada' => $tolerancia
                 ]);
                 return $cuotaExacta;
-            } else {
-                Log::debug("⚠️ No se encontró cuota por mensualidad aprobada", [
-                    'mensualidad_aprobada' => $mensualidadAprobada,
-                    'tolerancia' => $tolerancia,
-                    'cuotas_disponibles' => $cuotasPendientes->pluck('monto')->toArray()
-                ]);
             }
         }
 
@@ -696,12 +703,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'tolerancia_usada' => $tolerancia
             ]);
             return $cuotaPorMonto;
-        } else {
-            Log::debug("⚠️ No se encontró cuota por monto de pago", [
-                'monto_pago' => $montoPago,
-                'tolerancia' => $tolerancia,
-                'cuotas_disponibles' => $cuotasPendientes->pluck('monto')->toArray()
-            ]);
         }
 
         // 🔥 PRIORIDAD 3: PAGO PARCIAL (con tolerancia aumentada)
@@ -1081,7 +1082,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         if ($programaConMasCuotas) {
             $cuotasPendientes = $this->obtenerCuotasDelPrograma($programaConMasCuotas->estudiante_programa_id)
-                ->where('estado', 'pendiente')
+                ->where('estado', 'pendientes')
                 ->count();
 
             if ($cuotasPendientes > 0) {
@@ -1101,7 +1102,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return $programas->first();
     }
 
-    private function obtenerProgramasEstudiante($carnet)
+    /**
+     * 🔥 MÉTODO MEJORADO: Ahora crea estudiantes/programas si no existen
+     */
+    private function obtenerProgramasEstudiante($carnet, $row = null)
     {
         if (isset($this->estudiantesCache[$carnet])) {
             Log::debug("📋 Usando cache para carnet", ['carnet' => $carnet]);
@@ -1114,10 +1118,27 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ->where(DB::raw("REPLACE(UPPER(carnet), ' ', '')"), '=', $carnet)
             ->first();
 
+        // 🔥 NUEVO: Si no existe prospecto, crearlo
+        if (!$prospecto && $row) {
+            Log::warning("❌ Prospecto no encontrado, creando desde datos de pago", [
+                'carnet' => $carnet
+            ]);
+
+            $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($row, $this->uploaderId);
+
+            if ($programaCreado) {
+                $this->estudiantesCache[$carnet] = collect([$programaCreado]);
+                return collect([$programaCreado]);
+            }
+
+            // Si aún falla, retornar vacío
+            $this->estudiantesCache[$carnet] = collect([]);
+            return collect([]);
+        }
+
         if (!$prospecto) {
-            Log::warning("❌ PASO 1 FALLIDO: Prospecto no encontrado", [
-                'carnet' => $carnet,
-                'problema' => 'No existe un registro en la tabla prospectos con este carnet'
+            Log::warning("❌ PASO 1 FALLIDO: Prospecto no encontrado y no se pudo crear", [
+                'carnet' => $carnet
             ]);
             $this->estudiantesCache[$carnet] = collect([]);
             return collect([]);
@@ -1137,11 +1158,24 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ->where('prospecto_id', $prospecto->id)
             ->get();
 
+        // 🔥 NUEVO: Si no tiene programas, crear con datos del Excel
+        if ($estudianteProgramas->isEmpty() && $row) {
+            Log::warning("❌ No hay programas, creando desde datos de pago", [
+                'prospecto_id' => $prospecto->id
+            ]);
+
+            $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($row, $this->uploaderId);
+
+            if ($programaCreado) {
+                $this->estudiantesCache[$carnet] = collect([$programaCreado]);
+                return collect([$programaCreado]);
+            }
+        }
+
         if ($estudianteProgramas->isEmpty()) {
             Log::warning("❌ PASO 2 FALLIDO: No hay programas para este prospecto", [
                 'carnet' => $carnet,
-                'prospecto_id' => $prospecto->id,
-                'problema' => 'No existe ningún registro en estudiante_programa para este prospecto_id'
+                'prospecto_id' => $prospecto->id
             ]);
             $this->estudiantesCache[$carnet] = collect([]);
             return collect([]);
@@ -1149,16 +1183,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         Log::info("✅ PASO 2 EXITOSO: Programas encontrados", [
             'prospecto_id' => $prospecto->id,
-            'cantidad_programas' => $estudianteProgramas->count(),
-            'programa_ids' => $estudianteProgramas->pluck('id')->toArray()
+            'cantidad_programas' => $estudianteProgramas->count()
         ]);
 
-        Log::info("🔍 PASO 3: Obteniendo detalles de programas activos", [
-            'estudiante_programa_ids' => $estudianteProgramas->pluck('id')->toArray()
-        ]);
-
-        // 🔥 CAMBIO CRÍTICO: Para importación histórica, NO filtrar por prog.activo
-        // Los pagos históricos pueden pertenecer a programas que ahora están inactivos
         $programas = DB::table('prospectos as p')
             ->select(
                 'p.id as prospecto_id',
@@ -1168,45 +1195,97 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'ep.programa_id',
                 'ep.created_at as fecha_inscripcion',
                 'prog.nombre_del_programa as nombre_programa',
+                'prog.abreviatura as programa_abreviatura',
                 'prog.activo as programa_activo'
             )
             ->join('estudiante_programa as ep', 'p.id', '=', 'ep.prospecto_id')
             ->leftJoin('tb_programas as prog', 'ep.programa_id', '=', 'prog.id')
             ->where(DB::raw("REPLACE(UPPER(p.carnet), ' ', '')"), '=', $carnet)
-            // ✅ NO filtrar por activo en importación histórica
-            // ->where('prog.activo', '=', true)
             ->orderBy('ep.created_at', 'desc')
             ->get();
 
-        if ($programas->isEmpty()) {
-            Log::warning("❌ PASO 3 FALLIDO: No hay programas para el estudiante", [
-                'carnet' => $carnet,
-                'prospecto_id' => $prospecto->id,
-                'problema' => 'No se encontraron programas en estudiante_programa o no tienen programa_id válido en tb_programas'
-            ]);
-        } else {
-            // Contar activos e inactivos
-            $activos = $programas->where('programa_activo', true)->count();
-            $inactivos = $programas->where('programa_activo', false)->count();
+        // 🔥 NUEVO: Actualizar programas TEMP a reales si el Excel tiene plan_estudios
+        if ($row && !empty($row['plan_estudios'])) {
+            foreach ($programas as $programa) {
+                if ($programa->programa_abreviatura === 'TEMP') {
+                    Log::info("🔄 Detectado programa TEMP, intentando actualizar", [
+                        'estudiante_programa_id' => $programa->estudiante_programa_id,
+                        'plan_estudios_excel' => $row['plan_estudios']
+                    ]);
 
-            Log::info("✅ PASO 3 EXITOSO: Programas obtenidos (incluye activos e inactivos para importación histórica)", [
-                'carnet' => $carnet,
-                'total_programas' => $programas->count(),
-                'programas_activos' => $activos,
-                'programas_inactivos' => $inactivos,
-                'programas' => $programas->map(function ($p) {
-                    return [
-                        'estudiante_programa_id' => $p->estudiante_programa_id,
-                        'programa' => $p->nombre_programa,
-                        'activo' => $p->programa_activo
-                    ];
-                })->toArray()
-            ]);
+                    $actualizado = $this->estudianteService->actualizarProgramaTempAReal(
+                        $programa->estudiante_programa_id,
+                        $row['plan_estudios'],
+                        $this->uploaderId
+                    );
+
+                    if ($actualizado) {
+                        // Recargar programas después de actualizar
+                        unset($this->estudiantesCache[$carnet]);
+                        return $this->obtenerProgramasEstudiante($carnet, $row);
+                    }
+                }
+            }
+        }
+
+        // 🔥 NUEVO: Generar cuotas si no existen
+        foreach ($programas as $programa) {
+            $this->generarCuotasSiFaltan($programa->estudiante_programa_id, $row);
         }
 
         $this->estudiantesCache[$carnet] = $programas;
 
         return $programas;
+    }
+
+    /**
+     * 🆕 NUEVO: Generar cuotas si el programa no tiene ninguna
+     */
+    private function generarCuotasSiFaltan(int $estudianteProgramaId, ?array $row)
+    {
+        if (!$row) {
+            return;
+        }
+
+        // Verificar si ya tiene cuotas en caché
+        if (isset($this->cuotasPorEstudianteCache[$estudianteProgramaId])) {
+            $cuotas = $this->cuotasPorEstudianteCache[$estudianteProgramaId];
+            if ($cuotas->count() > 0) {
+                return; // Ya tiene cuotas
+            }
+        } else {
+            $cantidad = DB::table('cuotas_programa_estudiante')
+                ->where('estudiante_programa_id', $estudianteProgramaId)
+                ->count();
+
+            if ($cantidad > 0) {
+                return; // Ya tiene cuotas
+            }
+        }
+
+        Log::warning("⚠️ Programa sin cuotas, generando desde Excel", [
+            'estudiante_programa_id' => $estudianteProgramaId
+        ]);
+
+        $estudiantePrograma = \App\Models\EstudiantePrograma::find($estudianteProgramaId);
+
+        if ($estudiantePrograma) {
+            $cuotasGeneradas = $this->estudianteService->generarCuotasSiNoExisten(
+                $estudiantePrograma,
+                $row,
+                $this->uploaderId
+            );
+
+            if ($cuotasGeneradas > 0) {
+                // Limpiar caché para forzar recarga
+                unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+                                Log::info("✅ Cuotas generadas exitosamente", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'cantidad' => $cuotasGeneradas
+                ]);
+            }
+        }
     }
 
     private function obtenerCuotasDelPrograma(int $estudianteProgramaId)
