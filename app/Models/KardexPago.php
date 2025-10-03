@@ -65,7 +65,13 @@ class KardexPago extends Model
             }
 
             if (!empty($model->banco_normalizado) && !empty($model->numero_boleta_normalizada)) {
-                $model->boleta_fingerprint = hash('sha256', $model->banco_normalizado.'|'.$model->numero_boleta_normalizada);
+                // Include estudiante_programa_id and fecha_pago to make fingerprint truly unique per payment
+                $estudiante = $model->estudiante_programa_id ?? 'UNKNOWN';
+                $fecha = $model->fecha_pago ? 
+                    (is_string($model->fecha_pago) ? $model->fecha_pago : $model->fecha_pago->format('Y-m-d')) : 
+                    'UNKNOWN';
+                $model->boleta_fingerprint = hash('sha256', 
+                    $model->banco_normalizado.'|'.$model->numero_boleta_normalizada.'|'.$estudiante.'|'.$fecha);
             }
 
             // Nota: archivo_hash se setea en el controller con hash_file() ANTES de mover el archivo.
