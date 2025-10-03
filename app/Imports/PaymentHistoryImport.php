@@ -196,10 +196,34 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'tipos' => $erroresPorTipo->map(function ($errores, $tipo) {
                     return [
                         'cantidad' => $errores->count(),
-                        'ejemplos' => $errores->take(3)->pluck('error')->toArray()
+                        'ejemplos' => $errores->take(3)->map(function($error) {
+                            $details = ['mensaje' => $error['error'] ?? 'Error desconocido'];
+                            if (isset($error['carnet'])) $details['carnet'] = $error['carnet'];
+                            if (isset($error['fila'])) $details['fila'] = $error['fila'];
+                            if (isset($error['boleta'])) $details['boleta'] = $error['boleta'];
+                            if (isset($error['cantidad_pagos_afectados'])) $details['pagos_afectados'] = $error['cantidad_pagos_afectados'];
+                            if (isset($error['solucion'])) $details['solucion'] = $error['solucion'];
+                            return $details;
+                        })->toArray()
                     ];
                 })->toArray()
             ]);
+            
+            // Log detailed breakdown for each error type
+            foreach ($erroresPorTipo as $tipo => $errores) {
+                Log::warning("🔍 Detalle de {$tipo}", [
+                    'total' => $errores->count(),
+                    'descripcion' => $this->getErrorTypeDescription($tipo),
+                    'primeros_5_casos' => $errores->take(5)->map(function($error) {
+                        return [
+                            'carnet' => $error['carnet'] ?? 'N/A',
+                            'fila' => $error['fila'] ?? 'N/A',
+                            'mensaje' => $error['error'] ?? 'Sin descripción',
+                            'pagos_afectados' => $error['cantidad_pagos_afectados'] ?? 1
+                        ];
+                    })->toArray()
+                ]);
+            }
         }
 
         // 📊 Resumen de advertencias si las hay
@@ -238,12 +262,16 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'diferencias_monto' => collect($this->advertencias)->where('tipo', 'DIFERENCIA_MONTO')->count()
         ]);
 
+        $erroresCollection = collect($this->errores);
         Log::info('❌ ERRORES', [
             'total' => count($this->errores),
-            'estudiantes_no_encontrados' => collect($this->errores)->where('tipo', 'ESTUDIANTE_NO_ENCONTRADO')->count(),
-            'programas_no_identificados' => collect($this->errores)->where('tipo', 'PROGRAMA_NO_IDENTIFICADO')->count(),
-            'datos_incompletos' => collect($this->errores)->where('tipo', 'DATOS_INCOMPLETOS')->count(),
-            'errores_procesamiento' => collect($this->errores)->where('tipo', 'ERROR_PROCESAMIENTO_PAGO')->count()
+            'estudiantes_no_encontrados' => $erroresCollection->where('tipo', 'ESTUDIANTE_NO_ENCONTRADO')->count(),
+            'programas_no_identificados' => $erroresCollection->where('tipo', 'PROGRAMA_NO_IDENTIFICADO')->count(),
+            'datos_incompletos' => $erroresCollection->where('tipo', 'DATOS_INCOMPLETOS')->count(),
+            'errores_procesamiento_pago' => $erroresCollection->where('tipo', 'ERROR_PROCESAMIENTO_PAGO')->count(),
+            'errores_procesamiento_estudiante' => $erroresCollection->where('tipo', 'ERROR_PROCESAMIENTO_ESTUDIANTE')->count(),
+            'archivo_vacio' => $erroresCollection->where('tipo', 'ARCHIVO_VACIO')->count(),
+            'estructura_invalida' => $erroresCollection->where('tipo', 'ESTRUCTURA_INVALIDA')->count()
         ]);
 
         Log::info('=' . str_repeat('=', 80));
@@ -1144,7 +1172,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'carnet' => $carnet
             ]);
 
-            $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($row, $this->uploaderId);
+            // Convert Collection to array if needed
+            $rowArray = $row instanceof Collection ? $row->toArray() : $row;
+            $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($rowArray, $this->uploaderId);
 
             if ($programaCreado) {
                 $this->estudiantesCache[$carnet] = collect([$programaCreado]);
@@ -1184,7 +1214,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'prospecto_id' => $prospecto->id
             ]);
 
-            $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($row, $this->uploaderId);
+            // Convert Collection to array if needed
+            $rowArray = $row instanceof Collection ? $row->toArray() : $row;
+            $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($rowArray, $this->uploaderId);
 
             if ($programaCreado) {
                 $this->estudiantesCache[$carnet] = collect([$programaCreado]);
@@ -1548,5 +1580,23 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ]);
             return null;
         }
+    }
+
+    /**
+     * Get a human-readable description for error types
+     */
+    private function getErrorTypeDescription(string $tipo): string
+    {
+        $descriptions = [
+            'ERROR_PROCESAMIENTO_ESTUDIANTE' => 'Error crítico al procesar estudiante (posible error de tipo de datos o configuración)',
+            'ERROR_PROCESAMIENTO_PAGO' => 'Error al procesar un pago individual',
+            'ESTUDIANTE_NO_ENCONTRADO' => 'No se encontró el estudiante en el sistema y no se pudo crear',
+            'PROGRAMA_NO_IDENTIFICADO' => 'No se pudo identificar o crear el programa del estudiante',
+            'DATOS_INCOMPLETOS' => 'Faltan datos requeridos en la fila del Excel',
+            'ARCHIVO_VACIO' => 'El archivo Excel no contiene datos',
+            'ESTRUCTURA_INVALIDA' => 'El archivo no tiene la estructura de columnas esperada'
+        ];
+        
+        return $descriptions[$tipo] ?? 'Error no categorizado';
     }
 }

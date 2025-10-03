@@ -152,4 +152,22 @@ class PaymentHistoryImportTest extends TestCase
         $this->assertIsArray($mockRow->toArray());
         $this->assertInstanceOf(Collection::class, $mockRow);
     }
+
+    public function test_get_error_type_description_returns_proper_descriptions()
+    {
+        $import = $this->getImportInstance();
+        
+        $reflection = new \ReflectionMethod($import, 'getErrorTypeDescription');
+        $reflection->setAccessible(true);
+        
+        // Test known error types
+        $this->assertStringContainsString('Error crítico', $reflection->invoke($import, 'ERROR_PROCESAMIENTO_ESTUDIANTE'));
+        $this->assertStringContainsString('Error al procesar un pago', $reflection->invoke($import, 'ERROR_PROCESAMIENTO_PAGO'));
+        $this->assertStringContainsString('No se encontró el estudiante', $reflection->invoke($import, 'ESTUDIANTE_NO_ENCONTRADO'));
+        $this->assertStringContainsString('programa', $reflection->invoke($import, 'PROGRAMA_NO_IDENTIFICADO'));
+        $this->assertStringContainsString('datos requeridos', $reflection->invoke($import, 'DATOS_INCOMPLETOS'));
+        
+        // Test unknown error type
+        $this->assertEquals('Error no categorizado', $reflection->invoke($import, 'UNKNOWN_ERROR_TYPE'));
+    }
 }
