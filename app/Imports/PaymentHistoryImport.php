@@ -1303,7 +1303,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         Log::info("🔍 PASO 1: Buscando prospecto por carnet", ['carnet' => $carnet]);
 
         $prospecto = DB::table('prospectos')
-            ->where(DB::raw("REPLACE(UPPER(carnet), ' ', '')"), '=', $carnet)
+            ->where('carnet', '=', $carnet)
             ->first();
 
         // 🔥 NUEVO: Si no existe prospecto, crearlo
