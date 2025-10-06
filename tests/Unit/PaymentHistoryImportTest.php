@@ -14,6 +14,31 @@ class PaymentHistoryImportTest extends TestCase
         return new PaymentHistoryImport(1); // Use dummy user ID
     }
 
+    protected function getImportInstanceWithReplace()
+    {
+        return new PaymentHistoryImport(1, 'cardex_directo', true); // With modoReemplazoPendientes enabled
+    }
+
+    public function test_constructor_accepts_modo_reemplazo_pendientes()
+    {
+        $import = new PaymentHistoryImport(1, 'cardex_directo', true);
+        
+        $reflection = new \ReflectionProperty($import, 'modoReemplazoPendientes');
+        $reflection->setAccessible(true);
+        
+        $this->assertTrue($reflection->getValue($import));
+    }
+
+    public function test_constructor_defaults_modo_reemplazo_to_false()
+    {
+        $import = new PaymentHistoryImport(1);
+        
+        $reflection = new \ReflectionProperty($import, 'modoReemplazoPendientes');
+        $reflection->setAccessible(true);
+        
+        $this->assertFalse($reflection->getValue($import));
+    }
+
     public function test_normalizar_carnet_removes_spaces_and_uppercases()
     {
         $import = $this->getImportInstance();
