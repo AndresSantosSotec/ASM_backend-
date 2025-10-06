@@ -7,6 +7,7 @@ ini_set('memory_limit', '2048M'); // 1 GB
 ini_set('max_execution_time', '1500'); // 10 minutos
 
 use App\Services\EstudianteService;
+use App\Services\PaymentReplaceService;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
@@ -42,15 +43,27 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     // 🆕 NUEVO: Servicio de estudiantes
     private EstudianteService $estudianteService;
 
-    public function __construct(int $uploaderId, string $tipoArchivo = 'cardex_directo')
-    {
+    // 🆕 NUEVO: Modos de operación
+    private bool $modoReemplazoPendientes = false;
+    private bool $modoReemplazo = false;
+
+    public function __construct(
+        int $uploaderId, 
+        string $tipoArchivo = 'cardex_directo',
+        bool $modoReemplazoPendientes = false,
+        bool $modoReemplazo = false
+    ) {
         $this->uploaderId = $uploaderId;
         $this->tipoArchivo = $tipoArchivo;
+        $this->modoReemplazoPendientes = $modoReemplazoPendientes;
+        $this->modoReemplazo = $modoReemplazo;
         $this->estudianteService = new EstudianteService();
 
         Log::info('📦 PaymentHistoryImport Constructor', [
             'uploaderId' => $uploaderId,
             'tipoArchivo' => $tipoArchivo,
+            'modoReemplazoPendientes' => $modoReemplazoPendientes,
+            'modoReemplazo' => $modoReemplazo,
             'timestamp' => now()->toDateTimeString()
         ]);
     }
@@ -102,6 +115,53 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'total_carnets' => $pagosPorCarnet->count(),
             'carnets_muestra' => $pagosPorCarnet->keys()->take(5)->toArray()
         ]);
+
+        // 🔥 NUEVO: Modo Reemplazo Total (purge + rebuild)
+        if ($this->modoReemplazo) {
+            Log::info('🔄 MODO REEMPLAZO ACTIVO: Se eliminará y reconstruirá todo para cada estudiante');
+            
+            $replaceService = new PaymentReplaceService();
+            
+            foreach ($pagosPorCarnet as $carnet => $pagosEstudiante) {
+                $carnetNorm = $this->normalizarCarnet($carnet);
+                
+                Log::info("🔄 [Reemplazo] Procesando carnet {$carnetNorm}", [
+                    'cantidad_pagos' => $pagosEstudiante->count()
+                ]);
+                
+                try {
+                    // Resolver programas con auto-creación si no existen
+                    $resolver = function (string $carnetN, $row) {
+                        return $this->obtenerProgramasEstudiante($carnetN, $row);
+                    };
+                    
+                    $replaceService->purgeAndRebuildForCarnet(
+                        $resolver,
+                        $carnetNorm,
+                        $pagosEstudiante,
+                        $this->uploaderId
+                    );
+                    
+                    Log::info("✅ [Reemplazo] Carnet {$carnetNorm} listo para importación", [
+                        'cantidad_pagos' => $pagosEstudiante->count()
+                    ]);
+                } catch (\Throwable $ex) {
+                    Log::error("❌ [Reemplazo] Error en carnet {$carnetNorm}", [
+                        'error' => $ex->getMessage(),
+                        'trace' => array_slice(explode("\n", $ex->getTraceAsString()), 0, 3)
+                    ]);
+                    
+                    $this->errores[] = [
+                        'tipo' => 'ERROR_REEMPLAZO',
+                        'carnet' => $carnetNorm,
+                        'error' => 'Error al purgar y reconstruir cuotas: ' . $ex->getMessage(),
+                        'cantidad_pagos_afectados' => $pagosEstudiante->count()
+                    ];
+                }
+            }
+            
+            Log::info('✅ Modo reemplazo completado, iniciando procesamiento normal de pagos');
+        }
 
         // ✅ Procesar cada estudiante
         foreach ($pagosPorCarnet as $carnet => $pagosEstudiante) {
@@ -679,6 +739,138 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
     }
 
+    /**
+     * 🆕 Método para reemplazar cuota pendiente con pago
+     * Solo se activa cuando modoReemplazoPendientes = true
+     */
+    private function reemplazarCuotaPendiente(
+        int $estudianteProgramaId,
+        Carbon $fechaPago,
+        float $montoPago,
+        float $mensualidadAprobada,
+        int $numeroFila
+    ) {
+        Log::info("🔄 Modo reemplazo activo: buscando cuota pendiente para reemplazar", [
+            'estudiante_programa_id' => $estudianteProgramaId,
+            'fila' => $numeroFila,
+            'monto_pago' => $montoPago,
+            'mensualidad_aprobada' => $mensualidadAprobada
+        ]);
+
+        $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
+            ->where('estado', 'pendiente')
+            ->sortBy('fecha_vencimiento');
+
+        if ($cuotasPendientes->isEmpty()) {
+            Log::info("⚠️ No hay cuotas pendientes para reemplazar", [
+                'estudiante_programa_id' => $estudianteProgramaId
+            ]);
+            return null;
+        }
+
+        // PRIORIDAD 1: Por mensualidad aprobada
+        if ($mensualidadAprobada > 0) {
+            $tolerancia = max(100, $mensualidadAprobada * 0.50);
+            $cuota = $cuotasPendientes->first(function ($c) use ($mensualidadAprobada, $tolerancia) {
+                $diferencia = abs($c->monto - $mensualidadAprobada);
+                return $diferencia <= $tolerancia;
+            });
+
+            if ($cuota) {
+                Log::info("✅ Cuota pendiente encontrada por mensualidad aprobada", [
+                    'cuota_id' => $cuota->id,
+                    'numero_cuota' => $cuota->numero_cuota,
+                    'monto_cuota' => $cuota->monto,
+                    'mensualidad_aprobada' => $mensualidadAprobada
+                ]);
+
+                // Actualizar cuota a "pagado"
+                $cuota->update([
+                    'estado' => 'pagado',
+                    'paid_at' => $fechaPago,
+                ]);
+
+                // Limpiar caché para forzar recarga
+                unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+                Log::info("🔄 Reemplazando cuota pendiente con pago", [
+                    'cuota_id' => $cuota->id,
+                    'estado_anterior' => 'pendiente',
+                    'estado_nuevo' => 'pagado',
+                    'fecha_pago' => $fechaPago->toDateString()
+                ]);
+
+                return $cuota;
+            }
+        }
+
+        // PRIORIDAD 2: Por monto de pago
+        $tolerancia = max(100, $montoPago * 0.50);
+        $cuota = $cuotasPendientes->first(function ($c) use ($montoPago, $tolerancia) {
+            $diferencia = abs($c->monto - $montoPago);
+            return $diferencia <= $tolerancia;
+        });
+
+        if ($cuota) {
+            Log::info("✅ Cuota pendiente encontrada por monto de pago", [
+                'cuota_id' => $cuota->id,
+                'numero_cuota' => $cuota->numero_cuota,
+                'monto_cuota' => $cuota->monto,
+                'monto_pago' => $montoPago
+            ]);
+
+            // Actualizar cuota a "pagado"
+            $cuota->update([
+                'estado' => 'pagado',
+                'paid_at' => $fechaPago,
+            ]);
+
+            // Limpiar caché para forzar recarga
+            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+            Log::info("🔄 Reemplazando cuota pendiente con pago", [
+                'cuota_id' => $cuota->id,
+                'estado_anterior' => 'pendiente',
+                'estado_nuevo' => 'pagado',
+                'fecha_pago' => $fechaPago->toDateString()
+            ]);
+
+            return $cuota;
+        }
+
+        // PRIORIDAD 3: Primera cuota pendiente
+        $cuota = $cuotasPendientes->first();
+
+        if ($cuota) {
+            Log::info("✅ Usando primera cuota pendiente disponible", [
+                'cuota_id' => $cuota->id,
+                'numero_cuota' => $cuota->numero_cuota,
+                'monto_cuota' => $cuota->monto,
+                'monto_pago' => $montoPago
+            ]);
+
+            // Actualizar cuota a "pagado"
+            $cuota->update([
+                'estado' => 'pagado',
+                'paid_at' => $fechaPago,
+            ]);
+
+            // Limpiar caché para forzar recarga
+            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+            Log::info("🔄 Reemplazando cuota pendiente con pago", [
+                'cuota_id' => $cuota->id,
+                'estado_anterior' => 'pendiente',
+                'estado_nuevo' => 'pagado',
+                'fecha_pago' => $fechaPago->toDateString()
+            ]);
+
+            return $cuota;
+        }
+
+        return null;
+    }
+
     private function buscarCuotaFlexible(
         int $estudianteProgramaId,
         Carbon $fechaPago,
@@ -686,6 +878,27 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         float $mensualidadAprobada,
         int $numeroFila
     ) {
+        // 🔄 NUEVO: Si modo reemplazo de pendientes está activo, buscar y reemplazar cuota pendiente
+        if ($this->modoReemplazoPendientes) {
+            $cuotaReemplazada = $this->reemplazarCuotaPendiente(
+                $estudianteProgramaId,
+                $fechaPago,
+                $montoPago,
+                $mensualidadAprobada,
+                $numeroFila
+            );
+            
+            if ($cuotaReemplazada) {
+                return $cuotaReemplazada;
+            }
+            
+            // Si no se encontró cuota para reemplazar, continuar con lógica normal
+            Log::info("⚠️ No se encontró cuota pendiente para reemplazar, usando lógica normal", [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'fila' => $numeroFila
+            ]);
+        }
+
         $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
             ->where('estado', 'pendiente')
             ->sortBy('fecha_vencimiento');
@@ -1442,6 +1655,19 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     private function generarCuotasSiFaltan(int $estudianteProgramaId, ?array $row = null)
     {
         try {
+            // 🔥 NUEVO: Verificar si ya existen cuotas para evitar duplicados
+            $cuotasExistentes = DB::table('cuotas_programa_estudiante')
+                ->where('estudiante_programa_id', $estudianteProgramaId)
+                ->count();
+
+            if ($cuotasExistentes > 0) {
+                Log::info("⚠️ Ya existen cuotas para este programa, saltando generación", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'cantidad_cuotas_existentes' => $cuotasExistentes
+                ]);
+                return false;
+            }
+
             // Obtener datos del estudiante_programa
             $estudiantePrograma = DB::table('estudiante_programa')
                 ->where('id', $estudianteProgramaId)
