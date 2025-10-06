@@ -18,12 +18,42 @@ class PaymentHistoryImportTest extends TestCase
     {
         return new PaymentHistoryImport(1, 'cardex_directo', true); // With modoReemplazoPendientes enabled
     }
+    
+    protected function getImportInstanceSilent()
+    {
+        return new PaymentHistoryImport(1, 'cardex_directo', false, true); // With modoSilencioso enabled
+    }
+    
+    protected function getImportInstanceForced()
+    {
+        return new PaymentHistoryImport(1, 'cardex_directo', false, false, true); // With modoInsercionForzada enabled
+    }
 
     public function test_constructor_accepts_modo_reemplazo_pendientes()
     {
         $import = new PaymentHistoryImport(1, 'cardex_directo', true);
         
         $reflection = new \ReflectionProperty($import, 'modoReemplazoPendientes');
+        $reflection->setAccessible(true);
+        
+        $this->assertTrue($reflection->getValue($import));
+    }
+    
+    public function test_constructor_accepts_modo_silencioso()
+    {
+        $import = new PaymentHistoryImport(1, 'cardex_directo', false, true);
+        
+        $reflection = new \ReflectionProperty($import, 'modoSilencioso');
+        $reflection->setAccessible(true);
+        
+        $this->assertTrue($reflection->getValue($import));
+    }
+    
+    public function test_constructor_accepts_modo_insercion_forzada()
+    {
+        $import = new PaymentHistoryImport(1, 'cardex_directo', false, false, true);
+        
+        $reflection = new \ReflectionProperty($import, 'modoInsercionForzada');
         $reflection->setAccessible(true);
         
         $this->assertTrue($reflection->getValue($import));
@@ -37,6 +67,40 @@ class PaymentHistoryImportTest extends TestCase
         $reflection->setAccessible(true);
         
         $this->assertFalse($reflection->getValue($import));
+    }
+    
+    public function test_constructor_defaults_modo_silencioso_to_false()
+    {
+        $import = new PaymentHistoryImport(1);
+        
+        $reflection = new \ReflectionProperty($import, 'modoSilencioso');
+        $reflection->setAccessible(true);
+        
+        $this->assertFalse($reflection->getValue($import));
+    }
+    
+    public function test_constructor_defaults_modo_insercion_forzada_to_false()
+    {
+        $import = new PaymentHistoryImport(1);
+        
+        $reflection = new \ReflectionProperty($import, 'modoInsercionForzada');
+        $reflection->setAccessible(true);
+        
+        $this->assertFalse($reflection->getValue($import));
+    }
+    
+    public function test_constructor_initializes_time_metrics()
+    {
+        $import = new PaymentHistoryImport(1);
+        
+        $reflectionTime = new \ReflectionProperty($import, 'tiempoInicio');
+        $reflectionTime->setAccessible(true);
+        
+        $reflectionMemory = new \ReflectionProperty($import, 'memoryInicio');
+        $reflectionMemory->setAccessible(true);
+        
+        $this->assertGreaterThan(0, $reflectionTime->getValue($import));
+        $this->assertGreaterThan(0, $reflectionMemory->getValue($import));
     }
 
     public function test_normalizar_carnet_removes_spaces_and_uppercases()
