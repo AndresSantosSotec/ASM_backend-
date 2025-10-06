@@ -312,7 +312,7 @@ class EstudianteService
 
     private function parseFechaInicio(array $row): Carbon
     {
-        // Prioridad: mes_inicio > fecha_pago > ahora
+        // Prioridad: mes_inicio > fecha_pago > fecha predeterminada (2020-04-01)
         if (!empty($row['mes_inicio'])) {
             try {
                 return Carbon::parse($row['mes_inicio'])->startOfMonth();
@@ -323,13 +323,16 @@ class EstudianteService
 
         if (!empty($row['fecha_pago'])) {
             try {
+                // Usar la primera fecha de pago como fecha de inicio
                 return Carbon::parse($row['fecha_pago'])->startOfMonth();
             } catch (\Exception $e) {
                 Log::warning("⚠️ Error parseando fecha_pago", ['valor' => $row['fecha_pago']]);
             }
         }
 
-        return now()->startOfMonth();
+        // Si no hay fecha de inicio ni fecha de pago, usar fecha predeterminada
+        // en lugar de now() para mantener consistencia en migraciones históricas
+        return Carbon::parse('2020-04-01')->startOfMonth();
     }
 
     private function normalizeCarnet(?string $carnet): string

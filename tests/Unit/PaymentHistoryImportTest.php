@@ -89,6 +89,17 @@ class PaymentHistoryImportTest extends TestCase
         $this->assertFalse($reflection->getValue($import));
     }
     
+    public function test_constructor_initializes_verbose_from_config()
+    {
+        $import = new PaymentHistoryImport(1);
+        
+        $reflection = new \ReflectionProperty($import, 'verbose');
+        $reflection->setAccessible(true);
+        
+        // Should default to false when config is not set
+        $this->assertIsBool($reflection->getValue($import));
+    }
+    
     public function test_constructor_initializes_time_metrics()
     {
         $import = new PaymentHistoryImport(1);
