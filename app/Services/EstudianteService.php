@@ -185,9 +185,11 @@ class EstudianteService
 
     private function findOrCreateProspecto(string $carnet, array $row, int $uploaderId): Prospecto
     {
-        $nombreEstudiante = trim($row['nombre_estudiante'] ?? 'Desconocido');
+        $nombreEstudiante = trim($row['nombre_estudiante'] ?? 'SIN NOMBRE');
         $telefono = $row['telefono'] ?? '00000000';
-        $correo = $row['email'] ?? $this->defaultEmail($carnet);
+        $correo = $row['email'] ?? $row['correo'] ?? $this->defaultEmail($carnet);
+        $genero = $row['genero'] ?? 'Masculino';
+        $pais = $row['pais'] ?? 'Guatemala';
 
         $prospecto = Prospecto::where('carnet', $carnet)->first();
 
@@ -199,7 +201,7 @@ class EstudianteService
             return $prospecto;
         }
 
-        // Crear nuevo prospecto
+        // Crear nuevo prospecto con valores por defecto seguros
         $prospecto = Prospecto::create([
             'carnet' => $carnet,
             'nombre_completo' => $nombreEstudiante,
@@ -208,13 +210,17 @@ class EstudianteService
             'fecha' => now()->toDateString(),
             'activo' => true,
             'status' => 'Inscrito',
+            'genero' => $genero,
+            'pais_origen' => $pais,
             'created_by' => $uploaderId,
         ]);
 
         Log::info("✅ Prospecto creado desde pago histórico", [
             'carnet' => $carnet,
             'prospecto_id' => $prospecto->id,
-            'nombre' => $nombreEstudiante
+            'nombre' => $nombreEstudiante,
+            'genero' => $genero,
+            'pais' => $pais
         ]);
 
         return $prospecto;
@@ -341,6 +347,6 @@ class EstudianteService
 
     private function defaultEmail(string $carnet): string
     {
-        return 'sin-email-' . Str::slug($carnet) . '@example.com';
+        return 'sin-correo-' . strtolower($carnet) . '@example.com';
     }
 }
