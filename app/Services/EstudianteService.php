@@ -80,7 +80,12 @@ class EstudianteService
     {
         $codigoNormalizado = $this->normalizeProgramaCodigo($planEstudios);
 
-        if (!$codigoNormalizado) {
+        // 🛑 SKIP: No actualizar si el plan de estudios es TEMP
+        if (!$codigoNormalizado || strtoupper($codigoNormalizado) === self::DEFAULT_PROGRAM_ABBR) {
+            Log::info("⏭️ Saltando actualización: plan_estudios inválido o es TEMP", [
+                'plan_estudios' => $planEstudios,
+                'codigo_normalizado' => $codigoNormalizado
+            ]);
             return false;
         }
 
@@ -90,6 +95,15 @@ class EstudianteService
             Log::warning("⚠️ No se encontró programa real para código", [
                 'plan_estudios' => $planEstudios,
                 'codigo_normalizado' => $codigoNormalizado
+            ]);
+            return false;
+        }
+
+        // 🛑 SKIP: No actualizar si el programa encontrado también es TEMP
+        if (strtoupper($programaReal->abreviatura) === self::DEFAULT_PROGRAM_ABBR) {
+            Log::info("⏭️ Saltando actualización: programa destino también es TEMP", [
+                'plan_estudios' => $planEstudios,
+                'programa_id' => $programaReal->id
             ]);
             return false;
         }
