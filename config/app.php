@@ -146,6 +146,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Import Verbose Mode
+    |--------------------------------------------------------------------------
+    |
+    | This option controls whether detailed logging is enabled during payment
+    | history imports. When set to false (production default), only errors
+    | and warnings are logged. Set to true in development to see detailed
+    | import progress logs.
+    |
+    */
+
+    'import_verbose' => env('IMPORT_VERBOSE', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Autoloaded Service Providers
     |--------------------------------------------------------------------------
     |
