@@ -52,6 +52,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     // 🆕 NUEVO: Modo inserción forzada (crear registros sin validación completa)
     private bool $modoInsercionForzada = false;
     
+    // 🆕 NUEVO: Modo verbose para logging detallado
+    private bool $verbose = false;
+    
     // 🆕 NUEVO: Métricas de tiempo y memoria
     private float $tiempoInicio = 0;
     private int $memoryInicio = 0;
@@ -69,6 +72,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $this->modoReemplazoPendientes = $modoReemplazoPendientes;
         $this->modoSilencioso = $modoSilencioso;
         $this->modoInsercionForzada = $modoInsercionForzada;
+        $this->verbose = config('app.import_verbose', false);
         $this->estudianteService = new EstudianteService();
         
         // Iniciar medición de tiempo y memoria
