@@ -3,8 +3,8 @@
 namespace App\Imports;
 
 // ✅ AGREGAR ESTAS LÍNEAS AL INICIO
-ini_set('memory_limit', '2048M'); // 1 GB
-ini_set('max_execution_time', '1500'); // 10 minutos
+ini_set('memory_limit', '4096M'); // 1 GB
+ini_set('max_execution_time', '0'); // 10 minutos
 
 use App\Services\EstudianteService;
 use Illuminate\Support\Collection;
