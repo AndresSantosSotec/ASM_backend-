@@ -519,7 +519,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'cantidad_pagos_afectados' => $pagos->count(),
                 'solucion' => 'Verifica los datos del Excel y que el carnet sea válido'
             ];
-            Log::warning("⚠️ Estudiante no encontrado/creado: {$carnetNormalizado}");
+            if ($this->verbose) {
+                Log::warning("⚠️ Estudiante no encontrado/creado: {$carnetNormalizado}");
+            }
             return;
         }
 
@@ -709,12 +711,15 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 );
 
                 if (!$cuota) {
-                    Log::warning("⚠️ No se encontró cuota pendiente para este pago", [
-                        'fila' => $numeroFila,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                        'fecha_pago' => $fechaPago->toDateString(),
-                        'monto' => $monto
-                    ]);
+                    // Solo loguear en modo verbose - mantener silencioso en producción
+                    if ($this->verbose) {
+                        Log::warning("⚠️ No se encontró cuota pendiente para este pago", [
+                            'fila' => $numeroFila,
+                            'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                            'fecha_pago' => $fechaPago->toDateString(),
+                            'monto' => $monto
+                        ]);
+                    }
 
                     $this->advertencias[] = [
                         'tipo' => 'SIN_CUOTA',
@@ -1195,14 +1200,17 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $this->pagosParciales++;
             $this->totalDiscrepancias += $discrepancia;
 
-            Log::warning("⚠️ PAGO PARCIAL DETECTADO", [
-                'fila' => $numeroFila,
-                'cuota_id' => $cuotaParcial->id,
-                'monto_cuota' => $cuotaParcial->monto,
-                'monto_pagado' => $montoPago,
-                'diferencia' => round($discrepancia, 2),
-                'porcentaje_pagado' => round(($montoPago / $cuotaParcial->monto) * 100, 2)
-            ]);
+            // Solo loguear en modo verbose
+            if ($this->verbose) {
+                Log::warning("⚠️ PAGO PARCIAL DETECTADO", [
+                    'fila' => $numeroFila,
+                    'cuota_id' => $cuotaParcial->id,
+                    'monto_cuota' => $cuotaParcial->monto,
+                    'monto_pagado' => $montoPago,
+                    'diferencia' => round($discrepancia, 2),
+                    'porcentaje_pagado' => round(($montoPago / $cuotaParcial->monto) * 100, 2)
+                ]);
+            }
 
             $this->advertencias[] = [
                 'tipo' => 'PAGO_PARCIAL',
@@ -1235,15 +1243,18 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         if ($cuotaToleranciaExtrema) {
             $diferencia = abs($cuotaToleranciaExtrema->monto - $montoPago);
 
-            Log::warning("⚠️ Cuota encontrada con tolerancia extrema (100%)", [
-                'cuota_id' => $cuotaToleranciaExtrema->id,
-                'monto_cuota' => $cuotaToleranciaExtrema->monto,
-                'monto_pago' => $montoPago,
-                'diferencia' => round($diferencia, 2),
-                'porcentaje_diferencia' => $cuotaToleranciaExtrema->monto > 0
-                    ? round(($diferencia / $cuotaToleranciaExtrema->monto) * 100, 2)
-                    : 0
-            ]);
+            // Solo loguear en modo verbose
+            if ($this->verbose) {
+                Log::warning("⚠️ Cuota encontrada con tolerancia extrema (100%)", [
+                    'cuota_id' => $cuotaToleranciaExtrema->id,
+                    'monto_cuota' => $cuotaToleranciaExtrema->monto,
+                    'monto_pago' => $montoPago,
+                    'diferencia' => round($diferencia, 2),
+                    'porcentaje_diferencia' => $cuotaToleranciaExtrema->monto > 0
+                        ? round(($diferencia / $cuotaToleranciaExtrema->monto) * 100, 2)
+                        : 0
+                ]);
+            }
 
             $this->advertencias[] = [
                 'tipo' => 'DIFERENCIA_MONTO_EXTREMA',
@@ -1268,13 +1279,16 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         if ($primeraCuota) {
             $diferencia = abs($primeraCuota->monto - $montoPago);
 
-            Log::warning("⚠️ Usando primera cuota pendiente sin validación de monto (última opción)", [
-                'cuota_id' => $primeraCuota->id,
-                'fecha_vencimiento' => $primeraCuota->fecha_vencimiento,
-                'monto_cuota' => $primeraCuota->monto,
-                'monto_pago' => $montoPago,
-                'diferencia' => round($diferencia, 2)
-            ]);
+            // Solo loguear en modo verbose
+            if ($this->verbose) {
+                Log::warning("⚠️ Usando primera cuota pendiente sin validación de monto (última opción)", [
+                    'cuota_id' => $primeraCuota->id,
+                    'fecha_vencimiento' => $primeraCuota->fecha_vencimiento,
+                    'monto_cuota' => $primeraCuota->monto,
+                    'monto_pago' => $montoPago,
+                    'diferencia' => round($diferencia, 2)
+                ]);
+            }
 
             $this->advertencias[] = [
                 'tipo' => 'CUOTA_FORZADA',
@@ -1680,9 +1694,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
 
         // 🔥 PRIORIDAD 5: Usar el más reciente (última opción)
-        Log::warning("⚠️ No se pudo identificar programa específico, usando el más reciente", [
-            'programas_disponibles' => $programas->count()
-        ]);
+        if ($this->verbose) {
+            Log::warning("⚠️ No se pudo identificar programa específico, usando el más reciente", [
+                'programas_disponibles' => $programas->count()
+            ]);
+        }
         return $programas->first();
     }
 
@@ -1694,10 +1710,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     {
         // 🛑 Prevenir recursión infinita
         if ($recursionDepth > 1) {
-            Log::warning("🛑 LOOP INFINITO PREVENIDO: Profundidad máxima alcanzada", [
-                'carnet' => $carnet,
-                'recursion_depth' => $recursionDepth
-            ]);
+            if ($this->verbose) {
+                Log::warning("🛑 LOOP INFINITO PREVENIDO: Profundidad máxima alcanzada", [
+                    'carnet' => $carnet,
+                    'recursion_depth' => $recursionDepth
+                ]);
+            }
             return $this->estudiantesCache[$carnet] ?? collect([]);
         }
 
@@ -1748,9 +1766,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
 
         if (!$prospecto) {
-            Log::warning("❌ PASO 1 FALLIDO: Prospecto no encontrado y no se pudo crear", [
-                'carnet' => $carnet
-            ]);
+            if ($this->verbose) {
+                Log::warning("❌ PASO 1 FALLIDO: Prospecto no encontrado y no se pudo crear", [
+                    'carnet' => $carnet
+                ]);
+            }
             $this->estudiantesCache[$carnet] = collect([]);
             return collect([]);
         }
@@ -1799,10 +1819,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
 
         if ($estudianteProgramas->isEmpty()) {
-            Log::warning("❌ PASO 2 FALLIDO: No hay programas para este prospecto", [
-                'carnet' => $carnet,
-                'prospecto_id' => $prospecto->id
-            ]);
+            if ($this->verbose) {
+                Log::warning("❌ PASO 2 FALLIDO: No hay programas para este prospecto", [
+                    'carnet' => $carnet,
+                    'prospecto_id' => $prospecto->id
+                ]);
+            }
             $this->estudiantesCache[$carnet] = collect([]);
             return collect([]);
         }
@@ -1975,10 +1997,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
             return $precioPrograma;
         } catch (\Throwable $ex) {
-            Log::warning("⚠️ Error al obtener precio de programa", [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'error' => $ex->getMessage()
-            ]);
+            if ($this->verbose) {
+                Log::warning("⚠️ Error al obtener precio de programa", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'error' => $ex->getMessage()
+                ]);
+            }
             return null;
         }
     }
@@ -2018,9 +2042,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 ->first();
 
             if (!$estudiantePrograma) {
-                Log::warning("⚠️ No se encontró estudiante_programa", [
-                    'estudiante_programa_id' => $estudianteProgramaId
-                ]);
+                if ($this->verbose) {
+                    Log::warning("⚠️ No se encontró estudiante_programa", [
+                        'estudiante_programa_id' => $estudianteProgramaId
+                    ]);
+                }
                 return false;
             }
 
@@ -2074,12 +2100,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
             // Validar que tengamos los datos mínimos
             if ($numCuotas <= 0 || $cuotaMensual <= 0) {
-                Log::warning("⚠️ No se pueden generar cuotas: datos insuficientes", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'num_cuotas' => $numCuotas,
-                    'cuota_mensual' => $cuotaMensual,
-                    'programa_codigo' => $estudiantePrograma->programa_codigo ?? 'N/A'
-                ]);
+                if ($this->verbose) {
+                    Log::warning("⚠️ No se pueden generar cuotas: datos insuficientes", [
+                        'estudiante_programa_id' => $estudianteProgramaId,
+                        'num_cuotas' => $numCuotas,
+                        'cuota_mensual' => $cuotaMensual,
+                        'programa_codigo' => $estudiantePrograma->programa_codigo ?? 'N/A'
+                    ]);
+                }
                 return false;
             }
 
@@ -2274,11 +2302,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
             return $resultado;
         } catch (\Exception $e) {
-            Log::warning('⚠️ Error normalizando fecha', [
-                'fecha' => $fecha,
-                'tipo' => gettype($fecha),
-                'error' => $e->getMessage()
-            ]);
+            if ($this->verbose) {
+                Log::warning('⚠️ Error normalizando fecha', [
+                    'fecha' => $fecha,
+                    'tipo' => gettype($fecha),
+                    'error' => $e->getMessage()
+                ]);
+            }
             return null;
         }
     }
