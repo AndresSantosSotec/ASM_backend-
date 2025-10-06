@@ -45,23 +45,24 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     // 🆕 NUEVO: Modo reemplazo de cuotas pendientes
     private bool $modoReemplazoPendientes = false;
 
-    
+
     // 🆕 NUEVO: Modo silencioso (solo errores críticos)
     private bool $modoSilencioso = false;
-    
+
     // 🆕 NUEVO: Modo inserción forzada (crear registros sin validación completa)
     private bool $modoInsercionForzada = false;
-    
+
     // 🆕 NUEVO: Métricas de tiempo y memoria
     private float $tiempoInicio = 0;
     private int $memoryInicio = 0;
 
     public function __construct(
-        int $uploaderId, 
-        string $tipoArchivo = 'cardex_directo', 
+        int $uploaderId,
+        string $tipoArchivo = 'cardex_directo',
         bool $modoReemplazoPendientes = false,
         bool $modoSilencioso = false,
-        bool $modoInsercionForzada = false
+        bool $modoInsercionForzada = false,
+        bool $verbose = false
     ) {
 
         $this->uploaderId = $uploaderId;
@@ -69,22 +70,24 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $this->modoReemplazoPendientes = $modoReemplazoPendientes;
         $this->modoSilencioso = $modoSilencioso;
         $this->modoInsercionForzada = $modoInsercionForzada;
+        $this->verbose = $verbose;
         $this->estudianteService = new EstudianteService();
-        
+
         // Iniciar medición de tiempo y memoria
         $this->tiempoInicio = microtime(true);
         $this->memoryInicio = memory_get_usage();
 
-        if (!$this->modoSilencioso) {
-            Log::info('📦 PaymentHistoryImport Constructor', [
-                'uploaderId' => $uploaderId,
-                'tipoArchivo' => $tipoArchivo,
-                'modoReemplazoPendientes' => $modoReemplazoPendientes,
-                'modoSilencioso' => $modoSilencioso,
-                'modoInsercionForzada' => $modoInsercionForzada,
-                'timestamp' => now()->toDateTimeString()
-            ]);
-        }
+    if (!$this->modoSilencioso) {
+        Log::info('📦 PaymentHistoryImport Constructor', [
+            'uploaderId' => $uploaderId,
+            'tipoArchivo' => $tipoArchivo,
+            'modoReemplazoPendientes' => $modoReemplazoPendientes,
+            'modoSilencioso' => $modoSilencioso,
+            'modoInsercionForzada' => $modoInsercionForzada,
+            'verbose' => $verbose,
+            'timestamp' => now()->toDateTimeString()
+        ]);
+    }
     }
 
     public function collection(Collection $rows)
@@ -121,13 +124,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'columnas_encontradas' => $validacionColumnas['encontradas'],
                 'solucion' => 'Asegúrate de que el archivo tenga todas las columnas requeridas en la primera fila'
             ];
-            
+
             if (!$this->modoSilencioso) {
                 Log::error('❌ Estructura de columnas inválida', [
                     'faltantes' => $validacionColumnas['faltantes']
                 ]);
             }
-            
+
             return;
         }
 
@@ -149,11 +152,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $carnetsProcesados = 0;
         $tamanioBloque = 500;
         $totalCarnets = $pagosPorCarnet->count();
-        
+
         // ✅ Procesar cada estudiante
         foreach ($pagosPorCarnet as $carnet => $pagosEstudiante) {
             $carnetsProcesados++;
-            
+
             try {
                 $this->procesarPagosDeEstudiante($carnet, $pagosEstudiante);
             } catch (\Throwable $ex) {
@@ -171,12 +174,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'cantidad_pagos_afectados' => $pagosEstudiante->count()
                 ];
             }
-            
+
             // 🆕 NUEVO: Limpiar cachés cada 500 carnets
             if ($carnetsProcesados % $tamanioBloque === 0) {
                 $this->estudiantesCache = [];
                 $this->cuotasPorEstudianteCache = [];
-                
+
                 if (!$this->modoSilencioso) {
                     $porcentaje = round(($carnetsProcesados / $totalCarnets) * 100, 1);
                     Log::info("📊 Progreso: {$carnetsProcesados}/{$totalCarnets} carnets ({$porcentaje}%)", [
@@ -187,7 +190,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 }
             }
         }
-        
+
         // 🆕 NUEVO: Calcular métricas de tiempo y memoria
         $tiempoTotal = microtime(true) - $this->tiempoInicio;
         $memoriaUsada = memory_get_usage() - $this->memoryInicio;
@@ -210,12 +213,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'monto_total' => 'Q' . number_format($this->totalAmount, 2)
             ]);
             Log::info('=' . str_repeat('=', 80));
-            
+
             // Advertencia si el proceso es muy lento
             if ($promedioPorFila > 0.5) {
                 Log::warning("⚠️ ADVERTENCIA: Proceso lento detectado (>{$promedioPorFila}s por fila)");
             }
-            
+
             // Advertencia de memoria si está cercano al límite
             $memoryLimit = ini_get('memory_limit');
             $memoriaActual = memory_get_usage();
@@ -492,7 +495,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                         'carnet' => $carnetNormalizado
                     ]);
                 }
-                
+
                 // Procesar pagos sin estudiante/programa (inserción forzada)
                 foreach ($pagos as $i => $pago) {
                     $numeroFila = $pago['fila_origen'] ?? ($i + 2);
@@ -507,7 +510,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 }
                 return;
             }
-            
+
             $this->errores[] = [
                 'tipo' => 'ESTUDIANTE_NO_ENCONTRADO',
                 'carnet' => $carnetNormalizado,
@@ -827,7 +830,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             // Don't re-throw - allow processing to continue with next payment
         }
     }
-    
+
     /**
      * 🆕 NUEVO: Insertar pago forzado sin validación completa
      * Usado cuando no existe estudiante, programa o cuota
@@ -843,7 +846,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $fechaPago = $this->normalizarFecha($row['fecha_pago'] ?? null);
             $banco = trim((string)($row['banco'] ?? 'EFECTIVO'));
             $concepto = trim((string)($row['concepto'] ?? 'Migración histórica'));
-            
+
             // Validaciones mínimas
             if (empty($boleta) || $monto <= 0 || !$fechaPago) {
                 $this->advertencias[] = [
@@ -854,14 +857,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 ];
                 return;
             }
-            
+
             // Crear placeholder temporal de estudiante_programa si no existe
             $estudianteProgramaTemp = $this->crearPlaceholderEstudiantePrograma($carnet, $nombreEstudiante);
-            
+
             if (!$estudianteProgramaTemp) {
                 throw new \Exception("No se pudo crear placeholder temporal para carnet {$carnet}");
             }
-            
+
             DB::transaction(function () use (
                 $estudianteProgramaTemp,
                 $boleta,
@@ -879,7 +882,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $kardexExistente = KardexPago::where('numero_boleta', $boleta)
                     ->where('estudiante_programa_id', $estudianteProgramaTemp->id)
                     ->first();
-                
+
                 if ($kardexExistente) {
                     $this->advertencias[] = [
                         'tipo' => 'DUPLICADO',
@@ -889,7 +892,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     ];
                     return;
                 }
-                
+
                 // Crear observaciones con información del motivo
                 $observaciones = sprintf(
                     "FORZADO: Pago migrado sin validación completa (motivo: %s) | Estudiante: %s | Fila: %d | Carnet: %s",
@@ -898,7 +901,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     $numeroFila,
                     $carnet
                 );
-                
+
                 // Crear kardex sin cuota asignada
                 $kardex = KardexPago::create([
                     'estudiante_programa_id' => $estudianteProgramaTemp->id,
@@ -911,11 +914,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'estado_pago' => 'aprobado',
                     'observaciones' => $observaciones,
                 ]);
-                
+
                 $this->kardexCreados++;
                 $this->totalAmount += $monto;
                 $this->procesados++;
-                
+
                 $this->advertencias[] = [
                     'tipo' => 'INSERCION_FORZADA',
                     'fila' => $numeroFila,
@@ -924,7 +927,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'motivo' => $motivo,
                     'carnet' => $carnet
                 ];
-                
+
                 $this->detalles[] = [
                     'accion' => 'pago_forzado',
                     'fila' => $numeroFila,
@@ -937,7 +940,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'fecha_pago' => $fechaPago->toDateString(),
                     'motivo' => $motivo
                 ];
-                
+
                 if (!$this->modoSilencioso) {
                     Log::warning("⚠️ Pago forzado creado", [
                         'fila' => $numeroFila,
@@ -952,7 +955,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'error' => $ex->getMessage(),
                 'trace' => array_slice(explode("\n", $ex->getTraceAsString()), 0, 3)
             ]);
-            
+
             $this->errores[] = [
                 'tipo' => 'ERROR_INSERCION_FORZADA',
                 'fila' => $numeroFila,
@@ -960,7 +963,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ];
         }
     }
-    
+
     /**
      * 🆕 NUEVO: Crear placeholder temporal de estudiante_programa
      */
@@ -971,7 +974,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $prospecto = DB::table('prospectos')
                 ->where('carnet', $carnet)
                 ->first();
-            
+
             if (!$prospecto) {
                 $prospectoId = DB::table('prospectos')->insertGetId([
                     'carnet' => $carnet,
@@ -985,12 +988,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             } else {
                 $prospectoId = $prospecto->id;
             }
-            
+
             // Buscar programa TEMP
             $programaTemp = DB::table('tb_programas')
                 ->where('abreviatura', 'TEMP')
                 ->first();
-            
+
             if (!$programaTemp) {
                 // Crear programa TEMP si no existe
                 $programaTempId = DB::table('tb_programas')->insertGetId([
@@ -1003,13 +1006,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             } else {
                 $programaTempId = $programaTemp->id;
             }
-            
+
             // Buscar o crear estudiante_programa temporal
             $estudiantePrograma = DB::table('estudiante_programa')
                 ->where('prospecto_id', $prospectoId)
                 ->where('programa_id', $programaTempId)
                 ->first();
-            
+
             if (!$estudiantePrograma) {
                 $estudianteProgramaId = DB::table('estudiante_programa')->insertGetId([
                     'prospecto_id' => $prospectoId,
@@ -1020,14 +1023,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
-                
+
                 $estudiantePrograma = (object)[
                     'id' => $estudianteProgramaId,
                     'prospecto_id' => $prospectoId,
                     'programa_id' => $programaTempId
                 ];
             }
-            
+
             return $estudiantePrograma;
         } catch (\Throwable $ex) {
             Log::error("❌ Error creando placeholder temporal", [
@@ -1054,7 +1057,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $mensualidadAprobada,
                 $numeroFila
             );
-            
+
             if ($cuotaReemplazada) {
                 return $cuotaReemplazada;
             }
@@ -1831,7 +1834,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         // 🔥 NUEVO: Actualizar programas TEMP a reales si el Excel tiene plan_estudios
         if ($row && !empty($row['plan_estudios'])) {
             $planEstudios = strtoupper(trim($row['plan_estudios']));
-            
+
             // 🛑 SKIP: No intentar actualizar si el Excel también tiene TEMP
             if ($planEstudios === 'TEMP') {
                 if ($this->verbose) {
@@ -1982,7 +1985,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     /**
      * 🆕 Generar cuotas automáticamente cuando no existen
      * Similar a la lógica de InscripcionesImport
-     * 
+     *
      * Mejoras:
      * - Soporte para programas TEMP con cuotas dinámicas
      * - Generación de cuota 0 (inscripción) si aplica
@@ -2039,7 +2042,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                         'programa_codigo' => $estudiantePrograma->programa_codigo
                     ]);
                 }
-                
+
                 // Para TEMP, usar valores por defecto si no hay datos
                 if ($numCuotas <= 0) {
                     $numCuotas = 12; // Default razonable para TEMP
@@ -2055,7 +2058,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 if ($precioPrograma) {
                     $numCuotas = $numCuotas > 0 ? $numCuotas : ($precioPrograma->meses ?? 12);
                     $cuotaMensual = $cuotaMensual > 0 ? $cuotaMensual : ($precioPrograma->cuota_mensual ?? 0);
-                    
+
                     // 🆕 Obtener inscripción si está disponible
                     if ($precioPrograma->inscripcion > 0) {
                         $inscripcion = $precioPrograma->inscripcion;
@@ -2092,7 +2095,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
             // Generar las cuotas
             $cuotas = [];
-            
+
             // 🆕 CUOTA 0 (Inscripción) si aplica
             if ($inscripcion && $inscripcion > 0) {
                 $cuotas[] = [
@@ -2104,14 +2107,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'created_at' => now(),
                     'updated_at' => now(),
                 ];
-                
+
                 if ($this->verbose) {
                     Log::info("✅ Cuota 0 (Inscripción) agregada", [
                         'monto' => $inscripcion
                     ]);
                 }
             }
-            
+
             // Cuotas 1..N (cuotas mensuales)
             for ($i = 1; $i <= $numCuotas; $i++) {
                 $fechaVencimiento = Carbon::parse($fechaInicio)
