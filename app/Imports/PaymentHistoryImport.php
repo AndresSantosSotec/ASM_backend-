@@ -3,8 +3,8 @@
 namespace App\Imports;
 
 // ✅ AGREGAR ESTAS LÍNEAS AL INICIO
-ini_set('memory_limit', '4096M'); // 1 GB
-ini_set('max_execution_time', '0'); // 10 minutos
+ini_set('memory_limit', '2048M'); // 1 GB
+ini_set('max_execution_time', '1500'); // 10 minutos
 
 use App\Services\EstudianteService;
 use Illuminate\Support\Collection;
@@ -42,67 +42,29 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     // 🆕 NUEVO: Servicio de estudiantes
     private EstudianteService $estudianteService;
 
-    // 🆕 NUEVO: Modo reemplazo de cuotas pendientes
-    private bool $modoReemplazoPendientes = false;
-
-    
-    // 🆕 NUEVO: Modo silencioso (solo errores críticos)
-    private bool $modoSilencioso = false;
-    
-    // 🆕 NUEVO: Modo inserción forzada (crear registros sin validación completa)
-    private bool $modoInsercionForzada = false;
-    
-    // 🆕 NUEVO: Modo verbose para logging detallado
-    private bool $verbose = false;
-    
-    // 🆕 NUEVO: Métricas de tiempo y memoria
-    private float $tiempoInicio = 0;
-    private int $memoryInicio = 0;
-
-    public function __construct(
-        int $uploaderId, 
-        string $tipoArchivo = 'cardex_directo', 
-        bool $modoReemplazoPendientes = false,
-        bool $modoSilencioso = false,
-        bool $modoInsercionForzada = false
-    ) {
-
+    public function __construct(int $uploaderId, string $tipoArchivo = 'cardex_directo')
+    {
         $this->uploaderId = $uploaderId;
         $this->tipoArchivo = $tipoArchivo;
-        $this->modoReemplazoPendientes = $modoReemplazoPendientes;
-        $this->modoSilencioso = $modoSilencioso;
-        $this->modoInsercionForzada = $modoInsercionForzada;
-        $this->verbose = config('app.import_verbose', false);
         $this->estudianteService = new EstudianteService();
-        
-        // Iniciar medición de tiempo y memoria
-        $this->tiempoInicio = microtime(true);
-        $this->memoryInicio = memory_get_usage();
 
-        if (!$this->modoSilencioso) {
-            Log::info('📦 PaymentHistoryImport Constructor', [
-                'uploaderId' => $uploaderId,
-                'tipoArchivo' => $tipoArchivo,
-                'modoReemplazoPendientes' => $modoReemplazoPendientes,
-                'modoSilencioso' => $modoSilencioso,
-                'modoInsercionForzada' => $modoInsercionForzada,
-                'timestamp' => now()->toDateTimeString()
-            ]);
-        }
+        Log::info('📦 PaymentHistoryImport Constructor', [
+            'uploaderId' => $uploaderId,
+            'tipoArchivo' => $tipoArchivo,
+            'timestamp' => now()->toDateTimeString()
+        ]);
     }
 
     public function collection(Collection $rows)
     {
         $this->totalRows = $rows->count();
 
-        if (!$this->modoSilencioso) {
-            Log::info('=== 🚀 INICIANDO PROCESAMIENTO ===', [
-                'total_rows' => $this->totalRows,
-                'primera_fila' => $rows->first()?->toArray(),
-                'columnas_detectadas' => $rows->first() ? array_keys($rows->first()->toArray()) : [],
-                'timestamp' => now()->toDateTimeString()
-            ]);
-        }
+        Log::info('=== 🚀 INICIANDO PROCESAMIENTO ===', [
+            'total_rows' => $this->totalRows,
+            'primera_fila' => $rows->first()?->toArray(),
+            'columnas_detectadas' => $rows->first() ? array_keys($rows->first()->toArray()) : [],
+            'timestamp' => now()->toDateTimeString()
+        ]);
 
         // ✅ Validar que haya datos
         if ($this->totalRows === 0) {
@@ -125,39 +87,24 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'columnas_encontradas' => $validacionColumnas['encontradas'],
                 'solucion' => 'Asegúrate de que el archivo tenga todas las columnas requeridas en la primera fila'
             ];
-            
-            if (!$this->modoSilencioso) {
-                Log::error('❌ Estructura de columnas inválida', [
-                    'faltantes' => $validacionColumnas['faltantes']
-                ]);
-            }
-            
+            Log::error('❌ Estructura de columnas inválida', [
+                'faltantes' => $validacionColumnas['faltantes']
+            ]);
             return;
         }
 
-        if (!$this->modoSilencioso) {
-            Log::info('✅ Estructura del Excel validada correctamente');
-        }
+        Log::info('✅ Estructura del Excel validada correctamente');
 
         // ✅ Agrupar por carnet para procesamiento ordenado
         $pagosPorCarnet = $rows->groupBy('carnet');
 
-        if (!$this->modoSilencioso) {
-            Log::info('📊 Pagos agrupados por carnet', [
-                'total_carnets' => $pagosPorCarnet->count(),
-                'carnets_muestra' => $pagosPorCarnet->keys()->take(5)->toArray()
-            ]);
-        }
+        Log::info('📊 Pagos agrupados por carnet', [
+            'total_carnets' => $pagosPorCarnet->count(),
+            'carnets_muestra' => $pagosPorCarnet->keys()->take(5)->toArray()
+        ]);
 
-        // 🆕 NUEVO: Procesamiento por bloques de 500 filas
-        $carnetsProcesados = 0;
-        $tamanioBloque = 500;
-        $totalCarnets = $pagosPorCarnet->count();
-        
         // ✅ Procesar cada estudiante
         foreach ($pagosPorCarnet as $carnet => $pagosEstudiante) {
-            $carnetsProcesados++;
-            
             try {
                 $this->procesarPagosDeEstudiante($carnet, $pagosEstudiante);
             } catch (\Throwable $ex) {
@@ -175,216 +122,159 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'cantidad_pagos_afectados' => $pagosEstudiante->count()
                 ];
             }
-            
-            // 🆕 NUEVO: Limpiar cachés cada 500 carnets
-            if ($carnetsProcesados % $tamanioBloque === 0) {
-                $this->estudiantesCache = [];
-                $this->cuotasPorEstudianteCache = [];
-                
-                if (!$this->modoSilencioso) {
-                    $porcentaje = round(($carnetsProcesados / $totalCarnets) * 100, 1);
-                    Log::info("📊 Progreso: {$carnetsProcesados}/{$totalCarnets} carnets ({$porcentaje}%)", [
-                        'kardex_creados' => $this->kardexCreados,
-                        'errores' => count($this->errores),
-                        'memoria_mb' => round(memory_get_usage() / 1024 / 1024, 2)
-                    ]);
-                }
-            }
         }
-        
-        // 🆕 NUEVO: Calcular métricas de tiempo y memoria
-        $tiempoTotal = microtime(true) - $this->tiempoInicio;
-        $memoriaUsada = memory_get_usage() - $this->memoryInicio;
-        $promedioPorFila = $this->totalRows > 0 ? $tiempoTotal / $this->totalRows : 0;
 
-        // 🆕 NUEVO: Resumen compacto o detallado según modo
-        if ($this->modoSilencioso) {
-            // Modo silencioso: solo métricas principales
-            Log::info('=' . str_repeat('=', 80));
-            Log::info('🎯 RESUMEN FINAL DE IMPORTACIÓN (MODO SILENCIOSO)');
-            Log::info('=' . str_repeat('=', 80));
-            Log::info('Métricas', [
-                'total_procesados' => $this->procesados,
-                'exitosos' => $this->kardexCreados,
-                'con_advertencias' => count($this->advertencias),
-                'con_errores' => count($this->errores),
-                'tiempo_total_seg' => round($tiempoTotal, 2),
-                'promedio_por_fila_seg' => round($promedioPorFila, 4),
-                'memoria_usada_mb' => round($memoriaUsada / 1024 / 1024, 2),
-                'monto_total' => 'Q' . number_format($this->totalAmount, 2)
-            ]);
-            Log::info('=' . str_repeat('=', 80));
-            
-            // Advertencia si el proceso es muy lento
-            if ($promedioPorFila > 0.5) {
-                Log::warning("⚠️ ADVERTENCIA: Proceso lento detectado (>{$promedioPorFila}s por fila)");
-            }
-            
-            // Advertencia de memoria si está cercano al límite
-            $memoryLimit = ini_get('memory_limit');
-            $memoriaActual = memory_get_usage();
-            if ($memoriaActual > 7 * 1024 * 1024 * 1024) { // > 7GB
-                Log::warning("⚠️ ADVERTENCIA: Uso de memoria elevado. Considere aumentar memory_limit", [
-                    'memoria_actual_mb' => round($memoriaActual / 1024 / 1024, 2),
-                    'memory_limit' => $memoryLimit
-                ]);
-            }
-        } else {
-            // Modo normal: log detallado completo
-            Log::info('=== ✅ PROCESAMIENTO COMPLETADO ===', [
-                'total_rows' => $this->totalRows,
-                'procesados' => $this->procesados,
-                'kardex_creados' => $this->kardexCreados,
-                'cuotas_actualizadas' => $this->cuotasActualizadas,
-                'conciliaciones' => $this->conciliaciones,
-                'total_monto' => round($this->totalAmount, 2),
-                'pagos_parciales' => $this->pagosParciales,
-                'total_discrepancias' => round($this->totalDiscrepancias, 2),
-                'errores' => count($this->errores),
-                'advertencias' => count($this->advertencias),
-                'tiempo_total_seg' => round($tiempoTotal, 2),
-                'promedio_por_fila_seg' => round($promedioPorFila, 4),
-                'timestamp' => now()->toDateTimeString()
+        Log::info('=== ✅ PROCESAMIENTO COMPLETADO ===', [
+            'total_rows' => $this->totalRows,
+            'procesados' => $this->procesados,
+            'kardex_creados' => $this->kardexCreados,
+            'cuotas_actualizadas' => $this->cuotasActualizadas,
+            'conciliaciones' => $this->conciliaciones,
+            'total_monto' => round($this->totalAmount, 2),
+            'pagos_parciales' => $this->pagosParciales,
+            'total_discrepancias' => round($this->totalDiscrepancias, 2),
+            'errores' => count($this->errores),
+            'advertencias' => count($this->advertencias),
+            'timestamp' => now()->toDateTimeString()
+        ]);
+
+        // 🆕 NUEVO: Resumen de registros exitosos
+        if (!empty($this->detalles)) {
+            Log::info('📊 RESUMEN DE REGISTROS IMPORTADOS EXITOSAMENTE', [
+                'total_exitosos' => count($this->detalles),
+                'monto_total_procesado' => 'Q' . number_format($this->totalAmount, 2)
             ]);
 
-            // 🆕 NUEVO: Resumen de registros exitosos
-            if (!empty($this->detalles)) {
-                Log::info('📊 RESUMEN DE REGISTROS IMPORTADOS EXITOSAMENTE', [
-                    'total_exitosos' => count($this->detalles),
-                    'monto_total_procesado' => 'Q' . number_format($this->totalAmount, 2)
-                ]);
+            // Agrupar por programa
+            $porPrograma = collect($this->detalles)->groupBy('programa');
 
-                // Agrupar por programa
-                $porPrograma = collect($this->detalles)->groupBy('programa');
+            foreach ($porPrograma as $programa => $registros) {
+                $montoPrograma = collect($registros)->sum('monto');
 
-                foreach ($porPrograma as $programa => $registros) {
-                    $montoPrograma = collect($registros)->sum('monto');
-
-                    Log::info("✅ Programa: {$programa}", [
-                        'cantidad_pagos' => $registros->count(),
-                        'monto_total' => 'Q' . number_format($montoPrograma, 2),
-                        'pagos' => collect($registros)->map(function ($detalle) {
-                            return [
-                                'fila' => $detalle['fila'],
-                                'carnet' => $detalle['carnet'],
-                                'nombre' => $detalle['nombre'],
-                                'kardex_id' => $detalle['kardex_id'],
-                                'cuota_id' => $detalle['cuota_id'] ?? 'SIN CUOTA',
-                                'monto' => 'Q' . number_format($detalle['monto'], 2),
-                                'fecha' => $detalle['fecha_pago']
-                            ];
-                        })->toArray()
-                    ]);
-                }
-
-                // 🆕 Resumen por estudiante
-                $porEstudiante = collect($this->detalles)->groupBy('carnet');
-
-                Log::info('📋 RESUMEN POR ESTUDIANTE', [
-                    'total_estudiantes_procesados' => $porEstudiante->count()
-                ]);
-
-                foreach ($porEstudiante as $carnet => $registros) {
-                    $montoEstudiante = collect($registros)->sum('monto');
-
-                    Log::info("👤 Estudiante: {$carnet}", [
-                        'nombre' => $registros->first()['nombre'] ?? 'N/A',
-                        'cantidad_pagos' => $registros->count(),
-                        'monto_total' => 'Q' . number_format($montoEstudiante, 2),
-                        'programa' => $registros->first()['programa'] ?? 'N/A',
-                        'kardex_ids_creados' => collect($registros)->pluck('kardex_id')->toArray()
-                    ]);
-                }
-            }
-
-            // 📊 Resumen detallado de errores si los hay
-            if (!empty($this->errores)) {
-                $erroresPorTipo = collect($this->errores)->groupBy('tipo');
-                Log::warning('📊 RESUMEN DE ERRORES POR TIPO', [
-                    'total_errores' => count($this->errores),
-                    'tipos' => $erroresPorTipo->map(function ($errores, $tipo) {
+                Log::info("✅ Programa: {$programa}", [
+                    'cantidad_pagos' => $registros->count(),
+                    'monto_total' => 'Q' . number_format($montoPrograma, 2),
+                    'pagos' => collect($registros)->map(function ($detalle) {
                         return [
-                            'cantidad' => $errores->count(),
-                            'ejemplos' => $errores->take(3)->map(function ($error) {
-                                $details = ['mensaje' => $error['error'] ?? 'Error desconocido'];
-                                if (isset($error['carnet'])) $details['carnet'] = $error['carnet'];
-                                if (isset($error['fila'])) $details['fila'] = $error['fila'];
-                                if (isset($error['boleta'])) $details['boleta'] = $error['boleta'];
-                                if (isset($error['cantidad_pagos_afectados'])) $details['pagos_afectados'] = $error['cantidad_pagos_afectados'];
-                                if (isset($error['solucion'])) $details['solucion'] = $error['solucion'];
-                                return $details;
-                            })->toArray()
-                        ];
-                    })->toArray()
-                ]);
-
-                // Log detailed breakdown for each error type
-                foreach ($erroresPorTipo as $tipo => $errores) {
-                    Log::warning("🔍 Detalle de {$tipo}", [
-                        'total' => $errores->count(),
-                        'descripcion' => $this->getErrorTypeDescription($tipo),
-                        'primeros_5_casos' => $errores->take(5)->map(function ($error) {
-                            return [
-                                'carnet' => $error['carnet'] ?? 'N/A',
-                                'fila' => $error['fila'] ?? 'N/A',
-                                'mensaje' => $error['error'] ?? 'Sin descripción',
-                                'pagos_afectados' => $error['cantidad_pagos_afectados'] ?? 1
-                            ];
-                        })->toArray()
-                    ]);
-                }
-            }
-
-            // 📊 Resumen de advertencias si las hay
-            if (!empty($this->advertencias)) {
-                $advertenciasPorTipo = collect($this->advertencias)->groupBy('tipo');
-                Log::info('📊 RESUMEN DE ADVERTENCIAS POR TIPO', [
-                    'total_advertencias' => count($this->advertencias),
-                    'tipos' => $advertenciasPorTipo->map(function ($advertencias, $tipo) {
-                        return [
-                            'cantidad' => $advertencias->count()
+                            'fila' => $detalle['fila'],
+                            'carnet' => $detalle['carnet'],
+                            'nombre' => $detalle['nombre'],
+                            'kardex_id' => $detalle['kardex_id'],
+                            'cuota_id' => $detalle['cuota_id'] ?? 'SIN CUOTA',
+                            'monto' => 'Q' . number_format($detalle['monto'], 2),
+                            'fecha' => $detalle['fecha_pago']
                         ];
                     })->toArray()
                 ]);
             }
 
-            // 🆕 NUEVO: Resumen final consolidado
-            Log::info('=' . str_repeat('=', 80));
-            Log::info('🎯 RESUMEN FINAL DE IMPORTACIÓN');
-            Log::info('=' . str_repeat('=', 80));
-            Log::info('✅ EXITOSOS', [
-                'filas_procesadas' => $this->procesados,
-                'kardex_creados' => $this->kardexCreados,
-                'cuotas_actualizadas' => $this->cuotasActualizadas,
-                'conciliaciones_creadas' => $this->conciliaciones,
-                'monto_total' => 'Q' . number_format($this->totalAmount, 2),
-                'porcentaje_exito' => $this->totalRows > 0
-                    ? round(($this->procesados / $this->totalRows) * 100, 2) . '%'
-                    : '0%'
+            // 🆕 Resumen por estudiante
+            $porEstudiante = collect($this->detalles)->groupBy('carnet');
+
+            Log::info('📋 RESUMEN POR ESTUDIANTE', [
+                'total_estudiantes_procesados' => $porEstudiante->count()
             ]);
 
-            Log::info('⚠️ ADVERTENCIAS', [
-                'total' => count($this->advertencias),
-                'sin_cuota' => collect($this->advertencias)->where('tipo', 'SIN_CUOTA')->count(),
-                'duplicados' => collect($this->advertencias)->where('tipo', 'DUPLICADO')->count(),
-                'pagos_parciales' => $this->pagosParciales,
-                'diferencias_monto' => collect($this->advertencias)->where('tipo', 'DIFERENCIA_MONTO')->count()
-            ]);
+            foreach ($porEstudiante as $carnet => $registros) {
+                $montoEstudiante = collect($registros)->sum('monto');
 
-            $erroresCollection = collect($this->errores);
-            Log::info('❌ ERRORES', [
-                'total' => count($this->errores),
-                'estudiantes_no_encontrados' => $erroresCollection->where('tipo', 'ESTUDIANTE_NO_ENCONTRADO')->count(),
-                'programas_no_identificados' => $erroresCollection->where('tipo', 'PROGRAMA_NO_IDENTIFICADO')->count(),
-                'datos_incompletos' => $erroresCollection->where('tipo', 'DATOS_INCOMPLETOS')->count(),
-                'errores_procesamiento_pago' => $erroresCollection->where('tipo', 'ERROR_PROCESAMIENTO_PAGO')->count(),
-                'errores_procesamiento_estudiante' => $erroresCollection->where('tipo', 'ERROR_PROCESAMIENTO_ESTUDIANTE')->count(),
-                'archivo_vacio' => $erroresCollection->where('tipo', 'ARCHIVO_VACIO')->count(),
-                'estructura_invalida' => $erroresCollection->where('tipo', 'ESTRUCTURA_INVALIDA')->count()
-            ]);
-
-            Log::info('=' . str_repeat('=', 80));
+                Log::info("👤 Estudiante: {$carnet}", [
+                    'nombre' => $registros->first()['nombre'] ?? 'N/A',
+                    'cantidad_pagos' => $registros->count(),
+                    'monto_total' => 'Q' . number_format($montoEstudiante, 2),
+                    'programa' => $registros->first()['programa'] ?? 'N/A',
+                    'kardex_ids_creados' => collect($registros)->pluck('kardex_id')->toArray()
+                ]);
+            }
         }
+
+        // 📊 Resumen detallado de errores si los hay
+        if (!empty($this->errores)) {
+            $erroresPorTipo = collect($this->errores)->groupBy('tipo');
+            Log::warning('📊 RESUMEN DE ERRORES POR TIPO', [
+                'total_errores' => count($this->errores),
+                'tipos' => $erroresPorTipo->map(function ($errores, $tipo) {
+                    return [
+                        'cantidad' => $errores->count(),
+                        'ejemplos' => $errores->take(3)->map(function ($error) {
+                            $details = ['mensaje' => $error['error'] ?? 'Error desconocido'];
+                            if (isset($error['carnet'])) $details['carnet'] = $error['carnet'];
+                            if (isset($error['fila'])) $details['fila'] = $error['fila'];
+                            if (isset($error['boleta'])) $details['boleta'] = $error['boleta'];
+                            if (isset($error['cantidad_pagos_afectados'])) $details['pagos_afectados'] = $error['cantidad_pagos_afectados'];
+                            if (isset($error['solucion'])) $details['solucion'] = $error['solucion'];
+                            return $details;
+                        })->toArray()
+                    ];
+                })->toArray()
+            ]);
+
+            // Log detailed breakdown for each error type
+            foreach ($erroresPorTipo as $tipo => $errores) {
+                Log::warning("🔍 Detalle de {$tipo}", [
+                    'total' => $errores->count(),
+                    'descripcion' => $this->getErrorTypeDescription($tipo),
+                    'primeros_5_casos' => $errores->take(5)->map(function ($error) {
+                        return [
+                            'carnet' => $error['carnet'] ?? 'N/A',
+                            'fila' => $error['fila'] ?? 'N/A',
+                            'mensaje' => $error['error'] ?? 'Sin descripción',
+                            'pagos_afectados' => $error['cantidad_pagos_afectados'] ?? 1
+                        ];
+                    })->toArray()
+                ]);
+            }
+        }
+
+        // 📊 Resumen de advertencias si las hay
+        if (!empty($this->advertencias)) {
+            $advertenciasPorTipo = collect($this->advertencias)->groupBy('tipo');
+            Log::info('📊 RESUMEN DE ADVERTENCIAS POR TIPO', [
+                'total_advertencias' => count($this->advertencias),
+                'tipos' => $advertenciasPorTipo->map(function ($advertencias, $tipo) {
+                    return [
+                        'cantidad' => $advertencias->count()
+                    ];
+                })->toArray()
+            ]);
+        }
+
+        // 🆕 NUEVO: Resumen final consolidado
+        Log::info('=' . str_repeat('=', 80));
+        Log::info('🎯 RESUMEN FINAL DE IMPORTACIÓN');
+        Log::info('=' . str_repeat('=', 80));
+        Log::info('✅ EXITOSOS', [
+            'filas_procesadas' => $this->procesados,
+            'kardex_creados' => $this->kardexCreados,
+            'cuotas_actualizadas' => $this->cuotasActualizadas,
+            'conciliaciones_creadas' => $this->conciliaciones,
+            'monto_total' => 'Q' . number_format($this->totalAmount, 2),
+            'porcentaje_exito' => $this->totalRows > 0
+                ? round(($this->procesados / $this->totalRows) * 100, 2) . '%'
+                : '0%'
+        ]);
+
+        Log::info('⚠️ ADVERTENCIAS', [
+            'total' => count($this->advertencias),
+            'sin_cuota' => collect($this->advertencias)->where('tipo', 'SIN_CUOTA')->count(),
+            'duplicados' => collect($this->advertencias)->where('tipo', 'DUPLICADO')->count(),
+            'pagos_parciales' => $this->pagosParciales,
+            'diferencias_monto' => collect($this->advertencias)->where('tipo', 'DIFERENCIA_MONTO')->count()
+        ]);
+
+        $erroresCollection = collect($this->errores);
+        Log::info('❌ ERRORES', [
+            'total' => count($this->errores),
+            'estudiantes_no_encontrados' => $erroresCollection->where('tipo', 'ESTUDIANTE_NO_ENCONTRADO')->count(),
+            'programas_no_identificados' => $erroresCollection->where('tipo', 'PROGRAMA_NO_IDENTIFICADO')->count(),
+            'datos_incompletos' => $erroresCollection->where('tipo', 'DATOS_INCOMPLETOS')->count(),
+            'errores_procesamiento_pago' => $erroresCollection->where('tipo', 'ERROR_PROCESAMIENTO_PAGO')->count(),
+            'errores_procesamiento_estudiante' => $erroresCollection->where('tipo', 'ERROR_PROCESAMIENTO_ESTUDIANTE')->count(),
+            'archivo_vacio' => $erroresCollection->where('tipo', 'ARCHIVO_VACIO')->count(),
+            'estructura_invalida' => $erroresCollection->where('tipo', 'ESTRUCTURA_INVALIDA')->count()
+        ]);
+
+        Log::info('=' . str_repeat('=', 80));
     }
 
     /**
@@ -478,40 +368,15 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     {
         $carnetNormalizado = $this->normalizarCarnet($carnet);
 
-        if (!$this->modoSilencioso) {
-            Log::info("=== 👤 PROCESANDO ESTUDIANTE {$carnetNormalizado} ===", [
-                'cantidad_pagos' => $pagos->count()
-            ]);
-        }
+        Log::info("=== 👤 PROCESANDO ESTUDIANTE {$carnetNormalizado} ===", [
+            'cantidad_pagos' => $pagos->count()
+        ]);
 
         // 🔥 CAMBIO: Pasar primer pago como contexto para creación
         $primerPago = $pagos->first();
         $programasEstudiante = $this->obtenerProgramasEstudiante($carnetNormalizado, $primerPago);
 
         if ($programasEstudiante->isEmpty()) {
-            // 🆕 NUEVO: Si modo inserción forzada está activo, crear placeholder temporal
-            if ($this->modoInsercionForzada) {
-                if (!$this->modoSilencioso) {
-                    Log::warning("⚠️ Estudiante no encontrado, creando placeholder temporal en modo forzado", [
-                        'carnet' => $carnetNormalizado
-                    ]);
-                }
-                
-                // Procesar pagos sin estudiante/programa (inserción forzada)
-                foreach ($pagos as $i => $pago) {
-                    $numeroFila = $pago['fila_origen'] ?? ($i + 2);
-                    try {
-                        $this->insertarPagoForzado($pago, $numeroFila, 'Estudiante no encontrado');
-                    } catch (\Throwable $ex) {
-                        Log::error("❌ Error en inserción forzada fila {$numeroFila}", [
-                            'carnet' => $carnetNormalizado,
-                            'error' => $ex->getMessage()
-                        ]);
-                    }
-                }
-                return;
-            }
-            
             $this->errores[] = [
                 'tipo' => 'ESTUDIANTE_NO_ENCONTRADO',
                 'carnet' => $carnetNormalizado,
@@ -523,13 +388,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             return;
         }
 
-        if ($this->verbose) {
-            Log::info("✅ Programas encontrados/creados", [
-                'carnet' => $carnetNormalizado,
-                'cantidad_programas' => $programasEstudiante->count(),
-                'programas' => $programasEstudiante->pluck('nombre_programa', 'estudiante_programa_id')->toArray()
-            ]);
-        }
+        Log::info("✅ Programas encontrados/creados", [
+            'carnet' => $carnetNormalizado,
+            'cantidad_programas' => $programasEstudiante->count(),
+            'programas' => $programasEstudiante->pluck('nombre_programa', 'estudiante_programa_id')->toArray()
+        ]);
 
         // ✅ Ordenar pagos cronológicamente
         $pagosOrdenados = $pagos->sortBy(function ($pago) {
@@ -576,16 +439,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $mesInicio = trim((string)($row['mes_inicio'] ?? ''));
         $mensualidadAprobada = $this->normalizarMonto($row['mensualidad_aprobada'] ?? 0);
 
-        if (!$this->modoSilencioso) {
-            Log::info("📄 Procesando fila {$numeroFila}", [
-                'carnet' => $carnet,
-                'nombre' => $nombreEstudiante,
-                'boleta' => $boleta,
-                'monto' => $monto,
-                'fecha_pago' => $fechaPago?->toDateString(),
-                'mensualidad_aprobada' => $mensualidadAprobada
-            ]);
-        }
+        Log::info("📄 Procesando fila {$numeroFila}", [
+            'carnet' => $carnet,
+            'nombre' => $nombreEstudiante,
+            'boleta' => $boleta,
+            'monto' => $monto,
+            'fecha_pago' => $fechaPago?->toDateString(),
+            'mensualidad_aprobada' => $mensualidadAprobada
+        ]);
 
         // ✅ Validaciones básicas mejoradas
         $validacion = $this->validarDatosPago($boleta, $monto, $fechaPago, $numeroFila);
@@ -638,13 +499,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     ->first();
 
                 if ($kardexExistente) {
-                    if ($this->verbose) {
-                        Log::info("⚠️ Kardex duplicado detectado (por boleta+estudiante)", [
-                            'kardex_id' => $kardexExistente->id,
-                            'boleta' => $boleta,
-                            'estudiante_programa_id' => $programaAsignado->estudiante_programa_id
-                        ]);
-                    }
+                    Log::info("⚠️ Kardex duplicado detectado (por boleta+estudiante)", [
+                        'kardex_id' => $kardexExistente->id,
+                        'boleta' => $boleta,
+                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id
+                    ]);
 
                     $this->advertencias[] = [
                         'tipo' => 'DUPLICADO',
@@ -667,15 +526,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $kardexPorFingerprint = KardexPago::where('boleta_fingerprint', $fingerprint)->first();
 
                 if ($kardexPorFingerprint) {
-                    if ($this->verbose) {
-                        Log::info("⚠️ Kardex duplicado detectado (por fingerprint)", [
-                            'kardex_id' => $kardexPorFingerprint->id,
-                            'fingerprint' => $fingerprint,
-                            'boleta' => $boleta,
-                            'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                            'fecha_pago' => $fechaYmd
-                        ]);
-                    }
+                    Log::info("⚠️ Kardex duplicado detectado (por fingerprint)", [
+                        'kardex_id' => $kardexPorFingerprint->id,
+                        'fingerprint' => $fingerprint,
+                        'boleta' => $boleta,
+                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                        'fecha_pago' => $fechaYmd
+                    ]);
 
                     $this->advertencias[] = [
                         'tipo' => 'DUPLICADO',
@@ -690,15 +547,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 }
 
                 // 🔥 Buscar cuota con lógica flexible
-                if ($this->verbose) {
-                    Log::info("🔍 Buscando cuota para asignar al pago", [
-                        'fila' => $numeroFila,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                        'fecha_pago' => $fechaPago->toDateString(),
-                        'monto' => $monto,
-                        'mensualidad_aprobada' => $mensualidadAprobada
-                    ]);
-                }
+                Log::info("🔍 Buscando cuota para asignar al pago", [
+                    'fila' => $numeroFila,
+                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                    'fecha_pago' => $fechaPago->toDateString(),
+                    'monto' => $monto,
+                    'mensualidad_aprobada' => $mensualidadAprobada
+                ]);
 
                 $cuota = $this->buscarCuotaFlexible(
                     $programaAsignado->estudiante_programa_id,
@@ -726,27 +581,23 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                         'recomendacion' => 'Revisar si las cuotas del programa están correctamente configuradas'
                     ];
                 } else {
-                    if ($this->verbose) {
-                        Log::info("✅ Cuota asignada al pago", [
-                            'fila' => $numeroFila,
-                            'cuota_id' => $cuota->id,
-                            'numero_cuota' => $cuota->numero_cuota,
-                            'monto_cuota' => $cuota->monto
-                        ]);
-                    }
+                    Log::info("✅ Cuota asignada al pago", [
+                        'fila' => $numeroFila,
+                        'cuota_id' => $cuota->id,
+                        'numero_cuota' => $cuota->numero_cuota,
+                        'monto_cuota' => $cuota->monto
+                    ]);
                 }
 
                 // ✅ Crear Kardex con información completa
-                if ($this->verbose) {
-                    Log::info("🔍 Creando registro en kardex_pagos", [
-                        'fila' => $numeroFila,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                        'cuota_id' => $cuota ? $cuota->id : null,
-                        'numero_boleta' => $boleta,
-                        'monto' => $monto,
-                        'banco' => $banco
-                    ]);
-                }
+                Log::info("🔍 Creando registro en kardex_pagos", [
+                    'fila' => $numeroFila,
+                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                    'cuota_id' => $cuota ? $cuota->id : null,
+                    'numero_boleta' => $boleta,
+                    'monto' => $monto,
+                    'banco' => $banco
+                ]);
 
                 $observaciones = sprintf(
                     "%s | Estudiante: %s | Mes: %s | Migración fila %d | Programa: %s",
@@ -772,28 +623,24 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $this->kardexCreados++;
                 $this->totalAmount += $monto;
 
-                if ($this->verbose) {
-                    Log::info("✅ Kardex creado exitosamente", [
-                        'kardex_id' => $kardex->id,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                        'cuota_id' => $cuota ? $cuota->id : 'SIN CUOTA',
-                        'programa' => $programaAsignado->nombre_programa ?? 'N/A',
-                        'numero_boleta' => $boleta,
-                        'monto' => $monto,
-                        'fila' => $numeroFila
-                    ]);
-                }
+                Log::info("✅ Kardex creado exitosamente", [
+                    'kardex_id' => $kardex->id,
+                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                    'cuota_id' => $cuota ? $cuota->id : 'SIN CUOTA',
+                    'programa' => $programaAsignado->nombre_programa ?? 'N/A',
+                    'numero_boleta' => $boleta,
+                    'monto' => $monto,
+                    'fila' => $numeroFila
+                ]);
 
                 // ✅ Actualizar cuota y conciliar si existe cuota
                 if ($cuota) {
                     $this->actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $monto);
                 } else {
-                    if ($this->verbose) {
-                        Log::info("⏭️ Saltando actualización de cuota (no se asignó cuota)", [
-                            'kardex_id' => $kardex->id,
-                            'fila' => $numeroFila
-                        ]);
-                    }
+                    Log::info("⏭️ Saltando actualización de cuota (no se asignó cuota)", [
+                        'kardex_id' => $kardex->id,
+                        'fila' => $numeroFila
+                    ]);
                 }
 
                 $this->procesados++;
@@ -831,216 +678,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             // Don't re-throw - allow processing to continue with next payment
         }
     }
-    
-    /**
-     * 🆕 NUEVO: Insertar pago forzado sin validación completa
-     * Usado cuando no existe estudiante, programa o cuota
-     */
-    private function insertarPagoForzado($row, int $numeroFila, string $motivo)
-    {
-        try {
-            // Extraer datos básicos
-            $carnet = $this->normalizarCarnet($row['carnet'] ?? 'DESCONOCIDO');
-            $nombreEstudiante = trim($row['nombre_estudiante'] ?? 'Nombre no especificado');
-            $boleta = $this->normalizarBoleta($row['numero_boleta'] ?? '');
-            $monto = $this->normalizarMonto($row['monto'] ?? 0);
-            $fechaPago = $this->normalizarFecha($row['fecha_pago'] ?? null);
-            $banco = trim((string)($row['banco'] ?? 'EFECTIVO'));
-            $concepto = trim((string)($row['concepto'] ?? 'Migración histórica'));
-            
-            // Validaciones mínimas
-            if (empty($boleta) || $monto <= 0 || !$fechaPago) {
-                $this->advertencias[] = [
-                    'tipo' => 'INSERCION_FORZADA_OMITIDA',
-                    'fila' => $numeroFila,
-                    'advertencia' => 'Datos insuficientes para inserción forzada',
-                    'motivo' => $motivo
-                ];
-                return;
-            }
-            
-            // Crear placeholder temporal de estudiante_programa si no existe
-            $estudianteProgramaTemp = $this->crearPlaceholderEstudiantePrograma($carnet, $nombreEstudiante);
-            
-            if (!$estudianteProgramaTemp) {
-                throw new \Exception("No se pudo crear placeholder temporal para carnet {$carnet}");
-            }
-            
-            DB::transaction(function () use (
-                $estudianteProgramaTemp,
-                $boleta,
-                $monto,
-                $fechaPago,
-                $banco,
-                $concepto,
-                $numeroFila,
-                $carnet,
-                $nombreEstudiante,
-                $motivo,
-                $row
-            ) {
-                // Verificar duplicado
-                $kardexExistente = KardexPago::where('numero_boleta', $boleta)
-                    ->where('estudiante_programa_id', $estudianteProgramaTemp->id)
-                    ->first();
-                
-                if ($kardexExistente) {
-                    $this->advertencias[] = [
-                        'tipo' => 'DUPLICADO',
-                        'fila' => $numeroFila,
-                        'advertencia' => 'Pago ya registrado (inserción forzada)',
-                        'kardex_id' => $kardexExistente->id
-                    ];
-                    return;
-                }
-                
-                // Crear observaciones con información del motivo
-                $observaciones = sprintf(
-                    "FORZADO: Pago migrado sin validación completa (motivo: %s) | Estudiante: %s | Fila: %d | Carnet: %s",
-                    $motivo,
-                    $nombreEstudiante,
-                    $numeroFila,
-                    $carnet
-                );
-                
-                // Crear kardex sin cuota asignada
-                $kardex = KardexPago::create([
-                    'estudiante_programa_id' => $estudianteProgramaTemp->id,
-                    'cuota_id' => null, // Sin cuota asignada
-                    'numero_boleta' => $boleta,
-                    'monto_pagado' => $monto,
-                    'fecha_pago' => $fechaPago,
-                    'fecha_recibo' => $fechaPago,
-                    'banco' => $banco,
-                    'estado_pago' => 'aprobado',
-                    'observaciones' => $observaciones,
-                ]);
-                
-                $this->kardexCreados++;
-                $this->totalAmount += $monto;
-                $this->procesados++;
-                
-                $this->advertencias[] = [
-                    'tipo' => 'INSERCION_FORZADA',
-                    'fila' => $numeroFila,
-                    'advertencia' => 'Pago creado en modo forzado sin validación completa',
-                    'kardex_id' => $kardex->id,
-                    'motivo' => $motivo,
-                    'carnet' => $carnet
-                ];
-                
-                $this->detalles[] = [
-                    'accion' => 'pago_forzado',
-                    'fila' => $numeroFila,
-                    'carnet' => $carnet,
-                    'nombre' => $nombreEstudiante,
-                    'kardex_id' => $kardex->id,
-                    'cuota_id' => null,
-                    'programa' => 'TEMP (forzado)',
-                    'monto' => $monto,
-                    'fecha_pago' => $fechaPago->toDateString(),
-                    'motivo' => $motivo
-                ];
-                
-                if (!$this->modoSilencioso) {
-                    Log::warning("⚠️ Pago forzado creado", [
-                        'fila' => $numeroFila,
-                        'kardex_id' => $kardex->id,
-                        'carnet' => $carnet,
-                        'motivo' => $motivo
-                    ]);
-                }
-            });
-        } catch (\Throwable $ex) {
-            Log::error("❌ Error en inserción forzada fila {$numeroFila}", [
-                'error' => $ex->getMessage(),
-                'trace' => array_slice(explode("\n", $ex->getTraceAsString()), 0, 3)
-            ]);
-            
-            $this->errores[] = [
-                'tipo' => 'ERROR_INSERCION_FORZADA',
-                'fila' => $numeroFila,
-                'error' => $ex->getMessage()
-            ];
-        }
-    }
-    
-    /**
-     * 🆕 NUEVO: Crear placeholder temporal de estudiante_programa
-     */
-    private function crearPlaceholderEstudiantePrograma(string $carnet, string $nombreEstudiante)
-    {
-        try {
-            // Buscar o crear prospecto temporal
-            $prospecto = DB::table('prospectos')
-                ->where('carnet', $carnet)
-                ->first();
-            
-            if (!$prospecto) {
-                $prospectoId = DB::table('prospectos')->insertGetId([
-                    'carnet' => $carnet,
-                    'nombre_completo' => $nombreEstudiante,
-                    'email' => $carnet . '@temp.asm.edu.gt',
-                    'telefono' => '0000-0000',
-                    'fecha_nacimiento' => '2000-01-01',
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            } else {
-                $prospectoId = $prospecto->id;
-            }
-            
-            // Buscar programa TEMP
-            $programaTemp = DB::table('tb_programas')
-                ->where('abreviatura', 'TEMP')
-                ->first();
-            
-            if (!$programaTemp) {
-                // Crear programa TEMP si no existe
-                $programaTempId = DB::table('tb_programas')->insertGetId([
-                    'nombre_del_programa' => 'Programa Pendiente',
-                    'abreviatura' => 'TEMP',
-                    'activo' => true,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            } else {
-                $programaTempId = $programaTemp->id;
-            }
-            
-            // Buscar o crear estudiante_programa temporal
-            $estudiantePrograma = DB::table('estudiante_programa')
-                ->where('prospecto_id', $prospectoId)
-                ->where('programa_id', $programaTempId)
-                ->first();
-            
-            if (!$estudiantePrograma) {
-                $estudianteProgramaId = DB::table('estudiante_programa')->insertGetId([
-                    'prospecto_id' => $prospectoId,
-                    'programa_id' => $programaTempId,
-                    'fecha_inicio' => now(),
-                    'duracion_meses' => 12,
-                    'cuota_mensual' => 0,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-                
-                $estudiantePrograma = (object)[
-                    'id' => $estudianteProgramaId,
-                    'prospecto_id' => $prospectoId,
-                    'programa_id' => $programaTempId
-                ];
-            }
-            
-            return $estudiantePrograma;
-        } catch (\Throwable $ex) {
-            Log::error("❌ Error creando placeholder temporal", [
-                'carnet' => $carnet,
-                'error' => $ex->getMessage()
-            ]);
-            return null;
-        }
-    }
 
     private function buscarCuotaFlexible(
         int $estudianteProgramaId,
@@ -1049,33 +686,16 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         float $mensualidadAprobada,
         int $numeroFila
     ) {
-        // 🔄 NUEVO: Si modo reemplazo está activo, buscar y reemplazar cuota pendiente
-        if ($this->modoReemplazoPendientes) {
-            $cuotaReemplazada = $this->reemplazarCuotaPendiente(
-                $estudianteProgramaId,
-                $fechaPago,
-                $montoPago,
-                $mensualidadAprobada,
-                $numeroFila
-            );
-            
-            if ($cuotaReemplazada) {
-                return $cuotaReemplazada;
-            }
-        }
-
         $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
             ->where('estado', 'pendiente')
             ->sortBy('fecha_vencimiento');
 
         // 🔥 NUEVO: Si no hay cuotas, intentar generarlas automáticamente
         if ($cuotasPendientes->isEmpty()) {
-            if ($this->verbose) {
-                Log::warning("⚠️ No hay cuotas pendientes para este programa", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'fila' => $numeroFila
-                ]);
-            }
+            Log::warning("⚠️ No hay cuotas pendientes para este programa", [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'fila' => $numeroFila
+            ]);
 
             // Intentar generar cuotas automáticamente
             $generado = $this->generarCuotasSiFaltan($estudianteProgramaId, null);
@@ -1086,12 +706,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     ->where('estado', 'pendiente')
                     ->sortBy('fecha_vencimiento');
 
-                if ($this->verbose) {
-                    Log::info("✅ Cuotas generadas y recargadas", [
-                        'estudiante_programa_id' => $estudianteProgramaId,
-                        'cuotas_disponibles' => $cuotasPendientes->count()
-                    ]);
-                }
+                Log::info("✅ Cuotas generadas y recargadas", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'cuotas_disponibles' => $cuotasPendientes->count()
+                ]);
 
                 // Si aún no hay cuotas después de generar, retornar null
                 if ($cuotasPendientes->isEmpty()) {
@@ -1100,7 +718,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             } else {
                 // Si no se pudieron generar, intentar al menos validar con el precio del programa
                 $precioPrograma = $this->obtenerPrecioPrograma($estudianteProgramaId);
-                if ($precioPrograma && $this->verbose) {
+                if ($precioPrograma) {
                     Log::info("💰 Precio de programa encontrado para validación", [
                         'estudiante_programa_id' => $estudianteProgramaId,
                         'cuota_mensual' => $precioPrograma->cuota_mensual,
@@ -1127,14 +745,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             }
         }
 
-        if ($this->verbose) {
-            Log::info("🔍 Buscando cuota compatible", [
-                'cuotas_pendientes' => $cuotasPendientes->count(),
-                'monto_pago' => $montoPago,
-                'mensualidad_aprobada' => $mensualidadAprobada,
-                'fila' => $numeroFila
-            ]);
-        }
+        Log::info("🔍 Buscando cuota compatible", [
+            'cuotas_pendientes' => $cuotasPendientes->count(),
+            'monto_pago' => $montoPago,
+            'mensualidad_aprobada' => $mensualidadAprobada,
+            'fila' => $numeroFila
+        ]);
 
         // ✅ PRIORIDAD 1: Coincidencia exacta con mensualidad aprobada
         // 🔥 TOLERANCIA MÁXIMA: 50% o mínimo Q100 para importación histórica
@@ -1146,16 +762,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             });
 
             if ($cuotaExacta) {
-                if ($this->verbose) {
-                    Log::info("✅ Cuota encontrada por mensualidad aprobada", [
-                        'cuota_id' => $cuotaExacta->id,
-                        'monto_cuota' => $cuotaExacta->monto,
+                Log::info("✅ Cuota encontrada por mensualidad aprobada", [
+                    'cuota_id' => $cuotaExacta->id,
+                    'monto_cuota' => $cuotaExacta->monto,
                     'mensualidad_aprobada' => $mensualidadAprobada,
                     'monto_pago' => $montoPago,
                     'diferencia' => abs($cuotaExacta->monto - $mensualidadAprobada),
                     'tolerancia_usada' => $tolerancia
                 ]);
-                }
                 return $cuotaExacta;
             }
         }
@@ -1169,15 +783,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         });
 
         if ($cuotaPorMonto) {
-            if ($this->verbose) {
-                Log::info("✅ Cuota encontrada por monto de pago", [
-                    'cuota_id' => $cuotaPorMonto->id,
-                    'monto_cuota' => $cuotaPorMonto->monto,
-                    'monto_pago' => $montoPago,
-                    'diferencia' => abs($cuotaPorMonto->monto - $montoPago),
-                    'tolerancia_usada' => $tolerancia
-                ]);
-            }
+            Log::info("✅ Cuota encontrada por monto de pago", [
+                'cuota_id' => $cuotaPorMonto->id,
+                'monto_cuota' => $cuotaPorMonto->monto,
+                'monto_pago' => $montoPago,
+                'diferencia' => abs($cuotaPorMonto->monto - $montoPago),
+                'tolerancia_usada' => $tolerancia
+            ]);
             return $cuotaPorMonto;
         }
 
@@ -1295,103 +907,19 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return null;
     }
 
-    /**
-     * 🔄 Buscar y reemplazar cuota pendiente con estado "Pagado"
-     * Este método se usa cuando modoReemplazoPendientes está activo
-     */
-    private function reemplazarCuotaPendiente(
-        int $estudianteProgramaId,
-        Carbon $fechaPago,
-        float $montoPago,
-        float $mensualidadAprobada,
-        int $numeroFila
-    ) {
-        // Buscar cuotas pendientes ordenadas por fecha de vencimiento
-        $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
-            ->where('estado', 'pendiente')
-            ->sortBy('fecha_vencimiento');
-
-        if ($cuotasPendientes->isEmpty()) {
-            return null;
-        }
-
-        if ($this->verbose) {
-            Log::info("🔄 Modo reemplazo activo: buscando cuota pendiente para reemplazar", [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'cuotas_pendientes' => $cuotasPendientes->count(),
-                'monto_pago' => $montoPago,
-                'mensualidad_aprobada' => $mensualidadAprobada,
-                'fila' => $numeroFila
-            ]);
-        }
-
-        // 🔍 PRIORIDAD 1: Buscar por mensualidad aprobada (si está disponible)
-        $cuotaCompatible = null;
-        if ($mensualidadAprobada > 0) {
-            $tolerancia = max(100, $mensualidadAprobada * 0.50);
-            $cuotaCompatible = $cuotasPendientes->first(function ($cuota) use ($mensualidadAprobada, $tolerancia) {
-                $diferencia = abs($cuota->monto - $mensualidadAprobada);
-                return $diferencia <= $tolerancia;
-            });
-        }
-
-        // 🔍 PRIORIDAD 2: Buscar por monto de pago
-        if (!$cuotaCompatible) {
-            $tolerancia = max(100, $montoPago * 0.50);
-            $cuotaCompatible = $cuotasPendientes->first(function ($cuota) use ($montoPago, $tolerancia) {
-                $diferencia = abs($cuota->monto - $montoPago);
-                return $diferencia <= $tolerancia;
-            });
-        }
-
-        // 🔍 PRIORIDAD 3: Primera cuota pendiente
-        if (!$cuotaCompatible) {
-            $cuotaCompatible = $cuotasPendientes->first();
-        }
-
-        if ($cuotaCompatible) {
-            if ($this->verbose) {
-                Log::info("🔄 Reemplazando cuota pendiente con pago", [
-                    'cuota_id' => $cuotaCompatible->id,
-                    'numero_cuota' => $cuotaCompatible->numero_cuota,
-                    'monto_cuota_original' => $cuotaCompatible->monto,
-                    'monto_pago' => $montoPago,
-                    'estado_anterior' => 'pendiente',
-                    'estado_nuevo' => 'pagado',
-                    'fila' => $numeroFila
-                ]);
-            }
-
-            // Actualizar la cuota a estado pagado
-            $cuotaCompatible->update([
-                'estado' => 'pagado',
-                'paid_at' => $fechaPago,
-            ]);
-
-            // Limpiar cache para forzar recarga
-            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
-
-            return $cuotaCompatible;
-        }
-
-        return null;
-    }
-
     private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $montoPago)
     {
         $diferencia = $cuota->monto - $montoPago;
 
-        if ($this->verbose) {
-            Log::info("🔄 PASO 5: Actualizando estado de cuota", [
-                'fila' => $numeroFila,
-                'cuota_id' => $cuota->id,
-                'numero_cuota' => $cuota->numero_cuota,
-                'monto_cuota' => $cuota->monto,
-                'monto_pago' => $montoPago,
+        Log::info("🔄 PASO 5: Actualizando estado de cuota", [
+            'fila' => $numeroFila,
+            'cuota_id' => $cuota->id,
+            'numero_cuota' => $cuota->numero_cuota,
+            'monto_cuota' => $cuota->monto,
+            'monto_pago' => $montoPago,
             'diferencia' => round($diferencia, 2),
             'estado_anterior' => $cuota->estado
         ]);
-        }
 
         $cuota->update([
             'estado' => 'pagado',
@@ -1400,16 +928,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         $this->cuotasActualizadas++;
 
-        if ($this->verbose) {
-            Log::info("✅ PASO 5 EXITOSO: Cuota marcada como pagada", [
-                'cuota_id' => $cuota->id,
-                'numero_cuota' => $cuota->numero_cuota,
-                'estado_nuevo' => 'pagado',
-                'paid_at' => $kardex->fecha_pago->toDateString()
-            ]);
-        }
+        Log::info("✅ PASO 5 EXITOSO: Cuota marcada como pagada", [
+            'cuota_id' => $cuota->id,
+            'numero_cuota' => $cuota->numero_cuota,
+            'estado_nuevo' => 'pagado',
+            'paid_at' => $kardex->fecha_pago->toDateString()
+        ]);
 
-        if (abs($diferencia) > 100 && $this->verbose) {
+        if (abs($diferencia) > 100) {
             Log::info("💰 Cuota actualizada con diferencia", [
                 'cuota_id' => $cuota->id,
                 'monto_cuota' => $cuota->monto,
@@ -1419,14 +945,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ]);
         }
 
-        if ($this->verbose) {
-            Log::info("🔍 PASO 6: Creando registro de conciliación", [
-                'kardex_id' => $kardex->id,
-                'banco' => $banco,
-                'boleta' => $kardex->numero_boleta,
-                'monto' => $kardex->monto_pagado
-            ]);
-        }
+        Log::info("🔍 PASO 6: Creando registro de conciliación", [
+            'kardex_id' => $kardex->id,
+            'banco' => $banco,
+            'boleta' => $kardex->numero_boleta,
+            'monto' => $kardex->monto_pagado
+        ]);
 
         $bancoNormalizado = $this->normalizeBank($banco);
         $boletaNormalizada = $this->normalizeReceiptNumber($kardex->numero_boleta);
@@ -1434,12 +958,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $fingerprint = $this->makeFingerprint($bancoNormalizado, $boletaNormalizada, $kardex->monto_pagado, $fechaYmd);
 
         if (ReconciliationRecord::where('fingerprint', $fingerprint)->exists()) {
-            if ($this->verbose) {
-                Log::warning("⚠️ Conciliación duplicada detectada", [
-                    'fingerprint' => $fingerprint,
-                    'boleta' => $kardex->numero_boleta
-                ]);
-            }
+            Log::warning("⚠️ Conciliación duplicada detectada", [
+                'fingerprint' => $fingerprint,
+                'boleta' => $kardex->numero_boleta
+            ]);
             return;
         }
 
@@ -1459,14 +981,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
             $this->conciliaciones++;
 
-            if ($this->verbose) {
-                Log::info("✅ PASO 6 EXITOSO: Conciliación creada", [
-                    'kardex_id' => $kardex->id,
-                    'fingerprint' => $fingerprint,
-                    'status' => 'conciliado',
-                    'uploaded_by' => $this->uploaderId
-                ]);
-            }
+            Log::info("✅ PASO 6 EXITOSO: Conciliación creada", [
+                'kardex_id' => $kardex->id,
+                'fingerprint' => $fingerprint,
+                'status' => 'conciliado',
+                'uploaded_by' => $this->uploaderId
+            ]);
         } catch (\Throwable $e) {
             Log::error("❌ PASO 6 FALLIDO: Error creando conciliación", [
                 'error' => $e->getMessage(),
@@ -1526,13 +1046,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $original = $boleta;
             $boleta = trim($partes[0]);
 
-            if ($this->verbose) {
-                Log::info("📋 Boleta compuesta detectada", [
-                    'original' => $original,
-                    'normalizada' => $boleta,
-                    'segunda_parte' => trim($partes[1] ?? '')
-                ]);
-            }
+            Log::info("📋 Boleta compuesta detectada", [
+                'original' => $original,
+                'normalizada' => $boleta,
+                'segunda_parte' => trim($partes[1] ?? '')
+            ]);
         }
 
         $normalizada = strtoupper(preg_replace('/[^a-zA-Z0-9]/', '', $boleta));
@@ -1551,13 +1069,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             return $programas->first();
         }
 
-        if ($this->verbose) {
-            Log::info("🔍 Identificando programa entre {$programas->count()} opciones", [
-                'mensualidad_aprobada' => $mensualidadAprobada,
-                'monto_pago' => $montoPago,
-                'fecha_pago' => $fechaPago->toDateString()
-            ]);
-        }
+        Log::info("🔍 Identificando programa entre {$programas->count()} opciones", [
+            'mensualidad_aprobada' => $mensualidadAprobada,
+            'monto_pago' => $montoPago,
+            'fecha_pago' => $fechaPago->toDateString()
+        ]);
 
         // 🔥 PRIORIDAD 1: Por mensualidad aprobada con tolerancia del 50%
         if ($mensualidadAprobada > 0) {
@@ -1573,14 +1089,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     });
 
                     if ($cuotaCoincidente) {
-                        if ($this->verbose) {
-                            Log::info("✅ Programa identificado por mensualidad aprobada (cuotas)", [
-                                'estudiante_programa_id' => $programa->estudiante_programa_id,
-                                'programa' => $programa->nombre_programa,
-                                'mensualidad' => $mensualidadAprobada,
-                                'cuota_monto' => $cuotaCoincidente->monto
-                            ]);
-                        }
+                        Log::info("✅ Programa identificado por mensualidad aprobada (cuotas)", [
+                            'estudiante_programa_id' => $programa->estudiante_programa_id,
+                            'programa' => $programa->nombre_programa,
+                            'mensualidad' => $mensualidadAprobada,
+                            'cuota_monto' => $cuotaCoincidente->monto
+                        ]);
                         return $programa;
                     }
                 } else {
@@ -1591,14 +1105,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                         $tolerancia = max(100, $mensualidadAprobada * 0.50);
 
                         if ($diferencia <= $tolerancia) {
-                            if ($this->verbose) {
-                                Log::info("✅ Programa identificado por mensualidad aprobada (precio programa)", [
-                                    'estudiante_programa_id' => $programa->estudiante_programa_id,
-                                    'programa' => $programa->nombre_programa,
-                                    'mensualidad' => $mensualidadAprobada,
-                                    'cuota_mensual_programa' => $precioPrograma->cuota_mensual
-                                ]);
-                            }
+                            Log::info("✅ Programa identificado por mensualidad aprobada (precio programa)", [
+                                'estudiante_programa_id' => $programa->estudiante_programa_id,
+                                'programa' => $programa->nombre_programa,
+                                'mensualidad' => $mensualidadAprobada,
+                                'cuota_mensual_programa' => $precioPrograma->cuota_mensual
+                            ]);
                             return $programa;
                         }
                     }
@@ -1621,14 +1133,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 Carbon::parse($primeraFecha)->subDays(30),
                 Carbon::parse($ultimaFecha)->addDays(30)
             )) {
-                if ($this->verbose) {
-                    Log::info("✅ Programa identificado por rango de fechas", [
-                        'estudiante_programa_id' => $programa->estudiante_programa_id,
-                        'programa' => $programa->nombre_programa,
-                        'rango' => "{$primeraFecha} - {$ultimaFecha}",
+                Log::info("✅ Programa identificado por rango de fechas", [
+                    'estudiante_programa_id' => $programa->estudiante_programa_id,
+                    'programa' => $programa->nombre_programa,
+                    'rango' => "{$primeraFecha} - {$ultimaFecha}",
                     'fecha_pago' => $fechaPago->toDateString()
                 ]);
-                }
                 return $programa;
             }
         }
@@ -1644,13 +1154,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             });
 
             if ($cuotaCoincidente) {
-                if ($this->verbose) {
-                    Log::info("✅ Programa identificado por monto de pago", [
-                        'estudiante_programa_id' => $programa->estudiante_programa_id,
-                        'programa' => $programa->nombre_programa,
-                        'monto_pago' => $montoPago
-                    ]);
-                }
+                Log::info("✅ Programa identificado por monto de pago", [
+                    'estudiante_programa_id' => $programa->estudiante_programa_id,
+                    'programa' => $programa->nombre_programa,
+                    'monto_pago' => $montoPago
+                ]);
                 return $programa;
             }
         }
@@ -1668,13 +1176,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 ->count();
 
             if ($cuotasPendientes > 0) {
-                if ($this->verbose) {
-                    Log::info("✅ Programa identificado por mayor cantidad de cuotas pendientes", [
-                        'estudiante_programa_id' => $programaConMasCuotas->estudiante_programa_id,
-                        'programa' => $programaConMasCuotas->nombre_programa,
-                        'cuotas_pendientes' => $cuotasPendientes
-                    ]);
-                }
+                Log::info("✅ Programa identificado por mayor cantidad de cuotas pendientes", [
+                    'estudiante_programa_id' => $programaConMasCuotas->estudiante_programa_id,
+                    'programa' => $programaConMasCuotas->nombre_programa,
+                    'cuotas_pendientes' => $cuotasPendientes
+                ]);
                 return $programaConMasCuotas;
             }
         }
@@ -1688,41 +1194,25 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     /**
      * 🔥 MÉTODO MEJORADO: Ahora crea estudiantes/programas si no existen
-     * @param int $recursionDepth Profundidad de recursión para evitar loops infinitos
      */
-    private function obtenerProgramasEstudiante($carnet, $row = null, int $recursionDepth = 0)
+    private function obtenerProgramasEstudiante($carnet, $row = null)
     {
-        // 🛑 Prevenir recursión infinita
-        if ($recursionDepth > 1) {
-            Log::warning("🛑 LOOP INFINITO PREVENIDO: Profundidad máxima alcanzada", [
-                'carnet' => $carnet,
-                'recursion_depth' => $recursionDepth
-            ]);
-            return $this->estudiantesCache[$carnet] ?? collect([]);
-        }
-
         if (isset($this->estudiantesCache[$carnet])) {
-            if ($this->verbose) {
-                Log::debug("📋 Usando cache para carnet", ['carnet' => $carnet]);
-            }
+            Log::debug("📋 Usando cache para carnet", ['carnet' => $carnet]);
             return $this->estudiantesCache[$carnet];
         }
 
-        if ($this->verbose) {
-            Log::info("🔍 PASO 1: Buscando prospecto por carnet", ['carnet' => $carnet]);
-        }
+        Log::info("🔍 PASO 1: Buscando prospecto por carnet", ['carnet' => $carnet]);
 
         $prospecto = DB::table('prospectos')
-            ->where('carnet', '=', $carnet)
+            ->where(DB::raw("REPLACE(UPPER(carnet), ' ', '')"), '=', $carnet)
             ->first();
 
         // 🔥 NUEVO: Si no existe prospecto, crearlo
         if (!$prospecto && $row) {
-            if ($this->verbose) {
-                Log::warning("❌ Prospecto no encontrado, creando desde datos de pago", [
-                    'carnet' => $carnet
-                ]);
-            }
+            Log::warning("❌ Prospecto no encontrado, creando desde datos de pago", [
+                'carnet' => $carnet
+            ]);
 
             try {
                 // Convert Collection to array if needed
@@ -1755,19 +1245,15 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             return collect([]);
         }
 
-        if ($this->verbose) {
-            Log::info("✅ PASO 1 EXITOSO: Prospecto encontrado", [
-                'carnet' => $carnet,
-                'prospecto_id' => $prospecto->id,
-                'nombre_completo' => $prospecto->nombre_completo
+        Log::info("✅ PASO 1 EXITOSO: Prospecto encontrado", [
+            'carnet' => $carnet,
+            'prospecto_id' => $prospecto->id,
+            'nombre_completo' => $prospecto->nombre_completo
         ]);
-        }
 
-        if ($this->verbose) {
-            Log::info("🔍 PASO 2: Buscando programas del estudiante", [
-                'prospecto_id' => $prospecto->id
-            ]);
-        }
+        Log::info("🔍 PASO 2: Buscando programas del estudiante", [
+            'prospecto_id' => $prospecto->id
+        ]);
 
         $estudianteProgramas = DB::table('estudiante_programa')
             ->where('prospecto_id', $prospecto->id)
@@ -1775,11 +1261,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         // 🔥 NUEVO: Si no tiene programas, crear con datos del Excel
         if ($estudianteProgramas->isEmpty() && $row) {
-            if ($this->verbose) {
-                Log::warning("❌ No hay programas, creando desde datos de pago", [
-                    'prospecto_id' => $prospecto->id
-                ]);
-            }
+            Log::warning("❌ No hay programas, creando desde datos de pago", [
+                'prospecto_id' => $prospecto->id
+            ]);
 
             try {
                 // Convert Collection to array if needed
@@ -1807,12 +1291,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             return collect([]);
         }
 
-        if ($this->verbose) {
-            Log::info("✅ PASO 2 EXITOSO: Programas encontrados", [
-                'prospecto_id' => $prospecto->id,
-                'cantidad_programas' => $estudianteProgramas->count()
-            ]);
-        }
+        Log::info("✅ PASO 2 EXITOSO: Programas encontrados", [
+            'prospecto_id' => $prospecto->id,
+            'cantidad_programas' => $estudianteProgramas->count()
+        ]);
 
         $programas = DB::table('prospectos as p')
             ->select(
@@ -1834,45 +1316,23 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         // 🔥 NUEVO: Actualizar programas TEMP a reales si el Excel tiene plan_estudios
         if ($row && !empty($row['plan_estudios'])) {
-            $planEstudios = strtoupper(trim($row['plan_estudios']));
-            
-            // 🛑 SKIP: No intentar actualizar si el Excel también tiene TEMP
-            if ($planEstudios === 'TEMP') {
-                if ($this->verbose) {
-                    Log::info("⏭️ Saltando actualización TEMP-to-TEMP (Excel también contiene TEMP)", [
-                        'carnet' => $carnet,
-                    'plan_estudios' => $planEstudios
-                ]);
-                }
-            } else {
-                foreach ($programas as $programa) {
-                    if ($programa->programa_abreviatura === 'TEMP') {
-                        if ($this->verbose) {
-                            Log::info("🔄 Detectado programa TEMP, intentando actualizar", [
-                                'estudiante_programa_id' => $programa->estudiante_programa_id,
-                                'plan_estudios_excel' => $row['plan_estudios']
-                            ]);
-                        }
+            foreach ($programas as $programa) {
+                if ($programa->programa_abreviatura === 'TEMP') {
+                    Log::info("🔄 Detectado programa TEMP, intentando actualizar", [
+                        'estudiante_programa_id' => $programa->estudiante_programa_id,
+                        'plan_estudios_excel' => $row['plan_estudios']
+                    ]);
 
-                        $actualizado = $this->estudianteService->actualizarProgramaTempAReal(
-                            $programa->estudiante_programa_id,
-                            $row['plan_estudios'],
-                            $this->uploaderId
-                        );
+                    $actualizado = $this->estudianteService->actualizarProgramaTempAReal(
+                        $programa->estudiante_programa_id,
+                        $row['plan_estudios'],
+                        $this->uploaderId
+                    );
 
-                        if ($actualizado) {
-                            // Recargar programas después de actualizar (con depth+1 para prevenir loops)
-                            unset($this->estudiantesCache[$carnet]);
-                            return $this->obtenerProgramasEstudiante($carnet, $row, $recursionDepth + 1);
-                        } else {
-                            // ✅ Continuar con TEMP si no se puede actualizar
-                            if ($this->verbose) {
-                                Log::info("⏭️ No se encontró programa real, continuando con TEMP", [
-                                    'estudiante_programa_id' => $programa->estudiante_programa_id,
-                                    'plan_estudios_excel' => $row['plan_estudios']
-                                ]);
-                            }
-                        }
+                    if ($actualizado) {
+                        // Recargar programas después de actualizar
+                        unset($this->estudiantesCache[$carnet]);
+                        return $this->obtenerProgramasEstudiante($carnet, $row);
                     }
                 }
             }
@@ -1893,50 +1353,42 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     private function obtenerCuotasDelPrograma(int $estudianteProgramaId)
     {
         if (isset($this->cuotasPorEstudianteCache[$estudianteProgramaId])) {
-            if ($this->verbose) {
-                Log::debug("📋 Usando cache para cuotas", ['estudiante_programa_id' => $estudianteProgramaId]);
-            }
+            Log::debug("📋 Usando cache para cuotas", ['estudiante_programa_id' => $estudianteProgramaId]);
             return $this->cuotasPorEstudianteCache[$estudianteProgramaId];
         }
 
-        if ($this->verbose) {
-            Log::info("🔍 PASO 4: Buscando cuotas del programa", [
-                'estudiante_programa_id' => $estudianteProgramaId
-            ]);
-        }
+        Log::info("🔍 PASO 4: Buscando cuotas del programa", [
+            'estudiante_programa_id' => $estudianteProgramaId
+        ]);
 
         $cuotas = CuotaProgramaEstudiante::where('estudiante_programa_id', $estudianteProgramaId)
             ->orderBy('fecha_vencimiento', 'asc')
             ->get();
 
         if ($cuotas->isEmpty()) {
-            if ($this->verbose) {
-                Log::warning("❌ PASO 4: No hay cuotas para este programa", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'problema' => 'No existen cuotas en cuotas_programa_estudiante para este estudiante_programa_id'
-                ]);
-            }
+            Log::warning("❌ PASO 4: No hay cuotas para este programa", [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'problema' => 'No existen cuotas en cuotas_programa_estudiante para este estudiante_programa_id'
+            ]);
         } else {
-            if ($this->verbose) {
-                $pendientes = $cuotas->where('estado', 'pendiente')->count();
-                $pagadas = $cuotas->where('estado', 'pagado')->count();
+            $pendientes = $cuotas->where('estado', 'pendiente')->count();
+            $pagadas = $cuotas->where('estado', 'pagado')->count();
 
-                Log::info("✅ PASO 4 EXITOSO: Cuotas encontradas", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'total_cuotas' => $cuotas->count(),
-                    'cuotas_pendientes' => $pendientes,
-                    'cuotas_pagadas' => $pagadas,
-                    'resumen_cuotas' => $cuotas->map(function ($c) {
-                        return [
-                            'id' => $c->id,
-                            'numero' => $c->numero_cuota,
-                            'monto' => $c->monto,
-                            'estado' => $c->estado,
-                            'vencimiento' => $c->fecha_vencimiento
-                        ];
-                    })->toArray()
-                ]);
-            }
+            Log::info("✅ PASO 4 EXITOSO: Cuotas encontradas", [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'total_cuotas' => $cuotas->count(),
+                'cuotas_pendientes' => $pendientes,
+                'cuotas_pagadas' => $pagadas,
+                'resumen_cuotas' => $cuotas->map(function ($c) {
+                    return [
+                        'id' => $c->id,
+                        'numero' => $c->numero_cuota,
+                        'monto' => $c->monto,
+                        'estado' => $c->estado,
+                        'vencimiento' => $c->fecha_vencimiento
+                    ];
+                })->toArray()
+            ]);
         }
 
         $this->cuotasPorEstudianteCache[$estudianteProgramaId] = $cuotas;
@@ -1963,7 +1415,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             // Buscar el precio del programa
             $precioPrograma = PrecioPrograma::where('programa_id', $estudiantePrograma->programa_id)->first();
 
-            if ($precioPrograma && $this->verbose) {
+            if ($precioPrograma) {
                 Log::debug("💰 Precio de programa encontrado", [
                     'estudiante_programa_id' => $estudianteProgramaId,
                     'programa_id' => $estudiantePrograma->programa_id,
@@ -1986,35 +1438,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     /**
      * 🆕 Generar cuotas automáticamente cuando no existen
      * Similar a la lógica de InscripcionesImport
-     * 
-     * Mejoras:
-     * - Soporte para programas TEMP con cuotas dinámicas
-     * - Generación de cuota 0 (inscripción) si aplica
-     * - Inferencia de cantidad de cuotas desde pagos del Excel
      */
     private function generarCuotasSiFaltan(int $estudianteProgramaId, ?array $row = null)
     {
         try {
-            // Verificar si ya existen cuotas
-            $cuotasExistentes = DB::table('cuotas_programa_estudiante')
-                ->where('estudiante_programa_id', $estudianteProgramaId)
-                ->count();
-
-            if ($cuotasExistentes > 0) {
-                if ($this->verbose) {
-                    Log::debug("⏭️ Ya existen cuotas para este programa, saltando generación", [
-                        'estudiante_programa_id' => $estudianteProgramaId,
-                        'cuotas_existentes' => $cuotasExistentes
-                    ]);
-                }
-                return false;
-            }
-
-            // Obtener datos del estudiante_programa y programa
-            $estudiantePrograma = DB::table('estudiante_programa as ep')
-                ->leftJoin('tb_programas as prog', 'ep.programa_id', '=', 'prog.id')
-                ->where('ep.id', $estudianteProgramaId)
-                ->select('ep.*', 'prog.abreviatura as programa_codigo')
+            // Obtener datos del estudiante_programa
+            $estudiantePrograma = DB::table('estudiante_programa')
+                ->where('id', $estudianteProgramaId)
                 ->first();
 
             if (!$estudiantePrograma) {
@@ -2024,34 +1454,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 return false;
             }
 
-            // Detectar si es programa TEMP
-            $esProgramaTemp = strtoupper($estudiantePrograma->programa_codigo ?? '') === 'TEMP';
-
             // Usar datos del estudiante_programa para generar cuotas
             $numCuotas = $estudiantePrograma->duracion_meses ?? 0;
             $cuotaMensual = $estudiantePrograma->cuota_mensual ?? 0;
             $fechaInicio = $estudiantePrograma->fecha_inicio ?? now()->toDateString();
-            $inscripcion = null;
-
-            // 🔥 NUEVO: Para programas TEMP, inferir cantidad de cuotas desde Excel
-            if ($esProgramaTemp && $row) {
-                // Intentar inferir el número de cuotas desde el número de pagos
-                // Esto requeriría conocer todos los pagos del estudiante
-                if ($this->verbose) {
-                    Log::info("🧮 Programa TEMP detectado, usando configuración dinámica", [
-                        'estudiante_programa_id' => $estudianteProgramaId,
-                        'programa_codigo' => $estudiantePrograma->programa_codigo
-                    ]);
-                }
-                
-                // Para TEMP, usar valores por defecto si no hay datos
-                if ($numCuotas <= 0) {
-                    $numCuotas = 12; // Default razonable para TEMP
-                }
-                if ($cuotaMensual <= 0 && isset($row['mensualidad_aprobada'])) {
-                    $cuotaMensual = $this->normalizarMonto($row['mensualidad_aprobada']);
-                }
-            }
 
             // Si no hay datos suficientes en estudiante_programa, intentar con precio_programa
             if ($numCuotas <= 0 || $cuotaMensual <= 0) {
@@ -2059,17 +1465,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 if ($precioPrograma) {
                     $numCuotas = $numCuotas > 0 ? $numCuotas : ($precioPrograma->meses ?? 12);
                     $cuotaMensual = $cuotaMensual > 0 ? $cuotaMensual : ($precioPrograma->cuota_mensual ?? 0);
-                    
-                    // 🆕 Obtener inscripción si está disponible
-                    if ($precioPrograma->inscripcion > 0) {
-                        $inscripcion = $precioPrograma->inscripcion;
-                    }
                 }
-            }
-
-            // 🆕 Inferir inscripción desde Excel si está disponible
-            if (!$inscripcion && $row && isset($row['inscripcion']) && $row['inscripcion'] > 0) {
-                $inscripcion = $this->normalizarMonto($row['inscripcion']);
             }
 
             // Validar que tengamos los datos mínimos
@@ -2077,46 +1473,20 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 Log::warning("⚠️ No se pueden generar cuotas: datos insuficientes", [
                     'estudiante_programa_id' => $estudianteProgramaId,
                     'num_cuotas' => $numCuotas,
-                    'cuota_mensual' => $cuotaMensual,
-                    'programa_codigo' => $estudiantePrograma->programa_codigo ?? 'N/A'
+                    'cuota_mensual' => $cuotaMensual
                 ]);
                 return false;
             }
 
-            if ($this->verbose) {
-                Log::info("🔧 Generando cuotas automáticamente", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'num_cuotas' => $numCuotas,
-                    'cuota_mensual' => $cuotaMensual,
-                    'inscripcion' => $inscripcion,
-                    'fecha_inicio' => $fechaInicio,
-                    'es_temp' => $esProgramaTemp
-                ]);
-            }
+            Log::info("🔧 Generando cuotas automáticamente", [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'num_cuotas' => $numCuotas,
+                'cuota_mensual' => $cuotaMensual,
+                'fecha_inicio' => $fechaInicio
+            ]);
 
             // Generar las cuotas
             $cuotas = [];
-            
-            // 🆕 CUOTA 0 (Inscripción) si aplica
-            if ($inscripcion && $inscripcion > 0) {
-                $cuotas[] = [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'numero_cuota' => 0,
-                    'fecha_vencimiento' => $fechaInicio,
-                    'monto' => $inscripcion,
-                    'estado' => 'pendiente',
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
-                
-                if ($this->verbose) {
-                    Log::info("✅ Cuota 0 (Inscripción) agregada", [
-                        'monto' => $inscripcion
-                    ]);
-                }
-            }
-            
-            // Cuotas 1..N (cuotas mensuales)
             for ($i = 1; $i <= $numCuotas; $i++) {
                 $fechaVencimiento = Carbon::parse($fechaInicio)
                     ->addMonths($i - 1)
@@ -2136,13 +1506,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             // Insertar las cuotas en la base de datos
             DB::table('cuotas_programa_estudiante')->insert($cuotas);
 
-            if ($this->verbose) {
-                Log::info("✅ Cuotas generadas exitosamente", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'cantidad_cuotas' => count($cuotas),
-                    'incluye_inscripcion' => $inscripcion ? 'SÍ' : 'NO'
-                ]);
-            }
+            Log::info("✅ Cuotas generadas exitosamente", [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'cantidad_cuotas' => count($cuotas)
+            ]);
 
             // Limpiar cache para forzar recarga
             unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
@@ -2211,12 +1578,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     {
         $normalizado = strtoupper(preg_replace('/\s+/', '', trim($carnet)));
 
-        if ($this->verbose) {
-            Log::debug('🎫 Carnet normalizado', [
-                'original' => $carnet,
-                'normalizado' => $normalizado
-            ]);
-        }
+        Log::debug('🎫 Carnet normalizado', [
+            'original' => $carnet,
+            'normalizado' => $normalizado
+        ]);
 
         return $normalizado;
     }
@@ -2229,12 +1594,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         $resultado = floatval($monto);
 
-        if ($this->verbose) {
-            Log::debug('💵 Monto normalizado', [
-                'original' => $monto,
-                'resultado' => $resultado
-            ]);
-        }
+        Log::debug('💵 Monto normalizado', [
+            'original' => $monto,
+            'resultado' => $resultado
+        ]);
 
         return $resultado;
     }
@@ -2246,31 +1609,25 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $baseDate = Carbon::create(1899, 12, 30);
                 $resultado = $baseDate->addDays(intval($fecha));
 
-                if ($this->verbose) {
-                    Log::debug('📅 Fecha normalizada desde Excel', [
-                        'original' => $fecha,
-                        'resultado' => $resultado->toDateString()
-                    ]);
-                }
+                Log::debug('📅 Fecha normalizada desde Excel', [
+                    'original' => $fecha,
+                    'resultado' => $resultado->toDateString()
+                ]);
 
                 return $resultado;
             }
 
             if (empty($fecha) || trim($fecha) === '') {
-                if ($this->verbose) {
-                    Log::debug('⚠️ Fecha vacía detectada');
-                }
+                Log::debug('⚠️ Fecha vacía detectada');
                 return null;
             }
 
             $resultado = Carbon::parse($fecha);
 
-            if ($this->verbose) {
-                Log::debug('📅 Fecha parseada desde string', [
-                    'original' => $fecha,
-                    'resultado' => $resultado->toDateString()
-                ]);
-            }
+            Log::debug('📅 Fecha parseada desde string', [
+                'original' => $fecha,
+                'resultado' => $resultado->toDateString()
+            ]);
 
             return $resultado;
         } catch (\Exception $e) {
