@@ -994,7 +994,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $cuotaCompatible->update([
                 'estado' => 'pagado',
                 'paid_at' => $fechaPago,
-                'monto_pagado' => $montoPago,
             ]);
 
             // Limpiar cache para forzar recarga
@@ -1634,7 +1633,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'fecha_vencimiento' => $fechaInicio,
                     'monto' => $inscripcion,
                     'estado' => 'pendiente',
-                    'descripcion' => 'Inscripción',
                     'created_at' => now(),
                     'updated_at' => now(),
                 ];
