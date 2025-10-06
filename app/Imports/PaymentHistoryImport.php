@@ -1214,13 +1214,22 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'carnet' => $carnet
             ]);
 
-            // Convert Collection to array if needed
-            $rowArray = $row instanceof Collection ? $row->toArray() : $row;
-            $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($rowArray, $this->uploaderId);
+            try {
+                // Convert Collection to array if needed
+                $rowArray = $row instanceof Collection ? $row->toArray() : $row;
+                $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($rowArray, $this->uploaderId);
 
-            if ($programaCreado) {
-                $this->estudiantesCache[$carnet] = collect([$programaCreado]);
-                return collect([$programaCreado]);
+                if ($programaCreado) {
+                    $this->estudiantesCache[$carnet] = collect([$programaCreado]);
+                    return collect([$programaCreado]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning("⚠️ No se pudo crear prospecto automáticamente", [
+                    'carnet' => $carnet,
+                    'error' => $e->getMessage()
+                ]);
+                $this->estudiantesCache[$carnet] = collect([]);
+                return collect([]);
             }
 
             // Si aún falla, retornar vacío
@@ -1256,13 +1265,20 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'prospecto_id' => $prospecto->id
             ]);
 
-            // Convert Collection to array if needed
-            $rowArray = $row instanceof Collection ? $row->toArray() : $row;
-            $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($rowArray, $this->uploaderId);
+            try {
+                // Convert Collection to array if needed
+                $rowArray = $row instanceof Collection ? $row->toArray() : $row;
+                $programaCreado = $this->estudianteService->syncEstudianteFromPaymentRow($rowArray, $this->uploaderId);
 
-            if ($programaCreado) {
-                $this->estudiantesCache[$carnet] = collect([$programaCreado]);
-                return collect([$programaCreado]);
+                if ($programaCreado) {
+                    $this->estudiantesCache[$carnet] = collect([$programaCreado]);
+                    return collect([$programaCreado]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning("⚠️ No se pudo crear prospecto automáticamente", [
+                    'carnet' => $carnet,
+                    'error' => $e->getMessage()
+                ]);
             }
         }
 
