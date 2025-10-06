@@ -16,6 +16,7 @@ use App\Models\ReconciliationRecord;
 use App\Models\PrecioPrograma;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Services\PaymentReplaceService;
 use Carbon\Carbon;
 
 class PaymentHistoryImport implements ToCollection, WithHeadingRow
@@ -520,7 +521,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $bancoNormalizado = $this->normalizeBank($banco);
                 $boletaNormalizada = $this->normalizeReceiptNumber($boleta);
                 $fechaYmd = $fechaPago->format('Y-m-d');
-                $fingerprint = hash('sha256', 
+                $fingerprint = hash('sha256',
                     $bancoNormalizado.'|'.$boletaNormalizada.'|'.$programaAsignado->estudiante_programa_id.'|'.$fechaYmd);
 
                 $kardexPorFingerprint = KardexPago::where('boleta_fingerprint', $fingerprint)->first();
