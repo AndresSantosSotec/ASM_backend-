@@ -42,15 +42,20 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     // 🆕 NUEVO: Servicio de estudiantes
     private EstudianteService $estudianteService;
 
-    public function __construct(int $uploaderId, string $tipoArchivo = 'cardex_directo')
+    // 🆕 NUEVO: Modo reemplazo de cuotas pendientes
+    private bool $modoReemplazoPendientes = false;
+
+    public function __construct(int $uploaderId, string $tipoArchivo = 'cardex_directo', bool $modoReemplazoPendientes = false)
     {
         $this->uploaderId = $uploaderId;
         $this->tipoArchivo = $tipoArchivo;
+        $this->modoReemplazoPendientes = $modoReemplazoPendientes;
         $this->estudianteService = new EstudianteService();
 
         Log::info('📦 PaymentHistoryImport Constructor', [
             'uploaderId' => $uploaderId,
             'tipoArchivo' => $tipoArchivo,
+            'modoReemplazoPendientes' => $modoReemplazoPendientes,
             'timestamp' => now()->toDateTimeString()
         ]);
     }
@@ -686,6 +691,21 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         float $mensualidadAprobada,
         int $numeroFila
     ) {
+        // 🔄 NUEVO: Si modo reemplazo está activo, buscar y reemplazar cuota pendiente
+        if ($this->modoReemplazoPendientes) {
+            $cuotaReemplazada = $this->reemplazarCuotaPendiente(
+                $estudianteProgramaId,
+                $fechaPago,
+                $montoPago,
+                $mensualidadAprobada,
+                $numeroFila
+            );
+            
+            if ($cuotaReemplazada) {
+                return $cuotaReemplazada;
+            }
+        }
+
         $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
             ->where('estado', 'pendiente')
             ->sortBy('fecha_vencimiento');
@@ -902,6 +922,85 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ];
 
             return $primeraCuota;
+        }
+
+        return null;
+    }
+
+    /**
+     * 🔄 Buscar y reemplazar cuota pendiente con estado "Pagado"
+     * Este método se usa cuando modoReemplazoPendientes está activo
+     */
+    private function reemplazarCuotaPendiente(
+        int $estudianteProgramaId,
+        Carbon $fechaPago,
+        float $montoPago,
+        float $mensualidadAprobada,
+        int $numeroFila
+    ) {
+        // Buscar cuotas pendientes ordenadas por fecha de vencimiento
+        $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
+            ->where('estado', 'pendiente')
+            ->sortBy('fecha_vencimiento');
+
+        if ($cuotasPendientes->isEmpty()) {
+            return null;
+        }
+
+        Log::info("🔄 Modo reemplazo activo: buscando cuota pendiente para reemplazar", [
+            'estudiante_programa_id' => $estudianteProgramaId,
+            'cuotas_pendientes' => $cuotasPendientes->count(),
+            'monto_pago' => $montoPago,
+            'mensualidad_aprobada' => $mensualidadAprobada,
+            'fila' => $numeroFila
+        ]);
+
+        // 🔍 PRIORIDAD 1: Buscar por mensualidad aprobada (si está disponible)
+        $cuotaCompatible = null;
+        if ($mensualidadAprobada > 0) {
+            $tolerancia = max(100, $mensualidadAprobada * 0.50);
+            $cuotaCompatible = $cuotasPendientes->first(function ($cuota) use ($mensualidadAprobada, $tolerancia) {
+                $diferencia = abs($cuota->monto - $mensualidadAprobada);
+                return $diferencia <= $tolerancia;
+            });
+        }
+
+        // 🔍 PRIORIDAD 2: Buscar por monto de pago
+        if (!$cuotaCompatible) {
+            $tolerancia = max(100, $montoPago * 0.50);
+            $cuotaCompatible = $cuotasPendientes->first(function ($cuota) use ($montoPago, $tolerancia) {
+                $diferencia = abs($cuota->monto - $montoPago);
+                return $diferencia <= $tolerancia;
+            });
+        }
+
+        // 🔍 PRIORIDAD 3: Primera cuota pendiente
+        if (!$cuotaCompatible) {
+            $cuotaCompatible = $cuotasPendientes->first();
+        }
+
+        if ($cuotaCompatible) {
+            Log::info("🔄 Reemplazando cuota pendiente con pago", [
+                'cuota_id' => $cuotaCompatible->id,
+                'numero_cuota' => $cuotaCompatible->numero_cuota,
+                'monto_cuota_original' => $cuotaCompatible->monto,
+                'monto_pago' => $montoPago,
+                'estado_anterior' => 'pendiente',
+                'estado_nuevo' => 'pagado',
+                'fila' => $numeroFila
+            ]);
+
+            // Actualizar la cuota a estado pagado
+            $cuotaCompatible->update([
+                'estado' => 'pagado',
+                'paid_at' => $fechaPago,
+                'monto_pagado' => $montoPago,
+            ]);
+
+            // Limpiar cache para forzar recarga
+            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+            return $cuotaCompatible;
         }
 
         return null;
@@ -1422,13 +1521,33 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     /**
      * 🆕 Generar cuotas automáticamente cuando no existen
      * Similar a la lógica de InscripcionesImport
+     * 
+     * Mejoras:
+     * - Soporte para programas TEMP con cuotas dinámicas
+     * - Generación de cuota 0 (inscripción) si aplica
+     * - Inferencia de cantidad de cuotas desde pagos del Excel
      */
     private function generarCuotasSiFaltan(int $estudianteProgramaId, ?array $row = null)
     {
         try {
-            // Obtener datos del estudiante_programa
-            $estudiantePrograma = DB::table('estudiante_programa')
-                ->where('id', $estudianteProgramaId)
+            // Verificar si ya existen cuotas
+            $cuotasExistentes = DB::table('cuotas_programa_estudiante')
+                ->where('estudiante_programa_id', $estudianteProgramaId)
+                ->count();
+
+            if ($cuotasExistentes > 0) {
+                Log::debug("⏭️ Ya existen cuotas para este programa, saltando generación", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'cuotas_existentes' => $cuotasExistentes
+                ]);
+                return false;
+            }
+
+            // Obtener datos del estudiante_programa y programa
+            $estudiantePrograma = DB::table('estudiante_programa as ep')
+                ->leftJoin('tb_programas as prog', 'ep.programa_id', '=', 'prog.id')
+                ->where('ep.id', $estudianteProgramaId)
+                ->select('ep.*', 'prog.abreviatura as programa_codigo')
                 ->first();
 
             if (!$estudiantePrograma) {
@@ -1438,10 +1557,32 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 return false;
             }
 
+            // Detectar si es programa TEMP
+            $esProgramaTemp = strtoupper($estudiantePrograma->programa_codigo ?? '') === 'TEMP';
+
             // Usar datos del estudiante_programa para generar cuotas
             $numCuotas = $estudiantePrograma->duracion_meses ?? 0;
             $cuotaMensual = $estudiantePrograma->cuota_mensual ?? 0;
             $fechaInicio = $estudiantePrograma->fecha_inicio ?? now()->toDateString();
+            $inscripcion = null;
+
+            // 🔥 NUEVO: Para programas TEMP, inferir cantidad de cuotas desde Excel
+            if ($esProgramaTemp && $row) {
+                // Intentar inferir el número de cuotas desde el número de pagos
+                // Esto requeriría conocer todos los pagos del estudiante
+                Log::info("🧮 Programa TEMP detectado, usando configuración dinámica", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'programa_codigo' => $estudiantePrograma->programa_codigo
+                ]);
+                
+                // Para TEMP, usar valores por defecto si no hay datos
+                if ($numCuotas <= 0) {
+                    $numCuotas = 12; // Default razonable para TEMP
+                }
+                if ($cuotaMensual <= 0 && isset($row['mensualidad_aprobada'])) {
+                    $cuotaMensual = $this->normalizarMonto($row['mensualidad_aprobada']);
+                }
+            }
 
             // Si no hay datos suficientes en estudiante_programa, intentar con precio_programa
             if ($numCuotas <= 0 || $cuotaMensual <= 0) {
@@ -1449,7 +1590,17 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 if ($precioPrograma) {
                     $numCuotas = $numCuotas > 0 ? $numCuotas : ($precioPrograma->meses ?? 12);
                     $cuotaMensual = $cuotaMensual > 0 ? $cuotaMensual : ($precioPrograma->cuota_mensual ?? 0);
+                    
+                    // 🆕 Obtener inscripción si está disponible
+                    if ($precioPrograma->inscripcion > 0) {
+                        $inscripcion = $precioPrograma->inscripcion;
+                    }
                 }
+            }
+
+            // 🆕 Inferir inscripción desde Excel si está disponible
+            if (!$inscripcion && $row && isset($row['inscripcion']) && $row['inscripcion'] > 0) {
+                $inscripcion = $this->normalizarMonto($row['inscripcion']);
             }
 
             // Validar que tengamos los datos mínimos
@@ -1457,7 +1608,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 Log::warning("⚠️ No se pueden generar cuotas: datos insuficientes", [
                     'estudiante_programa_id' => $estudianteProgramaId,
                     'num_cuotas' => $numCuotas,
-                    'cuota_mensual' => $cuotaMensual
+                    'cuota_mensual' => $cuotaMensual,
+                    'programa_codigo' => $estudiantePrograma->programa_codigo ?? 'N/A'
                 ]);
                 return false;
             }
@@ -1466,11 +1618,33 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'estudiante_programa_id' => $estudianteProgramaId,
                 'num_cuotas' => $numCuotas,
                 'cuota_mensual' => $cuotaMensual,
-                'fecha_inicio' => $fechaInicio
+                'inscripcion' => $inscripcion,
+                'fecha_inicio' => $fechaInicio,
+                'es_temp' => $esProgramaTemp
             ]);
 
             // Generar las cuotas
             $cuotas = [];
+            
+            // 🆕 CUOTA 0 (Inscripción) si aplica
+            if ($inscripcion && $inscripcion > 0) {
+                $cuotas[] = [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'numero_cuota' => 0,
+                    'fecha_vencimiento' => $fechaInicio,
+                    'monto' => $inscripcion,
+                    'estado' => 'pendiente',
+                    'descripcion' => 'Inscripción',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+                
+                Log::info("✅ Cuota 0 (Inscripción) agregada", [
+                    'monto' => $inscripcion
+                ]);
+            }
+            
+            // Cuotas 1..N (cuotas mensuales)
             for ($i = 1; $i <= $numCuotas; $i++) {
                 $fechaVencimiento = Carbon::parse($fechaInicio)
                     ->addMonths($i - 1)
@@ -1492,7 +1666,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
             Log::info("✅ Cuotas generadas exitosamente", [
                 'estudiante_programa_id' => $estudianteProgramaId,
-                'cantidad_cuotas' => count($cuotas)
+                'cantidad_cuotas' => count($cuotas),
+                'incluye_inscripcion' => $inscripcion ? 'SÍ' : 'NO'
             ]);
 
             // Limpiar cache para forzar recarga
