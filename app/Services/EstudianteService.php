@@ -252,6 +252,8 @@ class EstudianteService
         $estudiantePrograma = EstudiantePrograma::create([
             'prospecto_id' => $prospecto->id,
             'programa_id' => $programa->id,
+            'inscripcion' => 0,
+            'inversion_total' => $mensualidad * $numCuotas,
             'fecha_inicio' => $fechaInicio->toDateString(),
             'fecha_fin' => $fechaFin->toDateString(),
             'cuota_mensual' => $mensualidad,
