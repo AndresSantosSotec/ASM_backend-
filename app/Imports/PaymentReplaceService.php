@@ -39,10 +39,11 @@ class PaymentReplaceService
         // 2) Inferencias a partir del Excel (por si faltan datos en estudiante_programa):
         $fechaInicioInferida = $this->inferFechaInicio($pagosEstudiante);
         $mensualidadInferida = $this->inferMensualidad($pagosEstudiante);
+        $inscripcionInferida = $this->inferInscripcion($pagosEstudiante); // 👈 NUEVO
 
         // 3) Por cada EP hacer purge + rebuild
         foreach ($programas as $ep) {
-            DB::transaction(function () use ($ep, $uploaderId, $carnetNormalizado, $fechaInicioInferida, $mensualidadInferida) {
+            DB::transaction(function () use ($ep, $uploaderId, $carnetNormalizado, $fechaInicioInferida, $mensualidadInferida, $inscripcionInferida) {
                 Log::info("🧹 [Replace] PURGE EP {$ep->estudiante_programa_id} ({$ep->nombre_programa})");
 
                 // 3.1 Borrar conciliaciones de kardex
@@ -64,7 +65,7 @@ class PaymentReplaceService
                 Log::info("   • cuotas eliminadas", ['count' => $deletedC]);
 
                 // 3.4 Reconstruir cuotas según duración del programa
-                $this->rebuildCuotasFromProgram($ep->estudiante_programa_id, $fechaInicioInferida, $mensualidadInferida);
+                $this->rebuildCuotasFromProgram($ep->estudiante_programa_id, $fechaInicioInferida, $mensualidadInferida, $inscripcionInferida);
 
                 Log::info("✅ [Replace] EP {$ep->estudiante_programa_id} listo para nueva importación", [
                     'carnet' => $carnetNormalizado,
@@ -78,7 +79,7 @@ class PaymentReplaceService
      * Reconstruye cuotas exactamente con la duración del programa.
      * Usa estudiante_programa; si faltan datos, complementa con precio_programa o inferencias.
      */
-    private function rebuildCuotasFromProgram(int $epId, ?Carbon $fechaInicioInferida, ?float $mensualidadInferida): void
+    private function rebuildCuotasFromProgram(int $epId, ?Carbon $fechaInicioInferida, ?float $mensualidadInferida, ?float $inscripcionInferida = null): void
     {
         $ep = DB::table('estudiante_programa')->where('id', $epId)->first();
         if (!$ep) {
@@ -92,6 +93,7 @@ class PaymentReplaceService
         $fechaInicio    = $ep->fecha_inicio ? Carbon::parse($ep->fecha_inicio) : null;
 
         // Complementar con precio_programa si falta
+        $pp = null;
         if ($duracionMeses <= 0 || $cuotaMensual <= 0) {
             $pp = PrecioPrograma::where('programa_id', $ep->programa_id)->first();
             if ($pp) {
@@ -106,15 +108,55 @@ class PaymentReplaceService
         if (!$fechaInicio && $fechaInicioInferida) { $fechaInicio = $fechaInicioInferida; }
         if (!$fechaInicio) { $fechaInicio = now(); }
 
+        // === 👇 INSCRIPCIÓN (CUOTA 0) =========================================
+        $inscripcion = null;
+
+        // 1) Si el EP tiene campo inscripcion (si existe en tu esquema) úsalo
+        if (property_exists($ep, 'inscripcion') && $ep->inscripcion > 0) {
+            $inscripcion = (float)$ep->inscripcion;
+        }
+
+        // 2) Si no, usa PrecioPrograma
+        if ($inscripcion === null) {
+            if (!$pp) {
+                $pp = PrecioPrograma::where('programa_id', $ep->programa_id)->first();
+            }
+            if ($pp && $pp->inscripcion > 0) {
+                $inscripcion = (float)$pp->inscripcion;
+            }
+        }
+
+        // 3) Si no, usa inferencia del Excel (si vino)
+        if ($inscripcion === null && $inscripcionInferida && $inscripcionInferida > 0) {
+            $inscripcion = $inscripcionInferida;
+        }
+        // ======================================================================
+
         Log::info("🔧 [Replace] Rebuild cuotas", [
             'ep_id' => $epId,
             'duracion_meses' => $duracionMeses,
             'cuota_mensual' => $cuotaMensual,
             'fecha_inicio' => $fechaInicio->toDateString(),
+            'inscripcion' => $inscripcion,
         ]);
 
         // Construcción de la malla de cuotas
         $rows = [];
+
+        // 👇 Si hay inscripción > 0, crear CUOTA 0
+        if ($inscripcion !== null && $inscripcion > 0) {
+            $rows[] = [
+                'estudiante_programa_id' => $epId,
+                'numero_cuota'           => 0,
+                'fecha_vencimiento'      => $fechaInicio->toDateString(),
+                'monto'                  => $inscripcion,
+                'estado'                 => 'pendiente',
+                'created_at'             => now(),
+                'updated_at'             => now(),
+            ];
+        }
+
+        // Cuotas 1..N como siempre
         for ($i = 1; $i <= $duracionMeses; $i++) {
             $rows[] = [
                 'estudiante_programa_id' => $epId,
@@ -129,9 +171,10 @@ class PaymentReplaceService
 
         DB::table('cuotas_programa_estudiante')->insert($rows);
 
-        Log::info("✅ [Replace] Malla de {$duracionMeses} cuotas reconstruida", [
+        Log::info("✅ [Replace] Malla reconstruida (incluye cuota 0 si aplica)", [
             'ep_id' => $epId,
-            'cuota_mensual' => $cuotaMensual
+            'cuota_mensual' => $cuotaMensual,
+            'inscripcion' => $inscripcion
         ]);
     }
 
@@ -165,5 +208,32 @@ class PaymentReplaceService
         arsort($freq);
         $moda = (float)array_key_first($freq);
         return $moda ?: null;
+    }
+
+    /** Usa concepto 'inscrip' o cercanía de monto para inferir inscripción (moda) */
+    private function inferInscripcion(Collection $pagos): ?float
+    {
+        // 1) Prioriza pagos cuyo concepto sugiera inscripción
+        $candidatosConcepto = $pagos->filter(function ($r) {
+            $c = strtolower((string)($r['concepto'] ?? ''));
+            return $c !== '' && str_contains($c, 'inscrip'); // inscripcion / inscripción / etc.
+        })->map(function ($r) {
+            $m = $r['monto'] ?? null;
+            if ($m === null || $m === '') return null;
+            $m = is_string($m) ? floatval(preg_replace('/[Q$,\s]/', '', $m)) : (float)$m;
+            return $m > 0 ? $m : null;
+        })->filter();
+
+        if ($candidatosConcepto->isNotEmpty()) {
+            // moda simple
+            $freq = [];
+            foreach ($candidatosConcepto as $v) { $freq[(string)$v] = ($freq[(string)$v] ?? 0) + 1; }
+            arsort($freq);
+            return (float)array_key_first($freq);
+        }
+
+        // 2) Si no hay concepto, intenta detectar un "monto chico único" que no sea mensualidad (heurística suave)
+        // (opcional; lo dejamos conservador)
+        return null;
     }
 }

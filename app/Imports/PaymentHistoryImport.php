@@ -43,15 +43,25 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     // 🆕 NUEVO: Servicio de estudiantes
     private EstudianteService $estudianteService;
 
-    public function __construct(int $uploaderId, string $tipoArchivo = 'cardex_directo')
+    // 🆕 NUEVO: Modo de reemplazo y servicio relacionado
+    private bool $modoReemplazo = false;
+    private ?PaymentReplaceService $replaceService = null;
+
+    // 🆕 NUEVO: Contexto de fila para detección de inscripción
+    private ?array $rowContext = null;
+
+    public function __construct(int $uploaderId, string $tipoArchivo = 'cardex_directo', bool $modoReemplazo = false)
     {
         $this->uploaderId = $uploaderId;
         $this->tipoArchivo = $tipoArchivo;
         $this->estudianteService = new EstudianteService();
+        $this->modoReemplazo = $modoReemplazo;
+        $this->replaceService = $modoReemplazo ? new PaymentReplaceService() : null;
 
         Log::info('📦 PaymentHistoryImport Constructor', [
             'uploaderId' => $uploaderId,
             'tipoArchivo' => $tipoArchivo,
+            'modoReemplazo' => $modoReemplazo,
             'timestamp' => now()->toDateTimeString()
         ]);
     }
@@ -103,6 +113,29 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'total_carnets' => $pagosPorCarnet->count(),
             'carnets_muestra' => $pagosPorCarnet->keys()->take(5)->toArray()
         ]);
+
+        // 🆕 MODO REEMPLAZO: Purge + Rebuild antes de importar pagos
+        if ($this->modoReemplazo && $this->replaceService) {
+            Log::info('🧹 [Replace] Iniciando PURGE+REBUILD global antes de importar pagos', [
+                'carnets' => $pagosPorCarnet->keys()->values()->toArray()
+            ]);
+
+            foreach ($pagosPorCarnet as $carnet => $pagosEstudiante) {
+                $carnetNorm = $this->normalizarCarnet($carnet);
+
+                $resolver = function (string $carnetN, $row) {
+                    return $this->obtenerProgramasEstudiante($carnetN, $row);
+                };
+
+                $this->replaceService->purgeAndRebuildForCarnet($resolver, $carnetNorm, $pagosEstudiante, $this->uploaderId);
+
+                // Limpiar cache para este carnet
+                unset($this->estudiantesCache[$carnetNorm]);
+                $this->cuotasPorEstudianteCache = [];
+            }
+
+            Log::info('✅ [Replace] PURGE+REBUILD global finalizado. Procediendo a registrar pagos del Excel...');
+        }
 
         // ✅ Procesar cada estudiante
         foreach ($pagosPorCarnet as $carnet => $pagosEstudiante) {
@@ -440,13 +473,21 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $mesInicio = trim((string)($row['mes_inicio'] ?? ''));
         $mensualidadAprobada = $this->normalizarMonto($row['mensualidad_aprobada'] ?? 0);
 
+        // 🆕 NUEVO: Guardar contexto de fila para buscarCuotaFlexible
+        $this->rowContext = [
+            'concepto' => $concepto,
+            'mes_pago' => $mesPago,
+            'mes_inicio' => $mesInicio
+        ];
+
         Log::info("📄 Procesando fila {$numeroFila}", [
             'carnet' => $carnet,
             'nombre' => $nombreEstudiante,
             'boleta' => $boleta,
             'monto' => $monto,
             'fecha_pago' => $fechaPago?->toDateString(),
-            'mensualidad_aprobada' => $mensualidadAprobada
+            'mensualidad_aprobada' => $mensualidadAprobada,
+            'concepto' => $concepto
         ]);
 
         // ✅ Validaciones básicas mejoradas
@@ -653,6 +694,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'nombre' => $nombreEstudiante,
                     'kardex_id' => $kardex->id,
                     'cuota_id' => $cuota ? $cuota->id : null,
+                    'numero_cuota' => $cuota ? $cuota->numero_cuota : null, // 👈 NUEVO
+                    'es_inscripcion' => $cuota ? ((int)$cuota->numero_cuota === 0) : false, // 👈 NUEVO
                     'programa' => $programaAsignado->nombre_programa ?? 'N/A',
                     'monto' => $monto,
                     'fecha_pago' => $fechaPago->toDateString()
@@ -678,6 +721,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
             // Don't re-throw - allow processing to continue with next payment
         }
+
+        // 🆕 NUEVO: Limpiar contexto de fila
+        unset($this->rowContext);
     }
 
     private function buscarCuotaFlexible(
@@ -752,6 +798,58 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'mensualidad_aprobada' => $mensualidadAprobada,
             'fila' => $numeroFila
         ]);
+
+        // === PRIORIDAD 0: CUOTA 0 (Inscripción) ===
+        $cuotaInscripcion = $cuotasPendientes->first(function ($c) {
+            return (int)$c->numero_cuota === 0;
+        });
+
+        if ($cuotaInscripcion && $cuotaInscripcion->estado === 'pendiente') {
+            // Detecta si el pago parece ser de inscripción:
+            // a) por concepto
+            $esInscripcionPorConcepto = false;
+            if (isset($this->rowContext) && is_array($this->rowContext)) {
+                $conceptoRaw = strtolower((string)($this->rowContext['concepto'] ?? ''));
+                $esInscripcionPorConcepto = $conceptoRaw !== '' && str_contains($conceptoRaw, 'inscrip');
+            }
+
+            // b) por monto cercano
+            $toleranciaIns = max(100, $cuotaInscripcion->monto * 0.30);
+            $esInscripcionPorMonto = abs($cuotaInscripcion->monto - $montoPago) <= $toleranciaIns;
+
+            if ($esInscripcionPorConcepto || $esInscripcionPorMonto) {
+                Log::info("✅ Cuota 0 (inscripción) detectada como match", [
+                    'cuota_id' => $cuotaInscripcion->id,
+                    'monto_cuota' => $cuotaInscripcion->monto,
+                    'monto_pago' => $montoPago,
+                    'por_concepto' => $esInscripcionPorConcepto,
+                    'por_monto' => $esInscripcionPorMonto,
+                    'tolerancia' => $toleranciaIns
+                ]);
+
+                // Permitir parciales en cuota 0 igual que en otras
+                if ($montoPago < $cuotaInscripcion->monto && $cuotaInscripcion->monto > 0) {
+                    $porcentaje = ($montoPago / $cuotaInscripcion->monto) * 100;
+                    if ($porcentaje >= 30) {
+                        $this->pagosParciales++;
+                        $this->totalDiscrepancias += ($cuotaInscripcion->monto - $montoPago);
+
+                        $this->advertencias[] = [
+                            'tipo' => 'PAGO_PARCIAL_INSCRIPCION',
+                            'fila' => $numeroFila,
+                            'advertencia' => sprintf(
+                                'Pago parcial de inscripción: Q%.2f de Q%.2f (%.1f%%)',
+                                $montoPago, $cuotaInscripcion->monto, $porcentaje
+                            ),
+                            'cuota_id' => $cuotaInscripcion->id
+                        ];
+                    }
+                }
+
+                return $cuotaInscripcion;
+            }
+        }
+        // === FIN PRIORIDAD 0 ===
 
         // ✅ PRIORIDAD 1: Coincidencia exacta con mensualidad aprobada
         // 🔥 TOLERANCIA MÁXIMA: 50% o mínimo Q100 para importación histórica
