@@ -1292,9 +1292,19 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     /**
      * 🔥 MÉTODO MEJORADO: Ahora crea estudiantes/programas si no existen
+     * @param int $recursionDepth Profundidad de recursión para evitar loops infinitos
      */
-    private function obtenerProgramasEstudiante($carnet, $row = null)
+    private function obtenerProgramasEstudiante($carnet, $row = null, int $recursionDepth = 0)
     {
+        // 🛑 Prevenir recursión infinita
+        if ($recursionDepth > 1) {
+            Log::warning("🛑 LOOP INFINITO PREVENIDO: Profundidad máxima alcanzada", [
+                'carnet' => $carnet,
+                'recursion_depth' => $recursionDepth
+            ]);
+            return $this->estudiantesCache[$carnet] ?? collect([]);
+        }
+
         if (isset($this->estudiantesCache[$carnet])) {
             Log::debug("📋 Usando cache para carnet", ['carnet' => $carnet]);
             return $this->estudiantesCache[$carnet];
@@ -1414,23 +1424,39 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         // 🔥 NUEVO: Actualizar programas TEMP a reales si el Excel tiene plan_estudios
         if ($row && !empty($row['plan_estudios'])) {
-            foreach ($programas as $programa) {
-                if ($programa->programa_abreviatura === 'TEMP') {
-                    Log::info("🔄 Detectado programa TEMP, intentando actualizar", [
-                        'estudiante_programa_id' => $programa->estudiante_programa_id,
-                        'plan_estudios_excel' => $row['plan_estudios']
-                    ]);
+            $planEstudios = strtoupper(trim($row['plan_estudios']));
+            
+            // 🛑 SKIP: No intentar actualizar si el Excel también tiene TEMP
+            if ($planEstudios === 'TEMP') {
+                Log::info("⏭️ Saltando actualización TEMP-to-TEMP (Excel también contiene TEMP)", [
+                    'carnet' => $carnet,
+                    'plan_estudios' => $planEstudios
+                ]);
+            } else {
+                foreach ($programas as $programa) {
+                    if ($programa->programa_abreviatura === 'TEMP') {
+                        Log::info("🔄 Detectado programa TEMP, intentando actualizar", [
+                            'estudiante_programa_id' => $programa->estudiante_programa_id,
+                            'plan_estudios_excel' => $row['plan_estudios']
+                        ]);
 
-                    $actualizado = $this->estudianteService->actualizarProgramaTempAReal(
-                        $programa->estudiante_programa_id,
-                        $row['plan_estudios'],
-                        $this->uploaderId
-                    );
+                        $actualizado = $this->estudianteService->actualizarProgramaTempAReal(
+                            $programa->estudiante_programa_id,
+                            $row['plan_estudios'],
+                            $this->uploaderId
+                        );
 
-                    if ($actualizado) {
-                        // Recargar programas después de actualizar
-                        unset($this->estudiantesCache[$carnet]);
-                        return $this->obtenerProgramasEstudiante($carnet, $row);
+                        if ($actualizado) {
+                            // Recargar programas después de actualizar (con depth+1 para prevenir loops)
+                            unset($this->estudiantesCache[$carnet]);
+                            return $this->obtenerProgramasEstudiante($carnet, $row, $recursionDepth + 1);
+                        } else {
+                            // ✅ Continuar con TEMP si no se puede actualizar
+                            Log::info("⏭️ No se encontró programa real, continuando con TEMP", [
+                                'estudiante_programa_id' => $programa->estudiante_programa_id,
+                                'plan_estudios_excel' => $row['plan_estudios']
+                            ]);
+                        }
                     }
                 }
             }
