@@ -45,24 +45,43 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     // 🆕 NUEVO: Modo reemplazo de cuotas pendientes
     private bool $modoReemplazoPendientes = false;
 
-    // 🆕 NUEVO: Modo verbose para logging detallado
-    private bool $verbose = false;
-    private ?\Carbon\Carbon $inicio = null;
+    
+    // 🆕 NUEVO: Modo silencioso (solo errores críticos)
+    private bool $modoSilencioso = false;
+    
+    // 🆕 NUEVO: Modo inserción forzada (crear registros sin validación completa)
+    private bool $modoInsercionForzada = false;
+    
+    // 🆕 NUEVO: Métricas de tiempo y memoria
+    private float $tiempoInicio = 0;
+    private int $memoryInicio = 0;
 
-    public function __construct(int $uploaderId, string $tipoArchivo = 'cardex_directo', bool $modoReemplazoPendientes = false)
-    {
+    public function __construct(
+        int $uploaderId, 
+        string $tipoArchivo = 'cardex_directo', 
+        bool $modoReemplazoPendientes = false,
+        bool $modoSilencioso = false,
+        bool $modoInsercionForzada = false
+    ) {
+
         $this->uploaderId = $uploaderId;
         $this->tipoArchivo = $tipoArchivo;
         $this->modoReemplazoPendientes = $modoReemplazoPendientes;
+        $this->modoSilencioso = $modoSilencioso;
+        $this->modoInsercionForzada = $modoInsercionForzada;
         $this->estudianteService = new EstudianteService();
-        $this->verbose = config('app.import_verbose', false);
-        $this->inicio = now();
+        
+        // Iniciar medición de tiempo y memoria
+        $this->tiempoInicio = microtime(true);
+        $this->memoryInicio = memory_get_usage();
 
-        if ($this->verbose) {
+        if (!$this->modoSilencioso) {
             Log::info('📦 PaymentHistoryImport Constructor', [
                 'uploaderId' => $uploaderId,
                 'tipoArchivo' => $tipoArchivo,
                 'modoReemplazoPendientes' => $modoReemplazoPendientes,
+                'modoSilencioso' => $modoSilencioso,
+                'modoInsercionForzada' => $modoInsercionForzada,
                 'timestamp' => now()->toDateTimeString()
             ]);
         }
@@ -72,10 +91,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     {
         $this->totalRows = $rows->count();
 
-        Log::info('=== 🚀 INICIANDO PROCESAMIENTO ===', [
-            'total_rows' => $this->totalRows,
-            'timestamp' => now()->toDateTimeString()
-        ]);
+        if (!$this->modoSilencioso) {
+            Log::info('=== 🚀 INICIANDO PROCESAMIENTO ===', [
+                'total_rows' => $this->totalRows,
+                'primera_fila' => $rows->first()?->toArray(),
+                'columnas_detectadas' => $rows->first() ? array_keys($rows->first()->toArray()) : [],
+                'timestamp' => now()->toDateTimeString()
+            ]);
+        }
 
         // ✅ Validar que haya datos
         if ($this->totalRows === 0) {
@@ -98,28 +121,39 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'columnas_encontradas' => $validacionColumnas['encontradas'],
                 'solucion' => 'Asegúrate de que el archivo tenga todas las columnas requeridas en la primera fila'
             ];
-            Log::error('❌ Estructura de columnas inválida', [
-                'faltantes' => $validacionColumnas['faltantes']
-            ]);
+            
+            if (!$this->modoSilencioso) {
+                Log::error('❌ Estructura de columnas inválida', [
+                    'faltantes' => $validacionColumnas['faltantes']
+                ]);
+            }
+            
             return;
         }
 
-        if ($this->verbose) {
+        if (!$this->modoSilencioso) {
             Log::info('✅ Estructura del Excel validada correctamente');
         }
 
         // ✅ Agrupar por carnet para procesamiento ordenado
         $pagosPorCarnet = $rows->groupBy('carnet');
 
-        if ($this->verbose) {
+        if (!$this->modoSilencioso) {
             Log::info('📊 Pagos agrupados por carnet', [
                 'total_carnets' => $pagosPorCarnet->count(),
                 'carnets_muestra' => $pagosPorCarnet->keys()->take(5)->toArray()
             ]);
         }
 
+        // 🆕 NUEVO: Procesamiento por bloques de 500 filas
+        $carnetsProcesados = 0;
+        $tamanioBloque = 500;
+        $totalCarnets = $pagosPorCarnet->count();
+        
         // ✅ Procesar cada estudiante
         foreach ($pagosPorCarnet as $carnet => $pagosEstudiante) {
+            $carnetsProcesados++;
+            
             try {
                 $this->procesarPagosDeEstudiante($carnet, $pagosEstudiante);
             } catch (\Throwable $ex) {
@@ -137,121 +171,215 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'cantidad_pagos_afectados' => $pagosEstudiante->count()
                 ];
             }
-        }
-
-        Log::info('=== ✅ IMPORTACIÓN FINALIZADA ===', [
-            'total_filas' => $this->totalRows,
-            'procesados' => $this->procesados,
-            'errores' => count($this->errores),
-            'advertencias' => count($this->advertencias),
-            'duracion_segundos' => $this->inicio ? now()->diffInSeconds($this->inicio) : 0,
-            'kardex_creados' => $this->kardexCreados,
-            'cuotas_actualizadas' => $this->cuotasActualizadas,
-            'conciliaciones' => $this->conciliaciones,
-            'total_monto' => round($this->totalAmount, 2),
-            'pagos_parciales' => $this->pagosParciales,
-            'total_discrepancias' => round($this->totalDiscrepancias, 2)
-        ]);
-
-        // 🆕 NUEVO: Resumen de registros exitosos (solo en modo verbose)
-        if ($this->verbose && !empty($this->detalles)) {
-            Log::info('📊 RESUMEN DE REGISTROS IMPORTADOS EXITOSAMENTE', [
-                'total_exitosos' => count($this->detalles),
-                'monto_total_procesado' => 'Q' . number_format($this->totalAmount, 2)
-            ]);
-
-            // Agrupar por programa
-            $porPrograma = collect($this->detalles)->groupBy('programa');
-
-            foreach ($porPrograma as $programa => $registros) {
-                $montoPrograma = collect($registros)->sum('monto');
-
-                Log::info("✅ Programa: {$programa}", [
-                    'cantidad_pagos' => $registros->count(),
-                    'monto_total' => 'Q' . number_format($montoPrograma, 2),
-                    'pagos' => collect($registros)->map(function ($detalle) {
-                        return [
-                            'fila' => $detalle['fila'],
-                            'carnet' => $detalle['carnet'],
-                            'nombre' => $detalle['nombre'],
-                            'kardex_id' => $detalle['kardex_id'],
-                            'cuota_id' => $detalle['cuota_id'] ?? 'SIN CUOTA',
-                            'monto' => 'Q' . number_format($detalle['monto'], 2),
-                            'fecha' => $detalle['fecha_pago']
-                        ];
-                    })->toArray()
-                ]);
-            }
-
-            // 🆕 Resumen por estudiante
-            $porEstudiante = collect($this->detalles)->groupBy('carnet');
-
-            Log::info('📋 RESUMEN POR ESTUDIANTE', [
-                'total_estudiantes_procesados' => $porEstudiante->count()
-            ]);
-
-            foreach ($porEstudiante as $carnet => $registros) {
-                $montoEstudiante = collect($registros)->sum('monto');
-
-                Log::info("👤 Estudiante: {$carnet}", [
-                    'nombre' => $registros->first()['nombre'] ?? 'N/A',
-                    'cantidad_pagos' => $registros->count(),
-                    'monto_total' => 'Q' . number_format($montoEstudiante, 2),
-                    'programa' => $registros->first()['programa'] ?? 'N/A',
-                    'kardex_ids_creados' => collect($registros)->pluck('kardex_id')->toArray()
-                ]);
+            
+            // 🆕 NUEVO: Limpiar cachés cada 500 carnets
+            if ($carnetsProcesados % $tamanioBloque === 0) {
+                $this->estudiantesCache = [];
+                $this->cuotasPorEstudianteCache = [];
+                
+                if (!$this->modoSilencioso) {
+                    $porcentaje = round(($carnetsProcesados / $totalCarnets) * 100, 1);
+                    Log::info("📊 Progreso: {$carnetsProcesados}/{$totalCarnets} carnets ({$porcentaje}%)", [
+                        'kardex_creados' => $this->kardexCreados,
+                        'errores' => count($this->errores),
+                        'memoria_mb' => round(memory_get_usage() / 1024 / 1024, 2)
+                    ]);
+                }
             }
         }
+        
+        // 🆕 NUEVO: Calcular métricas de tiempo y memoria
+        $tiempoTotal = microtime(true) - $this->tiempoInicio;
+        $memoriaUsada = memory_get_usage() - $this->memoryInicio;
+        $promedioPorFila = $this->totalRows > 0 ? $tiempoTotal / $this->totalRows : 0;
 
-        // 📊 Resumen detallado de errores si los hay
-        if (!empty($this->errores)) {
-            $erroresPorTipo = collect($this->errores)->groupBy('tipo');
-            Log::warning('📊 RESUMEN DE ERRORES POR TIPO', [
-                'total_errores' => count($this->errores),
-                'tipos' => $erroresPorTipo->map(function ($errores, $tipo) {
-                    return [
-                        'cantidad' => $errores->count(),
-                        'ejemplos' => $errores->take(3)->map(function ($error) {
-                            $details = ['mensaje' => $error['error'] ?? 'Error desconocido'];
-                            if (isset($error['carnet'])) $details['carnet'] = $error['carnet'];
-                            if (isset($error['fila'])) $details['fila'] = $error['fila'];
-                            if (isset($error['boleta'])) $details['boleta'] = $error['boleta'];
-                            if (isset($error['cantidad_pagos_afectados'])) $details['pagos_afectados'] = $error['cantidad_pagos_afectados'];
-                            if (isset($error['solucion'])) $details['solucion'] = $error['solucion'];
-                            return $details;
+        // 🆕 NUEVO: Resumen compacto o detallado según modo
+        if ($this->modoSilencioso) {
+            // Modo silencioso: solo métricas principales
+            Log::info('=' . str_repeat('=', 80));
+            Log::info('🎯 RESUMEN FINAL DE IMPORTACIÓN (MODO SILENCIOSO)');
+            Log::info('=' . str_repeat('=', 80));
+            Log::info('Métricas', [
+                'total_procesados' => $this->procesados,
+                'exitosos' => $this->kardexCreados,
+                'con_advertencias' => count($this->advertencias),
+                'con_errores' => count($this->errores),
+                'tiempo_total_seg' => round($tiempoTotal, 2),
+                'promedio_por_fila_seg' => round($promedioPorFila, 4),
+                'memoria_usada_mb' => round($memoriaUsada / 1024 / 1024, 2),
+                'monto_total' => 'Q' . number_format($this->totalAmount, 2)
+            ]);
+            Log::info('=' . str_repeat('=', 80));
+            
+            // Advertencia si el proceso es muy lento
+            if ($promedioPorFila > 0.5) {
+                Log::warning("⚠️ ADVERTENCIA: Proceso lento detectado (>{$promedioPorFila}s por fila)");
+            }
+            
+            // Advertencia de memoria si está cercano al límite
+            $memoryLimit = ini_get('memory_limit');
+            $memoriaActual = memory_get_usage();
+            if ($memoriaActual > 7 * 1024 * 1024 * 1024) { // > 7GB
+                Log::warning("⚠️ ADVERTENCIA: Uso de memoria elevado. Considere aumentar memory_limit", [
+                    'memoria_actual_mb' => round($memoriaActual / 1024 / 1024, 2),
+                    'memory_limit' => $memoryLimit
+                ]);
+            }
+        } else {
+            // Modo normal: log detallado completo
+            Log::info('=== ✅ PROCESAMIENTO COMPLETADO ===', [
+                'total_rows' => $this->totalRows,
+                'procesados' => $this->procesados,
+                'kardex_creados' => $this->kardexCreados,
+                'cuotas_actualizadas' => $this->cuotasActualizadas,
+                'conciliaciones' => $this->conciliaciones,
+                'total_monto' => round($this->totalAmount, 2),
+                'pagos_parciales' => $this->pagosParciales,
+                'total_discrepancias' => round($this->totalDiscrepancias, 2),
+                'errores' => count($this->errores),
+                'advertencias' => count($this->advertencias),
+                'tiempo_total_seg' => round($tiempoTotal, 2),
+                'promedio_por_fila_seg' => round($promedioPorFila, 4),
+                'timestamp' => now()->toDateTimeString()
+            ]);
+
+            // 🆕 NUEVO: Resumen de registros exitosos
+            if (!empty($this->detalles)) {
+                Log::info('📊 RESUMEN DE REGISTROS IMPORTADOS EXITOSAMENTE', [
+                    'total_exitosos' => count($this->detalles),
+                    'monto_total_procesado' => 'Q' . number_format($this->totalAmount, 2)
+                ]);
+
+                // Agrupar por programa
+                $porPrograma = collect($this->detalles)->groupBy('programa');
+
+                foreach ($porPrograma as $programa => $registros) {
+                    $montoPrograma = collect($registros)->sum('monto');
+
+                    Log::info("✅ Programa: {$programa}", [
+                        'cantidad_pagos' => $registros->count(),
+                        'monto_total' => 'Q' . number_format($montoPrograma, 2),
+                        'pagos' => collect($registros)->map(function ($detalle) {
+                            return [
+                                'fila' => $detalle['fila'],
+                                'carnet' => $detalle['carnet'],
+                                'nombre' => $detalle['nombre'],
+                                'kardex_id' => $detalle['kardex_id'],
+                                'cuota_id' => $detalle['cuota_id'] ?? 'SIN CUOTA',
+                                'monto' => 'Q' . number_format($detalle['monto'], 2),
+                                'fecha' => $detalle['fecha_pago']
+                            ];
                         })->toArray()
-                    ];
-                })->toArray()
-            ]);
+                    ]);
+                }
 
-            // Log detailed breakdown for each error type
-            foreach ($erroresPorTipo as $tipo => $errores) {
-                Log::warning("🔍 Detalle de {$tipo}", [
-                    'total' => $errores->count(),
-                    'descripcion' => $this->getErrorTypeDescription($tipo),
-                    'primeros_5_casos' => $errores->take(5)->map(function ($error) {
+                // 🆕 Resumen por estudiante
+                $porEstudiante = collect($this->detalles)->groupBy('carnet');
+
+                Log::info('📋 RESUMEN POR ESTUDIANTE', [
+                    'total_estudiantes_procesados' => $porEstudiante->count()
+                ]);
+
+                foreach ($porEstudiante as $carnet => $registros) {
+                    $montoEstudiante = collect($registros)->sum('monto');
+
+                    Log::info("👤 Estudiante: {$carnet}", [
+                        'nombre' => $registros->first()['nombre'] ?? 'N/A',
+                        'cantidad_pagos' => $registros->count(),
+                        'monto_total' => 'Q' . number_format($montoEstudiante, 2),
+                        'programa' => $registros->first()['programa'] ?? 'N/A',
+                        'kardex_ids_creados' => collect($registros)->pluck('kardex_id')->toArray()
+                    ]);
+                }
+            }
+
+            // 📊 Resumen detallado de errores si los hay
+            if (!empty($this->errores)) {
+                $erroresPorTipo = collect($this->errores)->groupBy('tipo');
+                Log::warning('📊 RESUMEN DE ERRORES POR TIPO', [
+                    'total_errores' => count($this->errores),
+                    'tipos' => $erroresPorTipo->map(function ($errores, $tipo) {
                         return [
-                            'carnet' => $error['carnet'] ?? 'N/A',
-                            'fila' => $error['fila'] ?? 'N/A',
-                            'mensaje' => $error['error'] ?? 'Sin descripción',
-                            'pagos_afectados' => $error['cantidad_pagos_afectados'] ?? 1
+                            'cantidad' => $errores->count(),
+                            'ejemplos' => $errores->take(3)->map(function ($error) {
+                                $details = ['mensaje' => $error['error'] ?? 'Error desconocido'];
+                                if (isset($error['carnet'])) $details['carnet'] = $error['carnet'];
+                                if (isset($error['fila'])) $details['fila'] = $error['fila'];
+                                if (isset($error['boleta'])) $details['boleta'] = $error['boleta'];
+                                if (isset($error['cantidad_pagos_afectados'])) $details['pagos_afectados'] = $error['cantidad_pagos_afectados'];
+                                if (isset($error['solucion'])) $details['solucion'] = $error['solucion'];
+                                return $details;
+                            })->toArray()
+                        ];
+                    })->toArray()
+                ]);
+
+                // Log detailed breakdown for each error type
+                foreach ($erroresPorTipo as $tipo => $errores) {
+                    Log::warning("🔍 Detalle de {$tipo}", [
+                        'total' => $errores->count(),
+                        'descripcion' => $this->getErrorTypeDescription($tipo),
+                        'primeros_5_casos' => $errores->take(5)->map(function ($error) {
+                            return [
+                                'carnet' => $error['carnet'] ?? 'N/A',
+                                'fila' => $error['fila'] ?? 'N/A',
+                                'mensaje' => $error['error'] ?? 'Sin descripción',
+                                'pagos_afectados' => $error['cantidad_pagos_afectados'] ?? 1
+                            ];
+                        })->toArray()
+                    ]);
+                }
+            }
+
+            // 📊 Resumen de advertencias si las hay
+            if (!empty($this->advertencias)) {
+                $advertenciasPorTipo = collect($this->advertencias)->groupBy('tipo');
+                Log::info('📊 RESUMEN DE ADVERTENCIAS POR TIPO', [
+                    'total_advertencias' => count($this->advertencias),
+                    'tipos' => $advertenciasPorTipo->map(function ($advertencias, $tipo) {
+                        return [
+                            'cantidad' => $advertencias->count()
                         ];
                     })->toArray()
                 ]);
             }
-        }
 
-        // 📊 Resumen de advertencias si las hay (solo en modo verbose)
-        if ($this->verbose && !empty($this->advertencias)) {
-            $advertenciasPorTipo = collect($this->advertencias)->groupBy('tipo');
-            Log::info('📊 RESUMEN DE ADVERTENCIAS POR TIPO', [
-                'total_advertencias' => count($this->advertencias),
-                'tipos' => $advertenciasPorTipo->map(function ($advertencias, $tipo) {
-                    return [
-                        'cantidad' => $advertencias->count()
-                    ];
-                })->toArray()
+            // 🆕 NUEVO: Resumen final consolidado
+            Log::info('=' . str_repeat('=', 80));
+            Log::info('🎯 RESUMEN FINAL DE IMPORTACIÓN');
+            Log::info('=' . str_repeat('=', 80));
+            Log::info('✅ EXITOSOS', [
+                'filas_procesadas' => $this->procesados,
+                'kardex_creados' => $this->kardexCreados,
+                'cuotas_actualizadas' => $this->cuotasActualizadas,
+                'conciliaciones_creadas' => $this->conciliaciones,
+                'monto_total' => 'Q' . number_format($this->totalAmount, 2),
+                'porcentaje_exito' => $this->totalRows > 0
+                    ? round(($this->procesados / $this->totalRows) * 100, 2) . '%'
+                    : '0%'
             ]);
+
+            Log::info('⚠️ ADVERTENCIAS', [
+                'total' => count($this->advertencias),
+                'sin_cuota' => collect($this->advertencias)->where('tipo', 'SIN_CUOTA')->count(),
+                'duplicados' => collect($this->advertencias)->where('tipo', 'DUPLICADO')->count(),
+                'pagos_parciales' => $this->pagosParciales,
+                'diferencias_monto' => collect($this->advertencias)->where('tipo', 'DIFERENCIA_MONTO')->count()
+            ]);
+
+            $erroresCollection = collect($this->errores);
+            Log::info('❌ ERRORES', [
+                'total' => count($this->errores),
+                'estudiantes_no_encontrados' => $erroresCollection->where('tipo', 'ESTUDIANTE_NO_ENCONTRADO')->count(),
+                'programas_no_identificados' => $erroresCollection->where('tipo', 'PROGRAMA_NO_IDENTIFICADO')->count(),
+                'datos_incompletos' => $erroresCollection->where('tipo', 'DATOS_INCOMPLETOS')->count(),
+                'errores_procesamiento_pago' => $erroresCollection->where('tipo', 'ERROR_PROCESAMIENTO_PAGO')->count(),
+                'errores_procesamiento_estudiante' => $erroresCollection->where('tipo', 'ERROR_PROCESAMIENTO_ESTUDIANTE')->count(),
+                'archivo_vacio' => $erroresCollection->where('tipo', 'ARCHIVO_VACIO')->count(),
+                'estructura_invalida' => $erroresCollection->where('tipo', 'ESTRUCTURA_INVALIDA')->count()
+            ]);
+
+            Log::info('=' . str_repeat('=', 80));
         }
     }
 
@@ -346,7 +474,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     {
         $carnetNormalizado = $this->normalizarCarnet($carnet);
 
-        if ($this->verbose) {
+        if (!$this->modoSilencioso) {
             Log::info("=== 👤 PROCESANDO ESTUDIANTE {$carnetNormalizado} ===", [
                 'cantidad_pagos' => $pagos->count()
             ]);
@@ -357,6 +485,29 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $programasEstudiante = $this->obtenerProgramasEstudiante($carnetNormalizado, $primerPago);
 
         if ($programasEstudiante->isEmpty()) {
+            // 🆕 NUEVO: Si modo inserción forzada está activo, crear placeholder temporal
+            if ($this->modoInsercionForzada) {
+                if (!$this->modoSilencioso) {
+                    Log::warning("⚠️ Estudiante no encontrado, creando placeholder temporal en modo forzado", [
+                        'carnet' => $carnetNormalizado
+                    ]);
+                }
+                
+                // Procesar pagos sin estudiante/programa (inserción forzada)
+                foreach ($pagos as $i => $pago) {
+                    $numeroFila = $pago['fila_origen'] ?? ($i + 2);
+                    try {
+                        $this->insertarPagoForzado($pago, $numeroFila, 'Estudiante no encontrado');
+                    } catch (\Throwable $ex) {
+                        Log::error("❌ Error en inserción forzada fila {$numeroFila}", [
+                            'carnet' => $carnetNormalizado,
+                            'error' => $ex->getMessage()
+                        ]);
+                    }
+                }
+                return;
+            }
+            
             $this->errores[] = [
                 'tipo' => 'ESTUDIANTE_NO_ENCONTRADO',
                 'carnet' => $carnetNormalizado,
@@ -421,7 +572,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $mesInicio = trim((string)($row['mes_inicio'] ?? ''));
         $mensualidadAprobada = $this->normalizarMonto($row['mensualidad_aprobada'] ?? 0);
 
-        if ($this->verbose) {
+        if (!$this->modoSilencioso) {
             Log::info("📄 Procesando fila {$numeroFila}", [
                 'carnet' => $carnet,
                 'nombre' => $nombreEstudiante,
@@ -674,6 +825,216 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ];
 
             // Don't re-throw - allow processing to continue with next payment
+        }
+    }
+    
+    /**
+     * 🆕 NUEVO: Insertar pago forzado sin validación completa
+     * Usado cuando no existe estudiante, programa o cuota
+     */
+    private function insertarPagoForzado($row, int $numeroFila, string $motivo)
+    {
+        try {
+            // Extraer datos básicos
+            $carnet = $this->normalizarCarnet($row['carnet'] ?? 'DESCONOCIDO');
+            $nombreEstudiante = trim($row['nombre_estudiante'] ?? 'Nombre no especificado');
+            $boleta = $this->normalizarBoleta($row['numero_boleta'] ?? '');
+            $monto = $this->normalizarMonto($row['monto'] ?? 0);
+            $fechaPago = $this->normalizarFecha($row['fecha_pago'] ?? null);
+            $banco = trim((string)($row['banco'] ?? 'EFECTIVO'));
+            $concepto = trim((string)($row['concepto'] ?? 'Migración histórica'));
+            
+            // Validaciones mínimas
+            if (empty($boleta) || $monto <= 0 || !$fechaPago) {
+                $this->advertencias[] = [
+                    'tipo' => 'INSERCION_FORZADA_OMITIDA',
+                    'fila' => $numeroFila,
+                    'advertencia' => 'Datos insuficientes para inserción forzada',
+                    'motivo' => $motivo
+                ];
+                return;
+            }
+            
+            // Crear placeholder temporal de estudiante_programa si no existe
+            $estudianteProgramaTemp = $this->crearPlaceholderEstudiantePrograma($carnet, $nombreEstudiante);
+            
+            if (!$estudianteProgramaTemp) {
+                throw new \Exception("No se pudo crear placeholder temporal para carnet {$carnet}");
+            }
+            
+            DB::transaction(function () use (
+                $estudianteProgramaTemp,
+                $boleta,
+                $monto,
+                $fechaPago,
+                $banco,
+                $concepto,
+                $numeroFila,
+                $carnet,
+                $nombreEstudiante,
+                $motivo,
+                $row
+            ) {
+                // Verificar duplicado
+                $kardexExistente = KardexPago::where('numero_boleta', $boleta)
+                    ->where('estudiante_programa_id', $estudianteProgramaTemp->id)
+                    ->first();
+                
+                if ($kardexExistente) {
+                    $this->advertencias[] = [
+                        'tipo' => 'DUPLICADO',
+                        'fila' => $numeroFila,
+                        'advertencia' => 'Pago ya registrado (inserción forzada)',
+                        'kardex_id' => $kardexExistente->id
+                    ];
+                    return;
+                }
+                
+                // Crear observaciones con información del motivo
+                $observaciones = sprintf(
+                    "FORZADO: Pago migrado sin validación completa (motivo: %s) | Estudiante: %s | Fila: %d | Carnet: %s",
+                    $motivo,
+                    $nombreEstudiante,
+                    $numeroFila,
+                    $carnet
+                );
+                
+                // Crear kardex sin cuota asignada
+                $kardex = KardexPago::create([
+                    'estudiante_programa_id' => $estudianteProgramaTemp->id,
+                    'cuota_id' => null, // Sin cuota asignada
+                    'numero_boleta' => $boleta,
+                    'monto_pagado' => $monto,
+                    'fecha_pago' => $fechaPago,
+                    'fecha_recibo' => $fechaPago,
+                    'banco' => $banco,
+                    'estado_pago' => 'aprobado',
+                    'observaciones' => $observaciones,
+                ]);
+                
+                $this->kardexCreados++;
+                $this->totalAmount += $monto;
+                $this->procesados++;
+                
+                $this->advertencias[] = [
+                    'tipo' => 'INSERCION_FORZADA',
+                    'fila' => $numeroFila,
+                    'advertencia' => 'Pago creado en modo forzado sin validación completa',
+                    'kardex_id' => $kardex->id,
+                    'motivo' => $motivo,
+                    'carnet' => $carnet
+                ];
+                
+                $this->detalles[] = [
+                    'accion' => 'pago_forzado',
+                    'fila' => $numeroFila,
+                    'carnet' => $carnet,
+                    'nombre' => $nombreEstudiante,
+                    'kardex_id' => $kardex->id,
+                    'cuota_id' => null,
+                    'programa' => 'TEMP (forzado)',
+                    'monto' => $monto,
+                    'fecha_pago' => $fechaPago->toDateString(),
+                    'motivo' => $motivo
+                ];
+                
+                if (!$this->modoSilencioso) {
+                    Log::warning("⚠️ Pago forzado creado", [
+                        'fila' => $numeroFila,
+                        'kardex_id' => $kardex->id,
+                        'carnet' => $carnet,
+                        'motivo' => $motivo
+                    ]);
+                }
+            });
+        } catch (\Throwable $ex) {
+            Log::error("❌ Error en inserción forzada fila {$numeroFila}", [
+                'error' => $ex->getMessage(),
+                'trace' => array_slice(explode("\n", $ex->getTraceAsString()), 0, 3)
+            ]);
+            
+            $this->errores[] = [
+                'tipo' => 'ERROR_INSERCION_FORZADA',
+                'fila' => $numeroFila,
+                'error' => $ex->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * 🆕 NUEVO: Crear placeholder temporal de estudiante_programa
+     */
+    private function crearPlaceholderEstudiantePrograma(string $carnet, string $nombreEstudiante)
+    {
+        try {
+            // Buscar o crear prospecto temporal
+            $prospecto = DB::table('prospectos')
+                ->where('carnet', $carnet)
+                ->first();
+            
+            if (!$prospecto) {
+                $prospectoId = DB::table('prospectos')->insertGetId([
+                    'carnet' => $carnet,
+                    'nombre_completo' => $nombreEstudiante,
+                    'email' => $carnet . '@temp.asm.edu.gt',
+                    'telefono' => '0000-0000',
+                    'fecha_nacimiento' => '2000-01-01',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            } else {
+                $prospectoId = $prospecto->id;
+            }
+            
+            // Buscar programa TEMP
+            $programaTemp = DB::table('tb_programas')
+                ->where('abreviatura', 'TEMP')
+                ->first();
+            
+            if (!$programaTemp) {
+                // Crear programa TEMP si no existe
+                $programaTempId = DB::table('tb_programas')->insertGetId([
+                    'nombre_del_programa' => 'Programa Pendiente',
+                    'abreviatura' => 'TEMP',
+                    'activo' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            } else {
+                $programaTempId = $programaTemp->id;
+            }
+            
+            // Buscar o crear estudiante_programa temporal
+            $estudiantePrograma = DB::table('estudiante_programa')
+                ->where('prospecto_id', $prospectoId)
+                ->where('programa_id', $programaTempId)
+                ->first();
+            
+            if (!$estudiantePrograma) {
+                $estudianteProgramaId = DB::table('estudiante_programa')->insertGetId([
+                    'prospecto_id' => $prospectoId,
+                    'programa_id' => $programaTempId,
+                    'fecha_inicio' => now(),
+                    'duracion_meses' => 12,
+                    'cuota_mensual' => 0,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+                
+                $estudiantePrograma = (object)[
+                    'id' => $estudianteProgramaId,
+                    'prospecto_id' => $prospectoId,
+                    'programa_id' => $programaTempId
+                ];
+            }
+            
+            return $estudiantePrograma;
+        } catch (\Throwable $ex) {
+            Log::error("❌ Error creando placeholder temporal", [
+                'carnet' => $carnet,
+                'error' => $ex->getMessage()
+            ]);
+            return null;
         }
     }
 
