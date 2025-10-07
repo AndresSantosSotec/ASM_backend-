@@ -81,29 +81,38 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         // ✅ Validar que haya datos
         if ($this->totalRows === 0) {
+            $errorMsg = 'El archivo no contiene datos válidos para procesar. Verifica que el archivo Excel tenga al menos una fila de datos después de los encabezados.';
             $this->errores[] = [
                 'tipo' => 'ARCHIVO_VACIO',
-                'error' => 'El archivo no contiene datos válidos para procesar',
+                'error' => $errorMsg,
                 'solucion' => 'Verifica que el archivo Excel tenga al menos una fila de datos después de los encabezados'
             ];
-            Log::error('❌ Archivo vacío detectado');
-            return;
+            Log::error('❌ Archivo vacío detectado', [
+                'total_rows' => $this->totalRows,
+                'error' => $errorMsg
+            ]);
+            // Throw exception to ensure error is surfaced to controller
+            throw new \Exception($errorMsg);
         }
 
         // ✅ Validar estructura de columnas
         $validacionColumnas = $this->validarColumnasExcel($rows->first());
         if (!$validacionColumnas['valido']) {
+            $errorMsg = 'El archivo no tiene las columnas requeridas. Faltantes: ' . implode(', ', $validacionColumnas['faltantes']);
             $this->errores[] = [
                 'tipo' => 'ESTRUCTURA_INVALIDA',
-                'error' => 'El archivo no tiene las columnas requeridas',
+                'error' => $errorMsg,
                 'columnas_faltantes' => $validacionColumnas['faltantes'],
                 'columnas_encontradas' => $validacionColumnas['encontradas'],
                 'solucion' => 'Asegúrate de que el archivo tenga todas las columnas requeridas en la primera fila'
             ];
             Log::error('❌ Estructura de columnas inválida', [
-                'faltantes' => $validacionColumnas['faltantes']
+                'faltantes' => $validacionColumnas['faltantes'],
+                'encontradas' => $validacionColumnas['encontradas'],
+                'error' => $errorMsg
             ]);
-            return;
+            // Throw exception to ensure error is surfaced to controller
+            throw new \Exception($errorMsg);
         }
 
         Log::info('✅ Estructura del Excel validada correctamente');
@@ -335,6 +344,30 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         ]);
 
         Log::info('=' . str_repeat('=', 80));
+        
+        // 🆕 VALIDACIÓN CRÍTICA: Si no se procesó NADA, algo salió mal
+        if ($this->totalRows > 0 && $this->procesados === 0 && $this->kardexCreados === 0) {
+            $errorMsg = "⚠️ IMPORTACIÓN SIN RESULTADOS: Se procesaron {$this->totalRows} filas pero no se insertó ningún registro. ";
+            
+            if (count($this->errores) > 0) {
+                $errorMsg .= "Total de errores: " . count($this->errores) . ". ";
+                $errorMsg .= "Primer error: " . ($this->errores[0]['error'] ?? 'Error desconocido');
+            } else {
+                $errorMsg .= "No se registraron errores específicos. Posible problema de configuración o datos inválidos.";
+            }
+            
+            Log::critical($errorMsg, [
+                'total_rows' => $this->totalRows,
+                'procesados' => $this->procesados,
+                'kardex_creados' => $this->kardexCreados,
+                'errores_count' => count($this->errores),
+                'advertencias_count' => count($this->advertencias),
+                'errores_detalle' => array_slice($this->errores, 0, 5), // Primeros 5 errores
+            ]);
+            
+            // Lanzar excepción para que el controlador sepa que falló
+            throw new \Exception($errorMsg);
+        }
     }
 
     /**
@@ -668,17 +701,36 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     $programaAsignado->nombre_programa ?? 'N/A'
                 );
 
-                $kardex = KardexPago::create([
-                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                    'cuota_id' => $cuota ? $cuota->id : null,
-                    'numero_boleta' => $boleta,
-                    'monto_pagado' => $monto,
-                    'fecha_pago' => $fechaPago,
-                    'fecha_recibo' => $fechaPago,
-                    'banco' => $banco,
-                    'estado_pago' => 'aprobado',
-                    'observaciones' => $observaciones,
-                ]);
+                try {
+                    $kardex = KardexPago::create([
+                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                        'cuota_id' => $cuota ? $cuota->id : null,
+                        'numero_boleta' => $boleta,
+                        'monto_pagado' => $monto,
+                        'fecha_pago' => $fechaPago,
+                        'fecha_recibo' => $fechaPago,
+                        'banco' => $banco,
+                        'estado_pago' => 'aprobado',
+                        'observaciones' => $observaciones,
+                    ]);
+                } catch (\Throwable $insertEx) {
+                    Log::error("❌ Error al insertar en kardex_pagos", [
+                        'fila' => $numeroFila,
+                        'error' => $insertEx->getMessage(),
+                        'error_class' => get_class($insertEx),
+                        'sql_error' => method_exists($insertEx, 'getSql') ? $insertEx->getSql() : 'N/A',
+                        'data' => [
+                            'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                            'cuota_id' => $cuota ? $cuota->id : null,
+                            'numero_boleta' => $boleta,
+                            'monto_pagado' => $monto,
+                            'fecha_pago' => $fechaPago->toDateString(),
+                            'banco' => $banco,
+                        ],
+                        'trace' => array_slice(explode("\n", $insertEx->getTraceAsString()), 0, 3)
+                    ]);
+                    throw $insertEx; // Re-throw to be caught by outer catch
+                }
 
                 $this->kardexCreados++;
                 $this->totalAmount += $monto;
