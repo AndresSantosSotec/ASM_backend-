@@ -365,8 +365,17 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'errores_detalle' => array_slice($this->errores, 0, 5), // Primeros 5 errores
             ]);
             
+            // Escribir errores a stderr para debugging
+            $this->dumpErrorsToStderr();
+            
             // Lanzar excepción para que el controlador sepa que falló
             throw new \Exception($errorMsg);
+        }
+        
+        // 🆕 Si hubo errores pero también algunos éxitos, escribir resumen a stderr
+        if (!empty($this->errores)) {
+            error_log("PaymentHistoryImport: Completado con {$this->procesados} éxitos y " . count($this->errores) . " errores");
+            $this->dumpErrorsToStderr();
         }
     }
 
@@ -413,6 +422,96 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             })->values()->toArray(),
             'detalle_completo' => $registrosExitosos->sortBy('fila')->values()->toArray()
         ];
+    }
+
+    /**
+     * 🆕 Método para obtener resumen de errores para el controlador
+     */
+    public function getErrorSummary(): array
+    {
+        if (empty($this->errores)) {
+            return [
+                'tiene_errores' => false,
+                'total_errores' => 0,
+                'mensaje' => 'No se encontraron errores durante la importación'
+            ];
+        }
+
+        $erroresCollection = collect($this->errores);
+        $erroresPorTipo = $erroresCollection->groupBy('tipo');
+
+        return [
+            'tiene_errores' => true,
+            'total_errores' => count($this->errores),
+            'mensaje' => 'Se encontraron ' . count($this->errores) . ' errores durante la importación',
+            'por_tipo' => $erroresPorTipo->map(function ($errores, $tipo) {
+                return [
+                    'tipo' => $tipo,
+                    'cantidad' => $errores->count(),
+                    'descripcion' => $this->getErrorTypeDescription($tipo),
+                    'ejemplos' => $errores->take(3)->map(function ($error) {
+                        return [
+                            'carnet' => $error['carnet'] ?? 'N/A',
+                            'fila' => $error['fila'] ?? 'N/A',
+                            'boleta' => $error['boleta'] ?? 'N/A',
+                            'mensaje' => $error['error'] ?? 'Error desconocido',
+                            'solucion' => $error['solucion'] ?? null
+                        ];
+                    })->toArray()
+                ];
+            })->values()->toArray(),
+            'todos_los_errores' => $this->errores
+        ];
+    }
+
+    /**
+     * 🆕 Método para verificar si la importación fue exitosa
+     */
+    public function hasErrors(): bool
+    {
+        return !empty($this->errores);
+    }
+
+    /**
+     * 🆕 Método para verificar si hubo procesamiento exitoso
+     */
+    public function hasSuccessfulImports(): bool
+    {
+        return $this->procesados > 0 || $this->kardexCreados > 0;
+    }
+
+    /**
+     * 🆕 Método para escribir errores a consola/stderr para debugging
+     * Útil cuando los logs no están disponibles o no se están escribiendo
+     */
+    public function dumpErrorsToStderr(): void
+    {
+        if (empty($this->errores)) {
+            error_log("PaymentHistoryImport: No hay errores para reportar");
+            return;
+        }
+
+        error_log("======================================");
+        error_log("ERRORES DE IMPORTACIÓN DE PAGOS");
+        error_log("======================================");
+        error_log("Total de errores: " . count($this->errores));
+        error_log("Total de filas procesadas: {$this->procesados} de {$this->totalRows}");
+        error_log("Kardex creados: {$this->kardexCreados}");
+        error_log("--------------------------------------");
+        
+        foreach ($this->errores as $i => $error) {
+            $num = $i + 1;
+            error_log("ERROR #{$num}:");
+            error_log("  Tipo: " . ($error['tipo'] ?? 'DESCONOCIDO'));
+            error_log("  Mensaje: " . ($error['error'] ?? 'Sin mensaje'));
+            if (isset($error['carnet'])) error_log("  Carnet: {$error['carnet']}");
+            if (isset($error['fila'])) error_log("  Fila: {$error['fila']}");
+            if (isset($error['boleta'])) error_log("  Boleta: {$error['boleta']}");
+            if (isset($error['solucion'])) error_log("  Solución: {$error['solucion']}");
+            error_log("--------------------------------------");
+        }
+        
+        error_log("======================================");
     }
 
     private function validarColumnasExcel($primeraFila): array
