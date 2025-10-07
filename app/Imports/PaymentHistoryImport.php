@@ -48,7 +48,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     private bool $modoReemplazo = false;
 
     public function __construct(
-        int $uploaderId, 
+        int $uploaderId,
         string $tipoArchivo = 'cardex_directo',
         bool $modoReemplazoPendientes = false,
         bool $modoReemplazo = false
@@ -128,29 +128,29 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         // 🔥 NUEVO: Modo Reemplazo Total (purge + rebuild)
         if ($this->modoReemplazo) {
             Log::info('🔄 MODO REEMPLAZO ACTIVO: Se eliminará y reconstruirá todo para cada estudiante');
-            
+
             $replaceService = new PaymentReplaceService();
-            
+
             foreach ($pagosPorCarnet as $carnet => $pagosEstudiante) {
                 $carnetNorm = $this->normalizarCarnet($carnet);
-                
+
                 Log::info("🔄 [Reemplazo] Procesando carnet {$carnetNorm}", [
                     'cantidad_pagos' => $pagosEstudiante->count()
                 ]);
-                
+
                 try {
                     // Resolver programas con auto-creación si no existen
                     $resolver = function (string $carnetN, $row) {
                         return $this->obtenerProgramasEstudiante($carnetN, $row);
                     };
-                    
+
                     $replaceService->purgeAndRebuildForCarnet(
                         $resolver,
                         $carnetNorm,
                         $pagosEstudiante,
                         $this->uploaderId
                     );
-                    
+
                     Log::info("✅ [Reemplazo] Carnet {$carnetNorm} listo para importación", [
                         'cantidad_pagos' => $pagosEstudiante->count()
                     ]);
@@ -159,7 +159,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                         'error' => $ex->getMessage(),
                         'trace' => array_slice(explode("\n", $ex->getTraceAsString()), 0, 3)
                     ]);
-                    
+
                     $this->errores[] = [
                         'tipo' => 'ERROR_REEMPLAZO',
                         'carnet' => $carnetNorm,
@@ -168,7 +168,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     ];
                 }
             }
-            
+
             Log::info('✅ Modo reemplazo completado, iniciando procesamiento normal de pagos');
         }
 
@@ -344,18 +344,18 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         ]);
 
         Log::info('=' . str_repeat('=', 80));
-        
+
         // 🆕 VALIDACIÓN CRÍTICA: Si no se procesó NADA, algo salió mal
         if ($this->totalRows > 0 && $this->procesados === 0 && $this->kardexCreados === 0) {
             $errorMsg = "⚠️ IMPORTACIÓN SIN RESULTADOS: Se procesaron {$this->totalRows} filas pero no se insertó ningún registro. ";
-            
+
             if (count($this->errores) > 0) {
                 $errorMsg .= "Total de errores: " . count($this->errores) . ". ";
                 $errorMsg .= "Primer error: " . ($this->errores[0]['error'] ?? 'Error desconocido');
             } else {
                 $errorMsg .= "No se registraron errores específicos. Posible problema de configuración o datos inválidos.";
             }
-            
+
             Log::critical($errorMsg, [
                 'total_rows' => $this->totalRows,
                 'procesados' => $this->procesados,
@@ -364,14 +364,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'advertencias_count' => count($this->advertencias),
                 'errores_detalle' => array_slice($this->errores, 0, 5), // Primeros 5 errores
             ]);
-            
+
             // Escribir errores a stderr para debugging
             $this->dumpErrorsToStderr();
-            
+
             // Lanzar excepción para que el controlador sepa que falló
             throw new \Exception($errorMsg);
         }
-        
+
         // 🆕 Si hubo errores pero también algunos éxitos, escribir resumen a stderr
         if (!empty($this->errores)) {
             error_log("PaymentHistoryImport: Completado con {$this->procesados} éxitos y " . count($this->errores) . " errores");
@@ -498,7 +498,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         error_log("Total de filas procesadas: {$this->procesados} de {$this->totalRows}");
         error_log("Kardex creados: {$this->kardexCreados}");
         error_log("--------------------------------------");
-        
+
         foreach ($this->errores as $i => $error) {
             $num = $i + 1;
             error_log("ERROR #{$num}:");
@@ -510,7 +510,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             if (isset($error['solucion'])) error_log("  Solución: {$error['solucion']}");
             error_log("--------------------------------------");
         }
-        
+
         error_log("======================================");
     }
 
@@ -817,7 +817,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                         'fila' => $numeroFila,
                         'error' => $insertEx->getMessage(),
                         'error_class' => get_class($insertEx),
-                        'sql_error' => method_exists($insertEx, 'getSql') ? $insertEx->getSql() : 'N/A',
                         'data' => [
                             'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
                             'cuota_id' => $cuota ? $cuota->id : null,
@@ -1038,11 +1037,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $mensualidadAprobada,
                 $numeroFila
             );
-            
+
             if ($cuotaReemplazada) {
                 return $cuotaReemplazada;
             }
-            
+
             // Si no se encontró cuota para reemplazar, continuar con lógica normal
             Log::info("⚠️ No se encontró cuota pendiente para reemplazar, usando lógica normal", [
                 'estudiante_programa_id' => $estudianteProgramaId,
