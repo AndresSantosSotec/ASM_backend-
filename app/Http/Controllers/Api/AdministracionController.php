@@ -12,6 +12,8 @@ use App\Models\Course;
 use App\Models\Prospecto;
 use App\Models\PeriodoInscripcion;
 use App\Models\InscripcionPeriodo;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\DashboardExport;
 
 class AdministracionController extends Controller
 {
@@ -24,7 +26,7 @@ class AdministracionController extends Controller
         try {
             $ahora = Carbon::now();
             $mesAnterior = Carbon::now()->subMonth();
-            
+
             return response()->json([
                 'matriculas' => $this->obtenerMatriculas($ahora, $mesAnterior),
                 'alumnosNuevos' => $this->obtenerAlumnosNuevos($ahora, $mesAnterior),
@@ -60,7 +62,7 @@ class AdministracionController extends Controller
             ->count();
 
         // Calcular porcentaje de cambio
-        $porcentajeCambio = $matriculasMesAnterior > 0 
+        $porcentajeCambio = $matriculasMesAnterior > 0
             ? round((($matriculasMesActual - $matriculasMesAnterior) / $matriculasMesAnterior) * 100, 2)
             : 0;
 
@@ -77,18 +79,18 @@ class AdministracionController extends Controller
     private function obtenerAlumnosNuevos($ahora, $mesAnterior)
     {
         // Nuevos estudiantes del mes actual
-        $nuevosMesActual = Prospecto::whereHas('programas', function($q) use ($ahora) {
+        $nuevosMesActual = Prospecto::whereHas('programas', function ($q) use ($ahora) {
             $q->whereYear('created_at', $ahora->year)
-              ->whereMonth('created_at', $ahora->month);
+                ->whereMonth('created_at', $ahora->month);
         })->count();
 
         // Nuevos estudiantes del mes anterior
-        $nuevosMesAnterior = Prospecto::whereHas('programas', function($q) use ($mesAnterior) {
+        $nuevosMesAnterior = Prospecto::whereHas('programas', function ($q) use ($mesAnterior) {
             $q->whereYear('created_at', $mesAnterior->year)
-              ->whereMonth('created_at', $mesAnterior->month);
+                ->whereMonth('created_at', $mesAnterior->month);
         })->count();
 
-        $porcentajeCambio = $nuevosMesAnterior > 0 
+        $porcentajeCambio = $nuevosMesAnterior > 0
             ? round((($nuevosMesActual - $nuevosMesAnterior) / $nuevosMesAnterior) * 100, 2)
             : 0;
 
@@ -182,10 +184,10 @@ class AdministracionController extends Controller
      */
     private function obtenerDistribucionProgramas()
     {
-        $distribucion = Programa::leftJoin('estudiante_programa', function($join) {
-                $join->on('tb_programas.id', '=', 'estudiante_programa.programa_id')
-                     ->whereNull('estudiante_programa.deleted_at');
-            })
+        $distribucion = Programa::leftJoin('estudiante_programa', function ($join) {
+            $join->on('tb_programas.id', '=', 'estudiante_programa.programa_id')
+                ->whereNull('estudiante_programa.deleted_at');
+        })
             ->leftJoin('prospectos', 'estudiante_programa.prospecto_id', '=', 'prospectos.id')
             ->select(
                 'tb_programas.id',
@@ -199,7 +201,7 @@ class AdministracionController extends Controller
             ->orderBy('tb_programas.nombre_del_programa')
             ->get();
 
-        return $distribucion->map(function($item) {
+        return $distribucion->map(function ($item) {
             return [
                 'programa' => $item->nombre,
                 'abreviatura' => $item->abreviatura,
@@ -229,7 +231,7 @@ class AdministracionController extends Controller
             $ahora,
             $ahora->copy()->addDays(15)
         ])->where('status', '!=', 'cancelled')
-          ->count();
+            ->count();
 
         return [
             'solicitudesPendientes' => [
@@ -279,16 +281,47 @@ class AdministracionController extends Controller
      */
     public function exportar(Request $request)
     {
-        $formato = $request->get('formato', 'json'); // json, excel, pdf
-        
-        // Por ahora retornamos JSON
-        // En el futuro se puede implementar Excel y PDF
-        $datos = $this->dashboard($request)->getData();
-        
-        return response()->json([
-            'formato' => $formato,
-            'datos' => $datos,
-            'exportado_en' => Carbon::now()->toDateTimeString()
-        ]);
+        $formato = $request->get('formato', 'json');
+
+        try {
+            switch ($formato) {
+                case 'excel':
+                case 'xlsx':
+                    // Obtener datos del dashboard
+                    $dashboardData = $this->dashboard($request)->getData();
+
+                    // Crear el export
+                    $export = new DashboardExport($dashboardData);
+
+                    $filename = 'dashboard_administrativo_' . Carbon::now()->format('Y-m-d_H-i-s') . '.xlsx';
+
+                    return Excel::download($export, $filename);
+
+                case 'csv':
+                    $dashboardData = $this->dashboard($request)->getData();
+                    $export = new DashboardExport($dashboardData);
+
+                    $filename = 'dashboard_administrativo_' . Carbon::now()->format('Y-m-d_H-i-s') . '.csv';
+
+                    return Excel::download($export, $filename, \Maatwebsite\Excel\Excel::CSV, [
+                        'Content-Type' => 'text/csv',
+                    ]);
+
+                case 'json':
+                default:
+                    $datos = $this->dashboard($request)->getData();
+
+                    return response()->json([
+                        'formato' => $formato,
+                        'datos' => $datos,
+                        'exportado_en' => Carbon::now()->toDateTimeString()
+                    ]);
+            }
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Error al exportar datos',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 }
