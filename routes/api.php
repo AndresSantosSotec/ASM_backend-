@@ -60,7 +60,7 @@ use App\Http\Controllers\Api\AdminEstudiantePagosController;
 use App\Http\Controllers\Api\DocentesController;
 use App\Http\Controllers\Api\GestionPagosController;
 use App\Http\Controllers\Api\EstudiantesController;
-use App\Http\Controllers\Api\AdministracionControllers;
+use App\Http\Controllers\Api\AdministracionController;
 
 
 use Illuminate\Support\Facades\DB;
@@ -700,7 +700,9 @@ Route::prefix('docentes')->middleware('auth:sanctum')->group(function () {
 // Modulo de Administracion
 // ----------------------
 Route::prefix('administracion')->middleware('auth:sanctum')->group(function () {
-    // Aquí van las rutas protegidas del módulo de administración
+    // Dashboard administrativo
+    Route::get('/dashboard', [AdministracionController::class, 'dashboard']);
+    Route::get('/dashboard/exportar', [AdministracionController::class, 'exportar']);
 });
 
 //----------------
