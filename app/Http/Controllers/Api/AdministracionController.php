@@ -249,7 +249,7 @@ class AdministracionController extends Controller
         $estudiantesMultiplesProgramas = DB::table('estudiante_programa')
             ->select('prospecto_id', DB::raw('COUNT(*) as total_programas'))
             ->groupBy('prospecto_id')
-            ->having('total_programas', '>', 1)
+            ->havingRaw('COUNT(*) > ?', [1])
             ->get();
 
         $topEstudiantes = $estudiantesMultiplesProgramas->sortByDesc('total_programas')->take(5);
