@@ -182,14 +182,21 @@ class AdministracionController extends Controller
      */
     private function obtenerDistribucionProgramas()
     {
-        $distribucion = Programa::leftJoin('estudiante_programa', 'tb_programas.id', '=', 'estudiante_programa.programa_id')
+        $distribucion = Programa::leftJoin('estudiante_programa', function($join) {
+                $join->on('tb_programas.id', '=', 'estudiante_programa.programa_id')
+                     ->whereNull('estudiante_programa.deleted_at');
+            })
+            ->leftJoin('prospectos', 'estudiante_programa.prospecto_id', '=', 'prospectos.id')
             ->select(
+                'tb_programas.id',
                 'tb_programas.nombre_del_programa as nombre',
                 'tb_programas.abreviatura',
-                DB::raw('COUNT(estudiante_programa.id) as total_estudiantes')
+                DB::raw('COUNT(DISTINCT estudiante_programa.id) as total_estudiantes')
             )
+            ->where('tb_programas.activo', 1)
             ->groupBy('tb_programas.id', 'tb_programas.nombre_del_programa', 'tb_programas.abreviatura')
             ->orderByDesc('total_estudiantes')
+            ->orderBy('tb_programas.nombre_del_programa')
             ->get();
 
         return $distribucion->map(function($item) {
