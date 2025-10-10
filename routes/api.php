@@ -57,10 +57,10 @@ use App\Http\Controllers\Api\EstudiantePagosController;
 use App\Http\Controllers\Api\DashboardFinancieroController;
 use App\Http\Controllers\Api\EmailController;
 use App\Http\Controllers\Api\AdminEstudiantePagosController;
-
-
-
+use App\Http\Controllers\Api\DocentesController;
 use App\Http\Controllers\Api\GestionPagosController;
+use App\Http\Controllers\Api\EstudiantesController;
+use App\Http\Controllers\Api\AdministracionControllers;
 
 
 use Illuminate\Support\Facades\DB;
@@ -497,8 +497,6 @@ Route::prefix('estudiante-programa')->group(function () {
 Route::get('precios/programa/{programa}', [PriceController::class, 'porPrograma']);
 Route::get('precios/convenio/{convenio}/{programa}', [PriceController::class, 'porConvenio']);
 
-
-
 Route::get('/prospectos/fichas/pendientes-public', [ProspectoController::class, 'pendientesAprobacion']);
 
 Route::get('contactos-enviados/{id}/download-contrato', [ContactoEnviadoController::class, 'downloadContrato']);
@@ -572,67 +570,41 @@ Route::get('/students/{id}', [StudentController::class, 'show'])->middleware('au
 Route::middleware('auth:sanctum')->group(function () {
     // ✅ Dashboard Financiero protegido
     Route::get('/dashboard-financiero', [DashboardFinancieroController::class, 'index'])->name('dashboard.financiero');
-
     Route::get('/invoices', [InvoiceController::class, 'index']);
     Route::post('/invoices', [InvoiceController::class, 'store']);
     Route::put('/invoices/{invoice}', [InvoiceController::class, 'update']);
     Route::delete('/invoices/{invoice}', [InvoiceController::class, 'destroy']);
-
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::post('/payments', [PaymentController::class, 'store']);
-
+    //Regals de Pagos
     Route::get('/payment-rules', [RuleController::class, 'index']);
     Route::post('/payment-rules', [RuleController::class, 'store']);
     Route::get('/payment-rules/{rule}', [RuleController::class, 'show']); // <- NUEVO
     Route::put('/payment-rules/{rule}', [RuleController::class, 'update']);
-
     Route::post('/payment-rules/{rule}/notifications', [PaymentRuleNotificationController::class, 'store']);
     Route::put('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'update']);
     Route::delete('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'destroy']);
     Route::get('/payment-rules/{rule}/notifications', [PaymentRuleNotificationController::class, 'index']);
     Route::get('/payment-rules/{rule}/notifications/{notification}', [PaymentRuleNotificationController::class, 'show']);
-
     // Planes de pago reales
     Route::get('/prospectos/{id}/cuotas', [\App\Http\Controllers\Api\CuotaController::class, 'byProspecto']);
     Route::get('/estudiante-programa/{id}/cuotas', [\App\Http\Controllers\Api\CuotaController::class, 'byPrograma']);
-
     Route::get('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'index']);
     Route::post('/kardex-pagos', [\App\Http\Controllers\Api\KardexPagoController::class, 'store']);
-
-
     Route::post('/reconciliation/upload', [ReconciliationController::class, 'upload']);
     Route::get('/reconciliation/pending', [ReconciliationController::class, 'pending']);
     Route::post('/reconciliation/process', [ReconciliationController::class, 'process']);
-
     Route::get('/conciliacion/conciliados-desde-kardex', [ReconciliationController::class, 'kardexConciliados']);
-
-
-
-    //rutas nuevas para la concilaicion
-
-
-
     // Financial reports
     Route::get('/reports/summary', [ReportsController::class, 'summary']);
     Route::get('/reports/export', [ReportsController::class, 'export']);
-
-
     // Collection Logs
     Route::get('/collection-logs', [CollectionLogController::class, 'index']);
     Route::post('/collection-logs', [CollectionLogController::class, 'store']);
     Route::get('/collection-logs/{id}', [CollectionLogController::class, 'show']);
     Route::put('/collection-logs/{id}', [CollectionLogController::class, 'update']);
     Route::delete('/collection-logs/{id}', [CollectionLogController::class, 'destroy']);
-
-    // Moodle queries
-    Route::get('/moodle/consultas/{carnet?}', [MoodleConsultasController::class, 'cursosPorCarnet']);
-    Route::get('/moodle/consultas/aprobados/{carnet?}', [MoodleConsultasController::class, 'cursosAprobados']);
-    Route::get('/moodle/consultas/reprobados/{carnet?}', [MoodleConsultasController::class, 'cursosReprobados']);
-    Route::get('/moodle/consultas/estatus/{carnet?}', [MoodleConsultasController::class, 'estatusAcademico']);
-    Route::get('/moodle/consultas', [MoodleConsultasController::class, 'cursosPorCarnet']);
-    //DataMoodle
-    Route::get('/moodle/programacion-cursos', [MoodleConsultasController::class, 'programacionCursos']);
-
+    // Moodle Consul
 
     // ----------------------
     // REGLAS DE BLOQUEO (PaymentRuleBlockingRule)
@@ -647,7 +619,6 @@ Route::middleware('auth:sanctum')->group(function () {
         // Opcional: cambiar estado (activar/desactivar)
         Route::patch('/{blockingRule}/toggle-status', [PaymentRuleBlockingRuleController::class, 'toggleStatus']);
     });
-
     // *** PASARELAS DE PAGO ***
     Route::prefix('payment-gateways')->group(function () {
         Route::get('/', [PaymentGatewayController::class, 'index']);
@@ -658,7 +629,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{gateway}', [PaymentGatewayController::class, 'destroy']);
         Route::patch('/{gateway}/toggle-status', [PaymentGatewayController::class, 'toggleStatus']);
     });
-
     // *** CATEGORÍAS DE EXCEPCIÓN ***
     Route::prefix('payment-exception-categories')->group(function () {
         // CRUD básico
@@ -710,6 +680,47 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 });
 
+
+//-------------------------
+// Modulo de Estudiantes
+//-------------------------
+Route::prefix('estudiantes')->middleware('auth:sanctum')->group(function () {
+    Route::get('/mi-informacion', [EstudiantesController::class, 'miInformacion']);
+    Route::get('/resumen-rapido', [EstudiantesController::class, 'resumenRapido']);
+});
+
+//-------------------------
+// Modulo de Docentes
+//-------------------------
+Route::prefix('docentes')->middleware('auth:sanctum')->group(function () {
+    // Aquí van las rutas protegidas del módulo de docentes
+});
+
+// ----------------------
+// Modulo de Administracion
+// ----------------------
+Route::prefix('administracion')->middleware('auth:sanctum')->group(function () {
+    // Aquí van las rutas protegidas del módulo de administración
+});
+
+//----------------
+// Notificaciones Internas del sistema
+//----------------
+Route::prefix('notificaciones')->middleware('auth:sanctum')->group(function () {
+    // Aquí van las rutas protegidas para notificaciones internas del sistema
+});
+
+//----------
+// Moodle Integraions
+//----------
+Route::prefix('moodle')->middleware('auth:sanctum')->group(function () {
+    Route::get('/consultas/{carnet?}', [MoodleConsultasController::class, 'cursosPorCarnet']);
+    Route::get('/consultas/aprobados/{carnet?}', [MoodleConsultasController::class, 'cursosAprobados']);
+    Route::get('/consultas/reprobados/{carnet?}', [MoodleConsultasController::class, 'cursosReprobados']);
+    Route::get('/consultas/estatus/{carnet?}', [MoodleConsultasController::class, 'estatusAcademico']);
+    Route::get('/consultas', [MoodleConsultasController::class, 'cursosPorCarnet']);
+    Route::get('/programacion-cursos', [MoodleConsultasController::class, 'programacionCursos']);
+});
 
 
 Route::apiResource('rules', RuleController::class);
