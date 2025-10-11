@@ -13,7 +13,12 @@ class DashboardExport implements WithMultipleSheets
 
     public function __construct($data)
     {
-        $this->data = $data;
+        // Asegurar que los datos estén en formato array
+        if (is_object($data)) {
+            $this->data = json_decode(json_encode($data), true);
+        } else {
+            $this->data = $data ?? [];
+        }
     }
 
     public function sheets(): array
@@ -46,21 +51,26 @@ class DashboardResumenSheet implements FromCollection, WithHeadings, WithTitle
     {
         $data = $this->data;
 
+        // Convertir a array si viene como objeto/JSON
+        if (is_object($data)) {
+            $data = json_decode(json_encode($data), true);
+        }
+
         return collect([
             ['Métricas Generales', '', ''],
-            ['Total Estudiantes', $data->estadisticas->totalEstudiantes ?? 0, ''],
-            ['Total Programas', $data->estadisticas->totalProgramas ?? 0, ''],
-            ['Total Cursos', $data->estadisticas->totalCursos ?? 0, ''],
+            ['Total Estudiantes', $data['estadisticas']['totalEstudiantes'] ?? 0, ''],
+            ['Total Programas', $data['estadisticas']['totalProgramas'] ?? 0, ''],
+            ['Total Cursos', $data['estadisticas']['totalCursos'] ?? 0, ''],
             ['', '', ''],
             ['Matrículas del Mes', '', ''],
-            ['Mes Actual', $data->matriculas->total ?? 0, ''],
-            ['Mes Anterior', $data->matriculas->mesAnterior ?? 0, ''],
-            ['% Cambio', $data->matriculas->porcentajeCambio ?? 0, '%'],
+            ['Mes Actual', $data['matriculas']['total'] ?? 0, ''],
+            ['Mes Anterior', $data['matriculas']['mesAnterior'] ?? 0, ''],
+            ['% Cambio', $data['matriculas']['porcentajeCambio'] ?? 0, '%'],
             ['', '', ''],
             ['Alumnos Nuevos', '', ''],
-            ['Nuevos este Mes', $data->alumnosNuevos->total ?? 0, ''],
-            ['Nuevos Mes Anterior', $data->alumnosNuevos->mesAnterior ?? 0, ''],
-            ['% Cambio', $data->alumnosNuevos->porcentajeCambio ?? 0, '%'],
+            ['Nuevos este Mes', $data['alumnosNuevos']['total'] ?? 0, ''],
+            ['Nuevos Mes Anterior', $data['alumnosNuevos']['mesAnterior'] ?? 0, ''],
+            ['% Cambio', $data['alumnosNuevos']['porcentajeCambio'] ?? 0, '%'],
         ]);
     }
 
@@ -90,13 +100,24 @@ class DashboardProgramasSheet implements FromCollection, WithHeadings, WithTitle
 
     public function collection()
     {
-        $programas = $this->data->distribucionProgramas ?? [];
+        // Convertir a array si viene como objeto/JSON
+        $data = $this->data;
+        if (is_object($data)) {
+            $data = json_decode(json_encode($data), true);
+        }
+
+        $programas = $data['distribucionProgramas'] ?? [];
 
         return collect($programas)->map(function($programa) {
+            // Asegurar que $programa sea array
+            if (is_object($programa)) {
+                $programa = json_decode(json_encode($programa), true);
+            }
+
             return [
-                'programa' => $programa->programa ?? '',
-                'abreviatura' => $programa->abreviatura ?? '',
-                'total_estudiantes' => $programa->totalEstudiantes ?? 0,
+                'programa' => $programa['programa'] ?? '',
+                'abreviatura' => $programa['abreviatura'] ?? '',
+                'total_estudiantes' => $programa['totalEstudiantes'] ?? 0,
             ];
         });
     }
@@ -127,12 +148,23 @@ class DashboardEvolucionSheet implements FromCollection, WithHeadings, WithTitle
 
     public function collection()
     {
-        $evolucion = $this->data->evolucionMatricula ?? [];
+        // Convertir a array si viene como objeto/JSON
+        $data = $this->data;
+        if (is_object($data)) {
+            $data = json_decode(json_encode($data), true);
+        }
+
+        $evolucion = $data['evolucionMatricula'] ?? [];
 
         return collect($evolucion)->map(function($mes) {
+            // Asegurar que $mes sea array
+            if (is_object($mes)) {
+                $mes = json_decode(json_encode($mes), true);
+            }
+
             return [
-                'mes' => $mes->mes ?? '',
-                'total' => $mes->total ?? 0,
+                'mes' => $mes['mes'] ?? '',
+                'total' => $mes['total'] ?? 0,
             ];
         });
     }
