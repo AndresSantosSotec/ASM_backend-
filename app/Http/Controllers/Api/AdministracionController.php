@@ -343,5 +343,659 @@ class AdministracionController extends Controller
      /**
      * Exportar datos del dashboard
      */
+
+    /**
+     * Reportes de Matrícula y Alumnos Nuevos
+     * Endpoint principal para consultar reportes con filtros
+     */
+    public function reportesMatricula(Request $request)
+    {
+        try {
+            // Validar parámetros
+            $validator = Validator::make($request->all(), [
+                'rango' => 'nullable|in:month,quarter,semester,year,custom',
+                'fechaInicio' => 'nullable|date|required_if:rango,custom',
+                'fechaFin' => 'nullable|date|required_if:rango,custom|after_or_equal:fechaInicio',
+                'programaId' => 'nullable|string',
+                'tipoAlumno' => 'nullable|in:all,Nuevo,Recurrente',
+                'page' => 'nullable|integer|min:1',
+                'perPage' => 'nullable|integer|min:1|max:100'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'error' => 'Parámetros inválidos',
+                    'messages' => $validator->errors()
+                ], 422);
+            }
+
+            // Obtener parámetros
+            $rango = $request->get('rango', 'month');
+            $fechaInicio = $request->get('fechaInicio');
+            $fechaFin = $request->get('fechaFin');
+            $programaId = $request->get('programaId', 'all');
+            $tipoAlumno = $request->get('tipoAlumno', 'all');
+            $page = $request->get('page', 1);
+            $perPage = $request->get('perPage', 50);
+
+            // Calcular rangos de fecha
+            $rangoFechas = $this->obtenerRangoFechas($rango, $fechaInicio, $fechaFin);
+            $rangoAnterior = $this->obtenerRangoAnterior($rango, $rangoFechas['fechaInicio'], $rangoFechas['fechaFin']);
+
+            // Obtener datos del período actual
+            $periodoActual = $this->obtenerDatosPeriodo(
+                $rangoFechas['fechaInicio'],
+                $rangoFechas['fechaFin'],
+                $programaId,
+                $tipoAlumno,
+                $rangoFechas['descripcion']
+            );
+
+            // Obtener datos del período anterior
+            $periodoAnterior = $this->obtenerDatosPeriodoAnterior(
+                $rangoAnterior['fechaInicio'],
+                $rangoAnterior['fechaFin'],
+                $programaId,
+                $tipoAlumno,
+                $rangoAnterior['descripcion']
+            );
+
+            // Calcular comparativas
+            $comparativa = $this->obtenerComparativa($periodoActual['totales'], $periodoAnterior['totales']);
+
+            // Obtener tendencias
+            $tendencias = $this->obtenerTendencias($programaId, $rangoFechas['fechaInicio']);
+
+            // Obtener listado paginado
+            $listado = $this->obtenerListadoAlumnos(
+                $rangoFechas['fechaInicio'],
+                $rangoFechas['fechaFin'],
+                $programaId,
+                $tipoAlumno,
+                $page,
+                $perPage
+            );
+
+            // Construir respuesta
+            return response()->json([
+                'filtros' => $this->obtenerFiltrosDisponibles(),
+                'periodoActual' => $periodoActual,
+                'periodoAnterior' => $periodoAnterior,
+                'comparativa' => $comparativa,
+                'tendencias' => $tendencias,
+                'listado' => $listado
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Error al obtener reportes de matrícula',
+                'message' => $e->getMessage(),
+                'debug' => config('app.debug') ? $e->getTraceAsString() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * Exportar reportes de matrícula
+     */
+    public function exportarReportesMatricula(Request $request)
+    {
+        try {
+            // Validar parámetros
+            $validator = Validator::make($request->all(), [
+                'formato' => 'required|in:pdf,excel,csv',
+                'detalle' => 'nullable|in:complete,summary,data',
+                'incluirGraficas' => 'nullable|boolean',
+                'rango' => 'nullable|in:month,quarter,semester,year,custom',
+                'fechaInicio' => 'nullable|date|required_if:rango,custom',
+                'fechaFin' => 'nullable|date|required_if:rango,custom|after_or_equal:fechaInicio',
+                'programaId' => 'nullable|string',
+                'tipoAlumno' => 'nullable|in:all,Nuevo,Recurrente'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'error' => 'Parámetros inválidos',
+                    'messages' => $validator->errors()
+                ], 422);
+            }
+
+            $formato = $request->get('formato');
+            $detalle = $request->get('detalle', 'complete');
+
+            // Obtener datos del reporte (reutilizando el endpoint principal)
+            $reporteRequest = new Request($request->except(['formato', 'detalle', 'incluirGraficas']));
+            $reporteResponse = $this->reportesMatricula($reporteRequest);
+            $datos = json_decode($reporteResponse->getContent());
+
+            // Auditoría
+            \Illuminate\Support\Facades\Log::info('Exportación de reportes de matrícula', [
+                'user_id' => auth()->id(),
+                'formato' => $formato,
+                'detalle' => $detalle,
+                'filtros' => $request->except(['formato', 'detalle', 'incluirGraficas'])
+            ]);
+
+            $filename = 'reportes_matricula_' . Carbon::now()->format('Y-m-d_H-i-s');
+
+            switch ($formato) {
+                case 'pdf':
+                    $pdf = Pdf::loadView('pdf.reportes-matricula', [
+                        'datos' => $datos,
+                        'detalle' => $detalle,
+                        'fecha' => Carbon::now()->format('d/m/Y H:i:s')
+                    ]);
+                    
+                    return $pdf->download($filename . '.pdf');
+
+                case 'excel':
+                    $export = new ReportesMatriculaExport($datos, $detalle);
+                    return Excel::download($export, $filename . '.xlsx');
+
+                case 'csv':
+                    $export = new ReportesMatriculaExport($datos, $detalle);
+                    return Excel::download($export, $filename . '.csv', \Maatwebsite\Excel\Excel::CSV, [
+                        'Content-Type' => 'text/csv; charset=UTF-8',
+                    ]);
+            }
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error al exportar reportes', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'error' => 'Error al exportar reportes',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener filtros disponibles
+     */
+    private function obtenerFiltrosDisponibles()
+    {
+        $programas = Programa::where('activo', 1)
+            ->select('id', 'nombre_del_programa as nombre')
+            ->get()
+            ->map(function ($p) {
+                return [
+                    'id' => (string) $p->id,
+                    'nombre' => $p->nombre
+                ];
+            });
+
+        return [
+            'rangosDisponibles' => ['month', 'quarter', 'semester', 'year', 'custom'],
+            'programas' => $programas,
+            'tiposAlumno' => ['Nuevo', 'Recurrente']
+        ];
+    }
+
+    /**
+     * Calcular rango de fechas según el tipo
+     */
+    private function obtenerRangoFechas($rango, $fechaInicio = null, $fechaFin = null)
+    {
+        $ahora = Carbon::now();
+        
+        switch ($rango) {
+            case 'month':
+                $inicio = $ahora->copy()->startOfMonth();
+                $fin = $ahora->copy()->endOfMonth();
+                $descripcion = $inicio->locale('es')->isoFormat('MMMM YYYY');
+                break;
+
+            case 'quarter':
+                $mes = $ahora->month;
+                $trimestre = ceil($mes / 3);
+                $inicio = $ahora->copy()->month(($trimestre - 1) * 3 + 1)->startOfMonth();
+                $fin = $ahora->copy()->month($trimestre * 3)->endOfMonth();
+                $descripcion = "Q{$trimestre} " . $ahora->year;
+                break;
+
+            case 'semester':
+                $semestre = $ahora->month <= 6 ? 1 : 2;
+                if ($semestre == 1) {
+                    $inicio = $ahora->copy()->month(1)->startOfMonth();
+                    $fin = $ahora->copy()->month(6)->endOfMonth();
+                } else {
+                    $inicio = $ahora->copy()->month(7)->startOfMonth();
+                    $fin = $ahora->copy()->month(12)->endOfMonth();
+                }
+                $descripcion = "Semestre {$semestre} " . $ahora->year;
+                break;
+
+            case 'year':
+                $inicio = $ahora->copy()->startOfYear();
+                $fin = $ahora->copy()->endOfYear();
+                $descripcion = "Año " . $ahora->year;
+                break;
+
+            case 'custom':
+                $inicio = Carbon::parse($fechaInicio)->startOfDay();
+                $fin = Carbon::parse($fechaFin)->endOfDay();
+                $descripcion = $inicio->format('d/m/Y') . ' - ' . $fin->format('d/m/Y');
+                break;
+
+            default:
+                $inicio = $ahora->copy()->startOfMonth();
+                $fin = $ahora->copy()->endOfMonth();
+                $descripcion = $inicio->locale('es')->isoFormat('MMMM YYYY');
+        }
+
+        return [
+            'fechaInicio' => $inicio->format('Y-m-d'),
+            'fechaFin' => $fin->format('Y-m-d'),
+            'descripcion' => $descripcion
+        ];
+    }
+
+    /**
+     * Calcular rango anterior con la misma duración
+     */
+    private function obtenerRangoAnterior($rango, $fechaInicio, $fechaFin)
+    {
+        $inicio = Carbon::parse($fechaInicio);
+        $fin = Carbon::parse($fechaFin);
+        $duracion = $inicio->diffInDays($fin) + 1;
+
+        $anteriorFin = $inicio->copy()->subDay();
+        $anteriorInicio = $anteriorFin->copy()->subDays($duracion - 1);
+
+        // Descripción según el tipo de rango
+        if ($rango === 'month') {
+            $descripcion = $anteriorInicio->locale('es')->isoFormat('MMMM YYYY');
+        } elseif ($rango === 'quarter') {
+            $mes = $anteriorInicio->month;
+            $trimestre = ceil($mes / 3);
+            $descripcion = "Q{$trimestre} " . $anteriorInicio->year;
+        } elseif ($rango === 'semester') {
+            $semestre = $anteriorInicio->month <= 6 ? 1 : 2;
+            $descripcion = "Semestre {$semestre} " . $anteriorInicio->year;
+        } elseif ($rango === 'year') {
+            $descripcion = "Año " . $anteriorInicio->year;
+        } else {
+            $descripcion = $anteriorInicio->format('d/m/Y') . ' - ' . $anteriorFin->format('d/m/Y');
+        }
+
+        return [
+            'fechaInicio' => $anteriorInicio->format('Y-m-d'),
+            'fechaFin' => $anteriorFin->format('Y-m-d'),
+            'descripcion' => $descripcion
+        ];
+    }
+
+    /**
+     * Obtener datos del período actual
+     */
+    private function obtenerDatosPeriodo($fechaInicio, $fechaFin, $programaId, $tipoAlumno, $descripcion)
+    {
+        $query = EstudiantePrograma::whereBetween('created_at', [$fechaInicio, $fechaFin]);
+        
+        if ($programaId !== 'all') {
+            $query->where('programa_id', $programaId);
+        }
+
+        // Total matriculados
+        $totalMatriculados = $query->count();
+
+        // Alumnos nuevos
+        $alumnosNuevos = $this->contarAlumnosNuevos($fechaInicio, $fechaFin, $programaId);
+
+        // Alumnos recurrentes
+        $alumnosRecurrentes = $totalMatriculados - $alumnosNuevos;
+
+        // Aplicar filtro de tipo si no es 'all'
+        if ($tipoAlumno === 'Nuevo') {
+            $totalMatriculados = $alumnosNuevos;
+            $alumnosRecurrentes = 0;
+        } elseif ($tipoAlumno === 'Recurrente') {
+            $totalMatriculados = $alumnosRecurrentes;
+            $alumnosNuevos = 0;
+        }
+
+        return [
+            'rango' => [
+                'fechaInicio' => $fechaInicio,
+                'fechaFin' => $fechaFin,
+                'descripcion' => $descripcion
+            ],
+            'totales' => [
+                'matriculados' => $totalMatriculados,
+                'alumnosNuevos' => $alumnosNuevos,
+                'alumnosRecurrentes' => $alumnosRecurrentes
+            ],
+            'distribucionProgramas' => $this->obtenerDistribucionProgramasRango($fechaInicio, $fechaFin, $programaId),
+            'evolucionMensual' => $this->obtenerEvolucionMensualRango($fechaInicio, $fechaFin, $programaId),
+            'distribucionTipo' => [
+                ['tipo' => 'Nuevo', 'total' => $alumnosNuevos],
+                ['tipo' => 'Recurrente', 'total' => $alumnosRecurrentes]
+            ]
+        ];
+    }
+
+    /**
+     * Obtener datos del período anterior
+     */
+    private function obtenerDatosPeriodoAnterior($fechaInicio, $fechaFin, $programaId, $tipoAlumno, $descripcion)
+    {
+        $query = EstudiantePrograma::whereBetween('created_at', [$fechaInicio, $fechaFin]);
+        
+        if ($programaId !== 'all') {
+            $query->where('programa_id', $programaId);
+        }
+
+        $totalMatriculados = $query->count();
+        $alumnosNuevos = $this->contarAlumnosNuevos($fechaInicio, $fechaFin, $programaId);
+        $alumnosRecurrentes = $totalMatriculados - $alumnosNuevos;
+
+        if ($tipoAlumno === 'Nuevo') {
+            $totalMatriculados = $alumnosNuevos;
+            $alumnosRecurrentes = 0;
+        } elseif ($tipoAlumno === 'Recurrente') {
+            $totalMatriculados = $alumnosRecurrentes;
+            $alumnosNuevos = 0;
+        }
+
+        return [
+            'totales' => [
+                'matriculados' => $totalMatriculados,
+                'alumnosNuevos' => $alumnosNuevos,
+                'alumnosRecurrentes' => $alumnosRecurrentes
+            ],
+            'rangoComparado' => [
+                'fechaInicio' => $fechaInicio,
+                'fechaFin' => $fechaFin,
+                'descripcion' => $descripcion
+            ]
+        ];
+    }
+
+    /**
+     * Calcular comparativas con variaciones
+     */
+    private function obtenerComparativa($totalesActual, $totalesAnterior)
+    {
+        return [
+            'totales' => [
+                'actual' => $totalesActual['matriculados'],
+                'anterior' => $totalesAnterior['matriculados'],
+                'variacion' => $this->calcularVariacion($totalesAnterior['matriculados'], $totalesActual['matriculados'])
+            ],
+            'nuevos' => [
+                'actual' => $totalesActual['alumnosNuevos'],
+                'anterior' => $totalesAnterior['alumnosNuevos'],
+                'variacion' => $this->calcularVariacion($totalesAnterior['alumnosNuevos'], $totalesActual['alumnosNuevos'])
+            ],
+            'recurrentes' => [
+                'actual' => $totalesActual['alumnosRecurrentes'],
+                'anterior' => $totalesAnterior['alumnosRecurrentes'],
+                'variacion' => $this->calcularVariacion($totalesAnterior['alumnosRecurrentes'], $totalesActual['alumnosRecurrentes'])
+            ]
+        ];
+    }
+
+    /**
+     * Calcular variación porcentual
+     */
+    private function calcularVariacion($anterior, $actual)
+    {
+        if ($anterior == 0) {
+            return $actual > 0 ? 100 : 0;
+        }
+        return round((($actual - $anterior) / $anterior) * 100, 2);
+    }
+
+    /**
+     * Contar alumnos nuevos (primera matrícula en el rango)
+     */
+    private function contarAlumnosNuevos($fechaInicio, $fechaFin, $programaId)
+    {
+        $query = DB::table('estudiante_programa as ep1')
+            ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
+                            FROM estudiante_programa 
+                            WHERE deleted_at IS NULL 
+                            GROUP BY prospecto_id) as ep2'), 
+                   'ep1.prospecto_id', '=', 'ep2.prospecto_id')
+            ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
+            ->whereNull('ep1.deleted_at');
+
+        if ($programaId !== 'all') {
+            $query->where('ep1.programa_id', $programaId);
+        }
+
+        return $query->distinct('ep1.prospecto_id')->count('ep1.prospecto_id');
+    }
+
+    /**
+     * Obtener distribución por programas en un rango
+     */
+    private function obtenerDistribucionProgramasRango($fechaInicio, $fechaFin, $programaId)
+    {
+        $query = EstudiantePrograma::whereBetween('created_at', [$fechaInicio, $fechaFin])
+            ->join('tb_programas', 'estudiante_programa.programa_id', '=', 'tb_programas.id')
+            ->select('tb_programas.nombre_del_programa as programa', DB::raw('COUNT(*) as total'))
+            ->groupBy('tb_programas.nombre_del_programa');
+
+        if ($programaId !== 'all') {
+            $query->where('estudiante_programa.programa_id', $programaId);
+        }
+
+        return $query->get()->toArray();
+    }
+
+    /**
+     * Obtener evolución mensual en un rango
+     */
+    private function obtenerEvolucionMensualRango($fechaInicio, $fechaFin, $programaId)
+    {
+        $inicio = Carbon::parse($fechaInicio);
+        $fin = Carbon::parse($fechaFin);
+        
+        $datos = [];
+        $mesActual = $inicio->copy();
+
+        while ($mesActual->lte($fin)) {
+            $query = EstudiantePrograma::whereYear('created_at', $mesActual->year)
+                ->whereMonth('created_at', $mesActual->month);
+
+            if ($programaId !== 'all') {
+                $query->where('programa_id', $programaId);
+            }
+
+            $total = $query->count();
+
+            $datos[] = [
+                'mes' => $mesActual->format('Y-m'),
+                'total' => $total
+            ];
+
+            $mesActual->addMonth();
+        }
+
+        return $datos;
+    }
+
+    /**
+     * Obtener tendencias de 12 meses
+     */
+    private function obtenerTendencias($programaId, $fechaActual)
+    {
+        $hace12Meses = Carbon::parse($fechaActual)->subMonths(12);
+        
+        // Últimos 12 meses
+        $ultimosDoceMeses = [];
+        for ($i = 11; $i >= 0; $i--) {
+            $fecha = Carbon::parse($fechaActual)->subMonths($i);
+            $query = EstudiantePrograma::whereYear('created_at', $fecha->year)
+                ->whereMonth('created_at', $fecha->month);
+
+            if ($programaId !== 'all') {
+                $query->where('programa_id', $programaId);
+            }
+
+            $ultimosDoceMeses[] = [
+                'mes' => $fecha->format('Y-m'),
+                'total' => $query->count()
+            ];
+        }
+
+        // Crecimiento por programa (últimos 6 meses vs 6 anteriores)
+        $crecimientoPorPrograma = $this->obtenerCrecimientoPorPrograma($fechaActual, $programaId);
+
+        // Proyección simple (promedio últimos 3 meses)
+        $proyeccion = $this->obtenerProyeccion($ultimosDoceMeses);
+
+        return [
+            'ultimosDoceMeses' => $ultimosDoceMeses,
+            'crecimientoPorPrograma' => $crecimientoPorPrograma,
+            'proyeccion' => $proyeccion
+        ];
+    }
+
+    /**
+     * Calcular crecimiento por programa
+     */
+    private function obtenerCrecimientoPorPrograma($fechaActual, $programaIdFiltro)
+    {
+        $hace6Meses = Carbon::parse($fechaActual)->subMonths(6);
+        $hace12Meses = Carbon::parse($fechaActual)->subMonths(12);
+
+        $programas = Programa::where('activo', 1)->get();
+        $resultado = [];
+
+        foreach ($programas as $programa) {
+            if ($programaIdFiltro !== 'all' && $programa->id != $programaIdFiltro) {
+                continue;
+            }
+
+            // Últimos 6 meses
+            $recientes = EstudiantePrograma::where('programa_id', $programa->id)
+                ->whereBetween('created_at', [$hace6Meses, $fechaActual])
+                ->count();
+
+            // 6 meses anteriores
+            $anteriores = EstudiantePrograma::where('programa_id', $programa->id)
+                ->whereBetween('created_at', [$hace12Meses, $hace6Meses])
+                ->count();
+
+            $variacion = $this->calcularVariacion($anteriores, $recientes);
+
+            $resultado[] = [
+                'programa' => $programa->nombre_del_programa,
+                'variacion' => $variacion
+            ];
+        }
+
+        return $resultado;
+    }
+
+    /**
+     * Calcular proyección simple
+     */
+    private function obtenerProyeccion($ultimosDoceMeses)
+    {
+        if (count($ultimosDoceMeses) < 3) {
+            return [];
+        }
+
+        // Promedio de los últimos 3 meses
+        $ultimos3 = array_slice($ultimosDoceMeses, -3);
+        $promedio = array_sum(array_column($ultimos3, 'total')) / 3;
+
+        $proximoMes = Carbon::now()->addMonth();
+
+        return [
+            [
+                'periodo' => $proximoMes->format('Y-m'),
+                'totalEsperado' => round($promedio)
+            ]
+        ];
+    }
+
+    /**
+     * Obtener listado paginado de alumnos
+     */
+    private function obtenerListadoAlumnos($fechaInicio, $fechaFin, $programaId, $tipoAlumno, $page, $perPage)
+    {
+        $query = EstudiantePrograma::whereBetween('estudiante_programa.created_at', [$fechaInicio, $fechaFin])
+            ->join('prospectos', 'estudiante_programa.prospecto_id', '=', 'prospectos.id')
+            ->join('tb_programas', 'estudiante_programa.programa_id', '=', 'tb_programas.id')
+            ->select(
+                'estudiante_programa.id',
+                'prospectos.nombre_completo as nombre',
+                'estudiante_programa.created_at as fechaMatricula',
+                'tb_programas.nombre_del_programa as programa',
+                DB::raw("CASE WHEN prospectos.activo = 1 THEN 'Activo' ELSE 'Inactivo' END as estado")
+            );
+
+        if ($programaId !== 'all') {
+            $query->where('estudiante_programa.programa_id', $programaId);
+        }
+
+        // Filtrar por tipo de alumno
+        if ($tipoAlumno === 'Nuevo') {
+            $nuevosIds = DB::table('estudiante_programa as ep1')
+                ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
+                                FROM estudiante_programa 
+                                WHERE deleted_at IS NULL 
+                                GROUP BY prospecto_id) as ep2'), 
+                       'ep1.prospecto_id', '=', 'ep2.prospecto_id')
+                ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
+                ->pluck('ep1.prospecto_id');
+
+            $query->whereIn('estudiante_programa.prospecto_id', $nuevosIds);
+        } elseif ($tipoAlumno === 'Recurrente') {
+            $nuevosIds = DB::table('estudiante_programa as ep1')
+                ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
+                                FROM estudiante_programa 
+                                WHERE deleted_at IS NULL 
+                                GROUP BY prospecto_id) as ep2'), 
+                       'ep1.prospecto_id', '=', 'ep2.prospecto_id')
+                ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
+                ->pluck('ep1.prospecto_id');
+
+            $query->whereNotIn('estudiante_programa.prospecto_id', $nuevosIds);
+        }
+
+        $total = $query->count();
+        $totalPaginas = ceil($total / $perPage);
+
+        $alumnos = $query->orderBy('estudiante_programa.created_at', 'desc')
+            ->skip(($page - 1) * $perPage)
+            ->take($perPage)
+            ->get()
+            ->map(function ($alumno) use ($fechaInicio, $fechaFin) {
+                // Determinar si es nuevo o recurrente
+                $primeraMatricula = EstudiantePrograma::where('prospecto_id', DB::table('prospectos')
+                    ->where('nombre_completo', $alumno->nombre)
+                    ->value('id'))
+                    ->min('created_at');
+                
+                $esNuevo = Carbon::parse($primeraMatricula)->between($fechaInicio, $fechaFin);
+
+                return [
+                    'id' => $alumno->id,
+                    'nombre' => $alumno->nombre,
+                    'fechaMatricula' => Carbon::parse($alumno->fechaMatricula)->format('Y-m-d'),
+                    'tipo' => $esNuevo ? 'Nuevo' : 'Recurrente',
+                    'programa' => $alumno->programa,
+                    'estado' => $alumno->estado
+                ];
+            });
+
+        return [
+            'alumnos' => $alumnos,
+            'paginacion' => [
+                'pagina' => $page,
+                'porPagina' => $perPage,
+                'total' => $total,
+                'totalPaginas' => $totalPaginas
+            ]
+        ];
+    }
 }
 
