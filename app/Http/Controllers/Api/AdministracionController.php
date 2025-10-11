@@ -14,6 +14,9 @@ use App\Models\PeriodoInscripcion;
 use App\Models\InscripcionPeriodo;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\DashboardExport;
+use App\Exports\ReportesMatriculaExport;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\Validator;
 use App\Exports\SimpleDashboardExport;
 
 class AdministracionController extends Controller
@@ -341,3 +344,4 @@ class AdministracionController extends Controller
      * Exportar datos del dashboard
      */
 }
+
