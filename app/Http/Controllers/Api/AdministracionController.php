@@ -14,6 +14,7 @@ use App\Models\PeriodoInscripcion;
 use App\Models\InscripcionPeriodo;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\DashboardExport;
+use App\Exports\SimpleDashboardExport;
 
 class AdministracionController extends Controller
 {
@@ -287,18 +288,22 @@ class AdministracionController extends Controller
             switch ($formato) {
                 case 'excel':
                 case 'xlsx':
-                    // Obtener datos del dashboard
-                    $dashboardData = $this->dashboard($request)->getData();
+                    // Obtener datos del dashboard directamente (no como response)
+                    $dashboardResponse = $this->dashboard($request);
+                    $dashboardData = $dashboardResponse->getData(true); // true para obtener array asociativo
 
-                    // Crear el export
-                    $export = new DashboardExport($dashboardData);
+                    // Crear el export usando la versión simple primero
+                    $export = new SimpleDashboardExport($dashboardData);
 
                     $filename = 'dashboard_administrativo_' . Carbon::now()->format('Y-m-d_H-i-s') . '.xlsx';
 
-                    return Excel::download($export, $filename);
+                    return Excel::download($export, $filename, \Maatwebsite\Excel\Excel::XLSX, [
+                        'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    ]);
 
                 case 'csv':
-                    $dashboardData = $this->dashboard($request)->getData();
+                    $dashboardResponse = $this->dashboard($request);
+                    $dashboardData = $dashboardResponse->getData(true);
                     $export = new DashboardExport($dashboardData);
 
                     $filename = 'dashboard_administrativo_' . Carbon::now()->format('Y-m-d_H-i-s') . '.csv';
@@ -309,7 +314,8 @@ class AdministracionController extends Controller
 
                 case 'json':
                 default:
-                    $datos = $this->dashboard($request)->getData();
+                    $dashboardResponse = $this->dashboard($request);
+                    $datos = $dashboardResponse->getData(true);
 
                     return response()->json([
                         'formato' => $formato,
@@ -318,10 +324,20 @@ class AdministracionController extends Controller
                     ]);
             }
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error al exportar dashboard', [
+                'formato' => $formato,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'error' => 'Error al exportar datos',
                 'message' => $e->getMessage()
             ], 500);
         }
     }
+
+     /**
+     * Exportar datos del dashboard
+     */
 }
