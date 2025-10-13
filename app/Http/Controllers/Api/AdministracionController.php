@@ -332,7 +332,7 @@ class AdministracionController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return response()->json([
                 'error' => 'Error al exportar datos',
                 'message' => $e->getMessage()
