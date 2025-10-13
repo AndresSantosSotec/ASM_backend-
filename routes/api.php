@@ -707,6 +707,10 @@ Route::prefix('administracion')->middleware('auth:sanctum')->group(function () {
     // Reportes de matrícula y alumnos nuevos
     Route::get('/reportes-matricula', [AdministracionController::class, 'reportesMatricula']);
     Route::post('/reportes-matricula/exportar', [AdministracionController::class, 'exportarReportesMatricula']);
+    
+    // Nuevo endpoint: Obtener todos los estudiantes matriculados del sistema
+    Route::get('/estudiantes-matriculados', [AdministracionController::class, 'estudiantesMatriculados']);
+    Route::post('/estudiantes-matriculados/exportar', [AdministracionController::class, 'exportarEstudiantesMatriculados']);
 });
 
 //----------------

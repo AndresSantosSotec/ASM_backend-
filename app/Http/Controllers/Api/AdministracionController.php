@@ -436,6 +436,230 @@ class AdministracionController extends Controller
     }
 
     /**
+     * Obtener todos los estudiantes matriculados del sistema
+     * Endpoint optimizado para cargar la totalidad de estudiantes con filtros opcionales
+     */
+    public function estudiantesMatriculados(Request $request)
+    {
+        try {
+            // Validar parámetros
+            $validator = Validator::make($request->all(), [
+                'fechaInicio' => 'nullable|date',
+                'fechaFin' => 'nullable|date|after_or_equal:fechaInicio',
+                'programaId' => 'nullable|string',
+                'tipoAlumno' => 'nullable|in:all,Nuevo,Recurrente',
+                'page' => 'nullable|integer|min:1',
+                'perPage' => 'nullable|integer|min:1|max:1000',
+                'exportar' => 'nullable|boolean'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'error' => 'Parámetros inválidos',
+                    'messages' => $validator->errors()
+                ], 422);
+            }
+
+            // Obtener parámetros
+            $fechaInicio = $request->get('fechaInicio');
+            $fechaFin = $request->get('fechaFin');
+            $programaId = $request->get('programaId', 'all');
+            $tipoAlumno = $request->get('tipoAlumno', 'all');
+            $page = $request->get('page', 1);
+            $perPage = $request->get('perPage', 100);
+            $exportar = $request->get('exportar', false);
+
+            // Si no se especifican fechas, obtener todos los estudiantes desde el inicio
+            if (!$fechaInicio) {
+                $fechaInicio = EstudiantePrograma::min('created_at') ?? Carbon::now()->subYears(10);
+            }
+            if (!$fechaFin) {
+                $fechaFin = Carbon::now();
+            }
+
+            // Construir query optimizada
+            $query = EstudiantePrograma::whereBetween('estudiante_programa.created_at', [$fechaInicio, $fechaFin])
+                ->join('prospectos', 'estudiante_programa.prospecto_id', '=', 'prospectos.id')
+                ->join('tb_programas', 'estudiante_programa.programa_id', '=', 'tb_programas.id')
+                ->select(
+                    'estudiante_programa.id',
+                    'prospectos.nombre_completo as nombre',
+                    'prospectos.carnet',
+                    'prospectos.correo_electronico as email',
+                    'prospectos.telefono',
+                    'estudiante_programa.created_at as fechaMatricula',
+                    'tb_programas.nombre_del_programa as programa',
+                    'tb_programas.id as programaId',
+                    DB::raw("CASE WHEN prospectos.activo = TRUE THEN 'Activo' ELSE 'Inactivo' END as estado")
+                );
+
+            // Filtrar por programa
+            if ($programaId !== 'all') {
+                $query->where('estudiante_programa.programa_id', $programaId);
+            }
+
+            // Filtrar por tipo de alumno
+            if ($tipoAlumno === 'Nuevo') {
+                $nuevosIds = DB::table('estudiante_programa as ep1')
+                    ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
+                                    FROM estudiante_programa 
+                                    WHERE deleted_at IS NULL 
+                                    GROUP BY prospecto_id) as ep2'), 
+                           'ep1.prospecto_id', '=', 'ep2.prospecto_id')
+                    ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
+                    ->pluck('ep1.prospecto_id');
+
+                $query->whereIn('estudiante_programa.prospecto_id', $nuevosIds);
+            } elseif ($tipoAlumno === 'Recurrente') {
+                $nuevosIds = DB::table('estudiante_programa as ep1')
+                    ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
+                                    FROM estudiante_programa 
+                                    WHERE deleted_at IS NULL 
+                                    GROUP BY prospecto_id) as ep2'), 
+                           'ep1.prospecto_id', '=', 'ep2.prospecto_id')
+                    ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
+                    ->pluck('ep1.prospecto_id');
+
+                $query->whereNotIn('estudiante_programa.prospecto_id', $nuevosIds);
+            }
+
+            // Calcular total
+            $total = $query->count();
+
+            // Si exportar=true, retornar todos los resultados sin paginación
+            if ($exportar) {
+                $estudiantes = $query->orderBy('estudiante_programa.created_at', 'desc')
+                    ->get()
+                    ->map(function ($alumno) use ($fechaInicio, $fechaFin) {
+                        return $this->mapearEstudiante($alumno, $fechaInicio, $fechaFin);
+                    });
+
+                return response()->json([
+                    'estudiantes' => $estudiantes,
+                    'total' => $total,
+                    'filtros' => [
+                        'fechaInicio' => Carbon::parse($fechaInicio)->format('Y-m-d'),
+                        'fechaFin' => Carbon::parse($fechaFin)->format('Y-m-d'),
+                        'programaId' => $programaId,
+                        'tipoAlumno' => $tipoAlumno
+                    ]
+                ]);
+            }
+
+            // Paginación
+            $totalPaginas = ceil($total / $perPage);
+            $estudiantes = $query->orderBy('estudiante_programa.created_at', 'desc')
+                ->skip(($page - 1) * $perPage)
+                ->take($perPage)
+                ->get()
+                ->map(function ($alumno) use ($fechaInicio, $fechaFin) {
+                    return $this->mapearEstudiante($alumno, $fechaInicio, $fechaFin);
+                });
+
+            // Obtener estadísticas resumidas
+            $estadisticas = $this->obtenerEstadisticasEstudiantes($fechaInicio, $fechaFin, $programaId, $tipoAlumno);
+
+            return response()->json([
+                'estudiantes' => $estudiantes,
+                'paginacion' => [
+                    'pagina' => $page,
+                    'porPagina' => $perPage,
+                    'total' => $total,
+                    'totalPaginas' => $totalPaginas
+                ],
+                'estadisticas' => $estadisticas,
+                'filtros' => [
+                    'fechaInicio' => Carbon::parse($fechaInicio)->format('Y-m-d'),
+                    'fechaFin' => Carbon::parse($fechaFin)->format('Y-m-d'),
+                    'programaId' => $programaId,
+                    'tipoAlumno' => $tipoAlumno
+                ],
+                'filtrosDisponibles' => $this->obtenerFiltrosDisponibles()
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Error al obtener estudiantes matriculados',
+                'message' => $e->getMessage(),
+                'debug' => config('app.debug') ? $e->getTraceAsString() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * Exportar listado completo de estudiantes matriculados
+     */
+    public function exportarEstudiantesMatriculados(Request $request)
+    {
+        try {
+            // Validar parámetros
+            $validator = Validator::make($request->all(), [
+                'formato' => 'required|in:pdf,excel,csv',
+                'fechaInicio' => 'nullable|date',
+                'fechaFin' => 'nullable|date|after_or_equal:fechaInicio',
+                'programaId' => 'nullable|string',
+                'tipoAlumno' => 'nullable|in:all,Nuevo,Recurrente'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'error' => 'Parámetros inválidos',
+                    'messages' => $validator->errors()
+                ], 422);
+            }
+
+            $formato = $request->get('formato');
+
+            // Obtener datos usando el endpoint principal con exportar=true
+            $dataRequest = new Request($request->all());
+            $dataRequest->merge(['exportar' => true]);
+            $dataResponse = $this->estudiantesMatriculados($dataRequest);
+            $datos = json_decode($dataResponse->getContent());
+
+            // Auditoría
+            \Illuminate\Support\Facades\Log::info('Exportación de estudiantes matriculados', [
+                'user_id' => auth()->id(),
+                'formato' => $formato,
+                'total_estudiantes' => count($datos->estudiantes),
+                'filtros' => $request->except(['formato'])
+            ]);
+
+            $filename = 'estudiantes_matriculados_' . Carbon::now()->format('Y-m-d_H-i-s');
+
+            switch ($formato) {
+                case 'pdf':
+                    $pdf = Pdf::loadView('pdf.estudiantes-matriculados', [
+                        'datos' => $datos,
+                        'fecha' => Carbon::now()->format('d/m/Y H:i:s')
+                    ]);
+                    
+                    return $pdf->download($filename . '.pdf');
+
+                case 'excel':
+                    $export = new \App\Exports\EstudiantesMatriculadosExport($datos);
+                    return Excel::download($export, $filename . '.xlsx');
+
+                case 'csv':
+                    $export = new \App\Exports\EstudiantesMatriculadosExport($datos);
+                    return Excel::download($export, $filename . '.csv', \Maatwebsite\Excel\Excel::CSV, [
+                        'Content-Type' => 'text/csv; charset=UTF-8',
+                    ]);
+            }
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error al exportar estudiantes matriculados', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'error' => 'Error al exportar estudiantes matriculados',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Exportar reportes de matrícula
      */
     public function exportarReportesMatricula(Request $request)
@@ -913,6 +1137,92 @@ class AdministracionController extends Controller
                 'periodo' => $proximoMes->format('Y-m'),
                 'totalEsperado' => round($promedio)
             ]
+        ];
+    }
+
+    /**
+     * Mapear datos de estudiante para respuesta
+     */
+    private function mapearEstudiante($alumno, $fechaInicio, $fechaFin)
+    {
+        // Determinar si es nuevo o recurrente
+        $primeraMatricula = EstudiantePrograma::where('prospecto_id', DB::table('prospectos')
+            ->where('nombre_completo', $alumno->nombre)
+            ->value('id'))
+            ->min('created_at');
+        
+        $esNuevo = $primeraMatricula ? Carbon::parse($primeraMatricula)->between($fechaInicio, $fechaFin) : false;
+
+        return [
+            'id' => $alumno->id,
+            'nombre' => $alumno->nombre,
+            'carnet' => $alumno->carnet ?? 'N/A',
+            'email' => $alumno->email ?? 'N/A',
+            'telefono' => $alumno->telefono ?? 'N/A',
+            'fechaMatricula' => Carbon::parse($alumno->fechaMatricula)->format('Y-m-d'),
+            'tipo' => $esNuevo ? 'Nuevo' : 'Recurrente',
+            'programa' => $alumno->programa,
+            'programaId' => $alumno->programaId,
+            'estado' => $alumno->estado
+        ];
+    }
+
+    /**
+     * Obtener estadísticas de estudiantes
+     */
+    private function obtenerEstadisticasEstudiantes($fechaInicio, $fechaFin, $programaId, $tipoAlumno)
+    {
+        $query = EstudiantePrograma::whereBetween('created_at', [$fechaInicio, $fechaFin]);
+
+        if ($programaId !== 'all') {
+            $query->where('programa_id', $programaId);
+        }
+
+        $totalEstudiantes = $query->count();
+
+        // Calcular nuevos vs recurrentes
+        $nuevosIds = DB::table('estudiante_programa as ep1')
+            ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
+                            FROM estudiante_programa 
+                            WHERE deleted_at IS NULL 
+                            GROUP BY prospecto_id) as ep2'), 
+                   'ep1.prospecto_id', '=', 'ep2.prospecto_id')
+            ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
+            ->pluck('ep1.prospecto_id');
+
+        $queryNuevos = EstudiantePrograma::whereBetween('created_at', [$fechaInicio, $fechaFin])
+            ->whereIn('prospecto_id', $nuevosIds);
+        
+        if ($programaId !== 'all') {
+            $queryNuevos->where('programa_id', $programaId);
+        }
+        
+        $totalNuevos = $queryNuevos->count();
+        $totalRecurrentes = $totalEstudiantes - $totalNuevos;
+
+        // Distribución por programa
+        $queryDistribucion = EstudiantePrograma::whereBetween('estudiante_programa.created_at', [$fechaInicio, $fechaFin])
+            ->join('tb_programas', 'estudiante_programa.programa_id', '=', 'tb_programas.id')
+            ->select('tb_programas.nombre_del_programa as programa', DB::raw('COUNT(*) as total'))
+            ->groupBy('tb_programas.nombre_del_programa');
+
+        if ($programaId !== 'all') {
+            $queryDistribucion->where('estudiante_programa.programa_id', $programaId);
+        }
+
+        $distribucionProgramas = $queryDistribucion->get()->map(function ($item) use ($totalEstudiantes) {
+            return [
+                'programa' => $item->programa,
+                'total' => $item->total,
+                'porcentaje' => $totalEstudiantes > 0 ? round(($item->total / $totalEstudiantes) * 100, 2) : 0
+            ];
+        });
+
+        return [
+            'totalEstudiantes' => $totalEstudiantes,
+            'nuevos' => $totalNuevos,
+            'recurrentes' => $totalRecurrentes,
+            'distribucionProgramas' => $distribucionProgramas
         ];
     }
 
