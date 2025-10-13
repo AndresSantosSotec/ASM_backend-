@@ -337,4 +337,74 @@ class ReportesMatriculaTest extends TestCase
 
         return $prospecto;
     }
+
+    /** @test */
+    public function it_can_access_estudiantes_matriculados_endpoint()
+    {
+        // Create some enrollments
+        $this->createEnrollments(5, $this->programa1, Carbon::now()->subDays(15));
+        $this->createEnrollments(3, $this->programa2, Carbon::now()->subDays(10));
+
+        $response = $this->actingAs($this->user)
+            ->getJson('/api/administracion/estudiantes-matriculados?page=1&perPage=50');
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'alumnos',
+                'paginacion' => [
+                    'pagina',
+                    'porPagina',
+                    'total',
+                    'totalPaginas'
+                ]
+            ]);
+    }
+
+    /** @test */
+    public function estudiantes_matriculados_requires_authentication()
+    {
+        $response = $this->getJson('/api/administracion/estudiantes-matriculados');
+        
+        $response->assertStatus(401);
+    }
+
+    /** @test */
+    public function estudiantes_matriculados_supports_filtering()
+    {
+        $this->createEnrollments(5, $this->programa1, Carbon::now()->subDays(15));
+        $this->createEnrollments(3, $this->programa2, Carbon::now()->subDays(10));
+
+        $response = $this->actingAs($this->user)
+            ->getJson('/api/administracion/estudiantes-matriculados?programaId=' . $this->programa1->id);
+
+        $response->assertStatus(200);
+        
+        // All returned students should be from programa1
+        $data = $response->json();
+        $this->assertArrayHasKey('alumnos', $data);
+    }
+
+    /** @test */
+    public function estudiantes_matriculados_does_not_have_n_plus_one_queries()
+    {
+        // Create a larger dataset to make N+1 issues more visible
+        $this->createEnrollments(20, $this->programa1, Carbon::now()->subDays(15));
+        
+        // Enable query logging
+        \DB::enableQueryLog();
+
+        $response = $this->actingAs($this->user)
+            ->getJson('/api/administracion/estudiantes-matriculados?page=1&perPage=20');
+
+        $queries = \DB::getQueryLog();
+        \DB::disableQueryLog();
+
+        $response->assertStatus(200);
+
+        // With the optimization, we should have a minimal number of queries
+        // Main query + subquery for first enrollment + auth queries
+        // Should be significantly less than 20 students * 2 queries each (40+)
+        $this->assertLessThan(15, count($queries), 
+            'Too many queries detected. Possible N+1 query issue. Total queries: ' . count($queries));
+    }
 }

@@ -921,14 +921,25 @@ class AdministracionController extends Controller
      */
     private function obtenerListadoAlumnos($fechaInicio, $fechaFin, $programaId, $tipoAlumno, $page, $perPage)
     {
+        // Pre-calcular primera matrícula de todos los prospectos de una sola vez
+        $primerasMatriculas = DB::table('estudiante_programa')
+            ->select('prospecto_id', DB::raw('MIN(created_at) as primera_matricula'))
+            ->whereNull('deleted_at')
+            ->groupBy('prospecto_id');
+
         $query = EstudiantePrograma::whereBetween('estudiante_programa.created_at', [$fechaInicio, $fechaFin])
             ->join('prospectos', 'estudiante_programa.prospecto_id', '=', 'prospectos.id')
             ->join('tb_programas', 'estudiante_programa.programa_id', '=', 'tb_programas.id')
+            ->leftJoinSub($primerasMatriculas, 'pm', function ($join) {
+                $join->on('estudiante_programa.prospecto_id', '=', 'pm.prospecto_id');
+            })
             ->select(
                 'estudiante_programa.id',
+                'estudiante_programa.prospecto_id',
                 'prospectos.nombre_completo as nombre',
                 'estudiante_programa.created_at as fechaMatricula',
                 'tb_programas.nombre_del_programa as programa',
+                'pm.primera_matricula',
                 DB::raw("CASE WHEN prospectos.activo = TRUE THEN 'Activo' ELSE 'Inactivo' END as estado")
             );
 
@@ -938,16 +949,7 @@ class AdministracionController extends Controller
 
         // Filtrar por tipo de alumno
         if ($tipoAlumno === 'Nuevo') {
-            $nuevosIds = DB::table('estudiante_programa as ep1')
-                ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula
-                                FROM estudiante_programa
-                                WHERE deleted_at IS NULL
-                                GROUP BY prospecto_id) as ep2'),
-                       'ep1.prospecto_id', '=', 'ep2.prospecto_id')
-                ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
-                ->pluck('ep1.prospecto_id');
-
-            $query->whereIn('estudiante_programa.prospecto_id', $nuevosIds);
+            $query->whereRaw('pm.primera_matricula BETWEEN ? AND ?', [$fechaInicio, $fechaFin]);
         } elseif ($tipoAlumno === 'Recurrente') {
             $nuevosIds = DB::table('estudiante_programa as ep1')
                 ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula
@@ -996,48 +998,6 @@ class AdministracionController extends Controller
                 'totalPaginas' => $totalPaginas
             ]
         ];
-    }
-
-    /**
-     * Endpoint público para obtener estudiantes matriculados paginados
-     * GET /api/administracion/estudiantes-matriculados?page=1&perPage=50
-     */
-    public function estudiantesMatriculados(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'rango' => 'nullable|in:month,quarter,semester,year,custom',
-            'fechaInicio' => 'nullable|date|required_if:rango,custom',
-            'fechaFin' => 'nullable|date|required_if:rango,custom|after_or_equal:fechaInicio',
-            'programaId' => 'nullable|string',
-            'tipoAlumno' => 'nullable|in:all,Nuevo,Recurrente',
-            'page' => 'nullable|integer|min:1',
-            'perPage' => 'nullable|integer|min:1|max:100'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['error' => 'Parámetros inválidos', 'messages' => $validator->errors()], 422);
-        }
-
-        $rango = $request->get('rango', 'month');
-        $fechaInicio = $request->get('fechaInicio');
-        $fechaFin = $request->get('fechaFin');
-        $programaId = $request->get('programaId', 'all');
-        $tipoAlumno = $request->get('tipoAlumno', 'all');
-        $page = (int)$request->get('page', 1);
-        $perPage = (int)$request->get('perPage', 50);
-
-        $rangoFechas = $this->obtenerRangoFechas($rango, $fechaInicio, $fechaFin);
-
-        $listado = $this->obtenerListadoAlumnos(
-            $rangoFechas['fechaInicio'],
-            $rangoFechas['fechaFin'],
-            $programaId,
-            $tipoAlumno,
-            $page,
-            $perPage
-        );
-
-        return response()->json($listado);
     }
 }
 
