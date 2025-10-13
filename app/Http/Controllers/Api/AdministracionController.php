@@ -485,7 +485,7 @@ class AdministracionController extends Controller
                         'detalle' => $detalle,
                         'fecha' => Carbon::now()->format('d/m/Y H:i:s')
                     ]);
-                    
+
                     return $pdf->download($filename . '.pdf');
 
                 case 'excel':
@@ -504,7 +504,7 @@ class AdministracionController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return response()->json([
                 'error' => 'Error al exportar reportes',
                 'message' => $e->getMessage()
@@ -540,7 +540,7 @@ class AdministracionController extends Controller
     private function obtenerRangoFechas($rango, $fechaInicio = null, $fechaFin = null)
     {
         $ahora = Carbon::now();
-        
+
         switch ($rango) {
             case 'month':
                 $inicio = $ahora->copy()->startOfMonth();
@@ -634,7 +634,7 @@ class AdministracionController extends Controller
     private function obtenerDatosPeriodo($fechaInicio, $fechaFin, $programaId, $tipoAlumno, $descripcion)
     {
         $query = EstudiantePrograma::whereBetween('created_at', [$fechaInicio, $fechaFin]);
-        
+
         if ($programaId !== 'all') {
             $query->where('programa_id', $programaId);
         }
@@ -683,7 +683,7 @@ class AdministracionController extends Controller
     private function obtenerDatosPeriodoAnterior($fechaInicio, $fechaFin, $programaId, $tipoAlumno, $descripcion)
     {
         $query = EstudiantePrograma::whereBetween('created_at', [$fechaInicio, $fechaFin]);
-        
+
         if ($programaId !== 'all') {
             $query->where('programa_id', $programaId);
         }
@@ -755,10 +755,10 @@ class AdministracionController extends Controller
     private function contarAlumnosNuevos($fechaInicio, $fechaFin, $programaId)
     {
         $query = DB::table('estudiante_programa as ep1')
-            ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
-                            FROM estudiante_programa 
-                            WHERE deleted_at IS NULL 
-                            GROUP BY prospecto_id) as ep2'), 
+            ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula
+                            FROM estudiante_programa
+                            WHERE deleted_at IS NULL
+                            GROUP BY prospecto_id) as ep2'),
                    'ep1.prospecto_id', '=', 'ep2.prospecto_id')
             ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
             ->whereNull('ep1.deleted_at');
@@ -794,7 +794,7 @@ class AdministracionController extends Controller
     {
         $inicio = Carbon::parse($fechaInicio);
         $fin = Carbon::parse($fechaFin);
-        
+
         $datos = [];
         $mesActual = $inicio->copy();
 
@@ -825,7 +825,7 @@ class AdministracionController extends Controller
     private function obtenerTendencias($programaId, $fechaActual)
     {
         $hace12Meses = Carbon::parse($fechaActual)->subMonths(12);
-        
+
         // Últimos 12 meses
         $ultimosDoceMeses = [];
         for ($i = 11; $i >= 0; $i--) {
@@ -939,10 +939,10 @@ class AdministracionController extends Controller
         // Filtrar por tipo de alumno
         if ($tipoAlumno === 'Nuevo') {
             $nuevosIds = DB::table('estudiante_programa as ep1')
-                ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
-                                FROM estudiante_programa 
-                                WHERE deleted_at IS NULL 
-                                GROUP BY prospecto_id) as ep2'), 
+                ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula
+                                FROM estudiante_programa
+                                WHERE deleted_at IS NULL
+                                GROUP BY prospecto_id) as ep2'),
                        'ep1.prospecto_id', '=', 'ep2.prospecto_id')
                 ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
                 ->pluck('ep1.prospecto_id');
@@ -950,10 +950,10 @@ class AdministracionController extends Controller
             $query->whereIn('estudiante_programa.prospecto_id', $nuevosIds);
         } elseif ($tipoAlumno === 'Recurrente') {
             $nuevosIds = DB::table('estudiante_programa as ep1')
-                ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
-                                FROM estudiante_programa 
-                                WHERE deleted_at IS NULL 
-                                GROUP BY prospecto_id) as ep2'), 
+                ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula
+                                FROM estudiante_programa
+                                WHERE deleted_at IS NULL
+                                GROUP BY prospecto_id) as ep2'),
                        'ep1.prospecto_id', '=', 'ep2.prospecto_id')
                 ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
                 ->pluck('ep1.prospecto_id');
@@ -974,7 +974,7 @@ class AdministracionController extends Controller
                     ->where('nombre_completo', $alumno->nombre)
                     ->value('id'))
                     ->min('created_at');
-                
+
                 $esNuevo = Carbon::parse($primeraMatricula)->between($fechaInicio, $fechaFin);
 
                 return [
@@ -996,6 +996,48 @@ class AdministracionController extends Controller
                 'totalPaginas' => $totalPaginas
             ]
         ];
+    }
+
+    /**
+     * Endpoint público para obtener estudiantes matriculados paginados
+     * GET /api/administracion/estudiantes-matriculados?page=1&perPage=50
+     */
+    public function estudiantesMatriculados(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'rango' => 'nullable|in:month,quarter,semester,year,custom',
+            'fechaInicio' => 'nullable|date|required_if:rango,custom',
+            'fechaFin' => 'nullable|date|required_if:rango,custom|after_or_equal:fechaInicio',
+            'programaId' => 'nullable|string',
+            'tipoAlumno' => 'nullable|in:all,Nuevo,Recurrente',
+            'page' => 'nullable|integer|min:1',
+            'perPage' => 'nullable|integer|min:1|max:100'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Parámetros inválidos', 'messages' => $validator->errors()], 422);
+        }
+
+        $rango = $request->get('rango', 'month');
+        $fechaInicio = $request->get('fechaInicio');
+        $fechaFin = $request->get('fechaFin');
+        $programaId = $request->get('programaId', 'all');
+        $tipoAlumno = $request->get('tipoAlumno', 'all');
+        $page = (int)$request->get('page', 1);
+        $perPage = (int)$request->get('perPage', 50);
+
+        $rangoFechas = $this->obtenerRangoFechas($rango, $fechaInicio, $fechaFin);
+
+        $listado = $this->obtenerListadoAlumnos(
+            $rangoFechas['fechaInicio'],
+            $rangoFechas['fechaFin'],
+            $programaId,
+            $tipoAlumno,
+            $page,
+            $perPage
+        );
+
+        return response()->json($listado);
     }
 }
 
