@@ -921,14 +921,25 @@ class AdministracionController extends Controller
      */
     private function obtenerListadoAlumnos($fechaInicio, $fechaFin, $programaId, $tipoAlumno, $page, $perPage)
     {
+        // Pre-calcular primera matrícula de todos los prospectos de una sola vez
+        $primerasMatriculas = DB::table('estudiante_programa')
+            ->select('prospecto_id', DB::raw('MIN(created_at) as primera_matricula'))
+            ->whereNull('deleted_at')
+            ->groupBy('prospecto_id');
+
         $query = EstudiantePrograma::whereBetween('estudiante_programa.created_at', [$fechaInicio, $fechaFin])
             ->join('prospectos', 'estudiante_programa.prospecto_id', '=', 'prospectos.id')
             ->join('tb_programas', 'estudiante_programa.programa_id', '=', 'tb_programas.id')
+            ->leftJoinSub($primerasMatriculas, 'pm', function ($join) {
+                $join->on('estudiante_programa.prospecto_id', '=', 'pm.prospecto_id');
+            })
             ->select(
                 'estudiante_programa.id',
+                'estudiante_programa.prospecto_id',
                 'prospectos.nombre_completo as nombre',
                 'estudiante_programa.created_at as fechaMatricula',
                 'tb_programas.nombre_del_programa as programa',
+                'pm.primera_matricula',
                 DB::raw("CASE WHEN prospectos.activo = TRUE THEN 'Activo' ELSE 'Inactivo' END as estado")
             );
 
@@ -938,27 +949,9 @@ class AdministracionController extends Controller
 
         // Filtrar por tipo de alumno
         if ($tipoAlumno === 'Nuevo') {
-            $nuevosIds = DB::table('estudiante_programa as ep1')
-                ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
-                                FROM estudiante_programa 
-                                WHERE deleted_at IS NULL 
-                                GROUP BY prospecto_id) as ep2'), 
-                       'ep1.prospecto_id', '=', 'ep2.prospecto_id')
-                ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
-                ->pluck('ep1.prospecto_id');
-
-            $query->whereIn('estudiante_programa.prospecto_id', $nuevosIds);
+            $query->whereRaw('pm.primera_matricula BETWEEN ? AND ?', [$fechaInicio, $fechaFin]);
         } elseif ($tipoAlumno === 'Recurrente') {
-            $nuevosIds = DB::table('estudiante_programa as ep1')
-                ->join(DB::raw('(SELECT prospecto_id, MIN(created_at) as primera_matricula 
-                                FROM estudiante_programa 
-                                WHERE deleted_at IS NULL 
-                                GROUP BY prospecto_id) as ep2'), 
-                       'ep1.prospecto_id', '=', 'ep2.prospecto_id')
-                ->whereBetween('ep2.primera_matricula', [$fechaInicio, $fechaFin])
-                ->pluck('ep1.prospecto_id');
-
-            $query->whereNotIn('estudiante_programa.prospecto_id', $nuevosIds);
+            $query->whereRaw('(pm.primera_matricula < ? OR pm.primera_matricula > ?)', [$fechaInicio, $fechaFin]);
         }
 
         $total = $query->count();
@@ -969,13 +962,9 @@ class AdministracionController extends Controller
             ->take($perPage)
             ->get()
             ->map(function ($alumno) use ($fechaInicio, $fechaFin) {
-                // Determinar si es nuevo o recurrente
-                $primeraMatricula = EstudiantePrograma::where('prospecto_id', DB::table('prospectos')
-                    ->where('nombre_completo', $alumno->nombre)
-                    ->value('id'))
-                    ->min('created_at');
-                
-                $esNuevo = Carbon::parse($primeraMatricula)->between($fechaInicio, $fechaFin);
+                // Determinar si es nuevo o recurrente usando la primera matrícula precargada
+                $primeraMatricula = $alumno->primera_matricula;
+                $esNuevo = $primeraMatricula && Carbon::parse($primeraMatricula)->between($fechaInicio, $fechaFin);
 
                 return [
                     'id' => $alumno->id,
@@ -996,6 +985,65 @@ class AdministracionController extends Controller
                 'totalPaginas' => $totalPaginas
             ]
         ];
+    }
+
+    /**
+     * Endpoint simplificado para estudiantes matriculados
+     * GET /api/administracion/estudiantes-matriculados
+     */
+    public function estudiantesMatriculados(Request $request)
+    {
+        try {
+            // Validar parámetros
+            $validator = Validator::make($request->all(), [
+                'page' => 'nullable|integer|min:1',
+                'perPage' => 'nullable|integer|min:1|max:100',
+                'programaId' => 'nullable|string',
+                'tipoAlumno' => 'nullable|in:all,Nuevo,Recurrente',
+                'fechaInicio' => 'nullable|date',
+                'fechaFin' => 'nullable|date|after_or_equal:fechaInicio'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'error' => 'Parámetros inválidos',
+                    'messages' => $validator->errors()
+                ], 422);
+            }
+
+            $page = $request->get('page', 1);
+            $perPage = $request->get('perPage', 50);
+            $programaId = $request->get('programaId', 'all');
+            $tipoAlumno = $request->get('tipoAlumno', 'all');
+            
+            // Usar el mes actual como rango por defecto
+            $fechaInicio = $request->get('fechaInicio', Carbon::now()->startOfMonth()->toDateString());
+            $fechaFin = $request->get('fechaFin', Carbon::now()->endOfMonth()->toDateString());
+
+            // Obtener listado de alumnos
+            $listado = $this->obtenerListadoAlumnos(
+                $fechaInicio,
+                $fechaFin,
+                $programaId,
+                $tipoAlumno,
+                $page,
+                $perPage
+            );
+
+            return response()->json($listado);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error en estudiantesMatriculados', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'error' => 'Error al obtener estudiantes matriculados',
+                'message' => $e->getMessage(),
+                'debug' => config('app.debug') ? $e->getTraceAsString() : null
+            ], 500);
+        }
     }
 }
 
