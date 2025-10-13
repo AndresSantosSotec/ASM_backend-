@@ -929,7 +929,7 @@ class AdministracionController extends Controller
                 'prospectos.nombre_completo as nombre',
                 'estudiante_programa.created_at as fechaMatricula',
                 'tb_programas.nombre_del_programa as programa',
-                DB::raw("CASE WHEN prospectos.activo = 1 THEN 'Activo' ELSE 'Inactivo' END as estado")
+                DB::raw("CASE WHEN prospectos.activo = TRUE THEN 'Activo' ELSE 'Inactivo' END as estado")
             );
 
         if ($programaId !== 'all') {
