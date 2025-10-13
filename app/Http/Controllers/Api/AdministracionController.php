@@ -951,7 +951,7 @@ class AdministracionController extends Controller
         if ($tipoAlumno === 'Nuevo') {
             $query->whereRaw('pm.primera_matricula BETWEEN ? AND ?', [$fechaInicio, $fechaFin]);
         } elseif ($tipoAlumno === 'Recurrente') {
-            $query->whereRaw('(pm.primera_matricula < ? OR pm.primera_matricula > ?)', [$fechaInicio, $fechaFin]);
+            $query->whereRaw('pm.primera_matricula < ?', [$fechaInicio]);
         }
 
         $total = $query->count();
