@@ -703,7 +703,7 @@ Route::prefix('administracion')->middleware('auth:sanctum')->group(function () {
     // Dashboard administrativo
     Route::get('/dashboard', [AdministracionController::class, 'dashboard']);
     Route::get('/dashboard/exportar', [AdministracionController::class, 'exportar']);
-    
+
     // Reportes de matrícula y alumnos nuevos
     Route::get('/reportes-matricula', [AdministracionController::class, 'reportesMatricula']);
     Route::post('/reportes-matricula/exportar', [AdministracionController::class, 'exportarReportesMatricula']);
