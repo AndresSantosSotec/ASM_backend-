@@ -1134,13 +1134,11 @@ class AdministracionController extends Controller
             ->take($perPage)
             ->get()
             ->map(function ($alumno) use ($fechaInicio, $fechaFin) {
-                // Determinar si es nuevo o recurrente
-                $primeraMatricula = EstudiantePrograma::where('prospecto_id', DB::table('prospectos')
-                    ->where('nombre_completo', $alumno->nombre)
-                    ->value('id'))
-                    ->min('created_at');
-
-                $esNuevo = Carbon::parse($primeraMatricula)->between($fechaInicio, $fechaFin);
+                // Determinar si es nuevo o recurrente usando la primera_matricula pre-calculada
+                // Esto evita el problema N+1 de hacer queries adicionales por cada alumno
+                $esNuevo = $alumno->primera_matricula 
+                    ? Carbon::parse($alumno->primera_matricula)->between($fechaInicio, $fechaFin)
+                    : false;
 
                 return [
                     'id' => $alumno->id,
