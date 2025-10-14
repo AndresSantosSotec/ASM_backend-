@@ -710,7 +710,8 @@ Route::prefix('administracion')->middleware('auth:sanctum')->group(function () {
 
     // Endpoint simplificado para estudiantes matriculados
     Route::get('/estudiantes-matriculados', [AdministracionController::class, 'estudiantesMatriculados']);
-    Route::get('/estudiantes-matriculados/exportar', [AdministracionController::class, 'exportarEstudiantesMatriculados']);});
+    Route::post('/estudiantes-matriculados/exportar', [AdministracionController::class, 'exportarEstudiantesMatriculados']);
+});
 
 //----------------
 // Notificaciones Internas del sistema
