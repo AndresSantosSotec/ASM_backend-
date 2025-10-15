@@ -513,6 +513,169 @@ class AdministracionController extends Controller
     }
 
     /**
+     * Endpoint simplificado para estudiantes matriculados
+     * GET /api/administracion/estudiantes-matriculados
+     */
+    public function estudiantesMatriculados(Request $request)
+    {
+        try {
+            // Parámetros de paginación
+            $page = max(1, (int) $request->get('page', 1));
+            $perPage = min(100, max(1, (int) $request->get('perPage', 50)));
+
+            // Parámetros de filtrado
+            $programaId = $request->get('programaId', 'all');
+            $tipoAlumno = $request->get('tipoAlumno', 'all');
+            
+            // Rango de fechas (por defecto mes actual)
+            $fechaInicio = $request->get('fechaInicio', Carbon::now()->startOfMonth()->format('Y-m-d'));
+            $fechaFin = $request->get('fechaFin', Carbon::now()->endOfMonth()->format('Y-m-d'));
+
+            // Validar fechas
+            try {
+                $fechaInicio = Carbon::parse($fechaInicio)->startOfDay();
+                $fechaFin = Carbon::parse($fechaFin)->endOfDay();
+            } catch (\Exception $e) {
+                return response()->json([
+                    'error' => 'Fechas inválidas',
+                    'message' => 'Las fechas deben estar en formato Y-m-d'
+                ], 422);
+            }
+
+            // Validar que fechaFin sea posterior a fechaInicio
+            if ($fechaFin->lt($fechaInicio)) {
+                return response()->json([
+                    'error' => 'Rango de fechas inválido',
+                    'message' => 'La fecha fin debe ser posterior a la fecha inicio'
+                ], 422);
+            }
+
+            // Obtener datos utilizando el método privado optimizado
+            $resultado = $this->obtenerListadoAlumnos(
+                $fechaInicio,
+                $fechaFin,
+                $programaId,
+                $tipoAlumno,
+                $page,
+                $perPage
+            );
+
+            return response()->json($resultado);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error en estudiantesMatriculados', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'user_id' => auth()->id()
+            ]);
+
+            return response()->json([
+                'error' => 'Error al obtener estudiantes matriculados',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Exportar estudiantes matriculados a PDF, Excel o CSV
+     * POST /api/administracion/estudiantes-matriculados/exportar
+     */
+    public function exportarEstudiantesMatriculados(Request $request)
+    {
+        try {
+            // Validar parámetros
+            $validator = Validator::make($request->all(), [
+                'formato' => 'required|in:pdf,excel,csv',
+                'fechaInicio' => 'nullable|date',
+                'fechaFin' => 'nullable|date|after_or_equal:fechaInicio',
+                'programaId' => 'nullable|string',
+                'tipoAlumno' => 'nullable|in:all,Nuevo,Recurrente',
+                'incluirTodos' => 'nullable|boolean'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'error' => 'Parámetros inválidos',
+                    'messages' => $validator->errors()
+                ], 422);
+            }
+
+            $formato = $request->get('formato');
+            $incluirTodos = $request->get('incluirTodos', false);
+
+            // Parámetros de filtrado
+            $programaId = $request->get('programaId', 'all');
+            $tipoAlumno = $request->get('tipoAlumno', 'all');
+            
+            // Rango de fechas (por defecto mes actual)
+            $fechaInicio = $request->get('fechaInicio', Carbon::now()->startOfMonth()->format('Y-m-d'));
+            $fechaFin = $request->get('fechaFin', Carbon::now()->endOfMonth()->format('Y-m-d'));
+
+            $fechaInicio = Carbon::parse($fechaInicio)->startOfDay();
+            $fechaFin = Carbon::parse($fechaFin)->endOfDay();
+
+            // Si incluirTodos es true, obtener todos los datos sin paginación
+            if ($incluirTodos) {
+                $perPage = 10000; // Límite alto para obtener todos
+                $page = 1;
+            } else {
+                $page = 1;
+                $perPage = 1000; // Límite razonable para exportación
+            }
+
+            // Obtener datos
+            $resultado = $this->obtenerListadoAlumnos(
+                $fechaInicio,
+                $fechaFin,
+                $programaId,
+                $tipoAlumno,
+                $page,
+                $perPage
+            );
+
+            // Auditoría
+            \Illuminate\Support\Facades\Log::info('Exportación de estudiantes matriculados', [
+                'user_id' => auth()->id(),
+                'formato' => $formato,
+                'filtros' => [
+                    'fechaInicio' => $fechaInicio->format('Y-m-d'),
+                    'fechaFin' => $fechaFin->format('Y-m-d'),
+                    'programaId' => $programaId,
+                    'tipoAlumno' => $tipoAlumno
+                ]
+            ]);
+
+            $filename = 'estudiantes_matriculados_' . Carbon::now()->format('Y-m-d_H-i-s');
+
+            // Para simplificar, retornar los datos en JSON
+            // En una implementación completa, se crearían las clases Export correspondientes
+            switch ($formato) {
+                case 'pdf':
+                case 'excel':
+                case 'csv':
+                    // Por ahora retornamos JSON con headers apropiados
+                    // En producción, se debería implementar con Excel y PDF facades
+                    $contentType = $formato === 'csv' ? 'text/csv' : 'application/json';
+                    return response()->json($resultado, 200, [
+                        'Content-Type' => $contentType,
+                        'Content-Disposition' => 'attachment; filename="' . $filename . '.' . $formato . '"'
+                    ]);
+            }
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error al exportar estudiantes matriculados', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'error' => 'Error al exportar estudiantes matriculados',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Obtener filtros disponibles
      */
     private function obtenerFiltrosDisponibles()
@@ -971,13 +1134,11 @@ class AdministracionController extends Controller
             ->take($perPage)
             ->get()
             ->map(function ($alumno) use ($fechaInicio, $fechaFin) {
-                // Determinar si es nuevo o recurrente
-                $primeraMatricula = EstudiantePrograma::where('prospecto_id', DB::table('prospectos')
-                    ->where('nombre_completo', $alumno->nombre)
-                    ->value('id'))
-                    ->min('created_at');
-
-                $esNuevo = Carbon::parse($primeraMatricula)->between($fechaInicio, $fechaFin);
+                // Determinar si es nuevo o recurrente usando la primera_matricula pre-calculada
+                // Esto evita el problema N+1 de hacer queries adicionales por cada alumno
+                $esNuevo = $alumno->primera_matricula 
+                    ? Carbon::parse($alumno->primera_matricula)->between($fechaInicio, $fechaFin)
+                    : false;
 
                 return [
                     'id' => $alumno->id,
