@@ -74,17 +74,10 @@ class RolePermissionController extends Controller
             $moduleviewId = $perm['moduleview_id'];
             $actions      = $perm['actions'] ?? [];
 
-            // 1) Obtener el view_path de esa moduleview
-            $mv = ModulesViews::find($moduleviewId);
-            if (!$mv) {
-                continue;
-            }
-
-            // 2) Buscar en permissions por (route_path = view_path) y action IN (...)
+            // Buscar en permissions por moduleview_id y action IN (...)
             $ids = Permisos::query()
-                ->where('route_path', $mv->view_path)
+                ->where('moduleview_id', $moduleviewId)
                 ->whereIn('action', $actions)
-                ->where('is_enabled', true)
                 ->pluck('id')
                 ->toArray();
 
