@@ -78,13 +78,11 @@ class UserPermisosController extends Controller
         $userId = (int) $request->input('user_id');
         $moduleviewIds = $request->input('permissions', []);
 
-        // Mapea TODOS los moduleview_id -> permission_id con JOIN correcto sobre "permissions as p"
+        // Mapea TODOS los moduleview_id -> permission_id
         $permMap = DB::table('permissions as p')
-            ->join('moduleviews as mv', 'mv.view_path', '=', 'p.route_path')
-            ->whereIn('mv.id', $moduleviewIds)
+            ->whereIn('p.moduleview_id', $moduleviewIds)
             ->where('p.action', '=', 'view')
-            ->where('p.is_enabled', '=', true)
-            ->pluck('p.id', 'mv.id')   // [mv_id => perm_id]
+            ->pluck('p.id', 'p.moduleview_id')   // [mv_id => perm_id]
             ->toArray();
 
         // Si falta alguno, no borres nada y responde 422

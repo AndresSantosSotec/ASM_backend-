@@ -28,29 +28,22 @@ class PermissionController extends Controller
 
         $mv = ModulesViews::findOrFail($validated['moduleview_id']);
 
-        // Unicidad lógica: action + route_path
+        // Unicidad lógica: action + moduleview_id
         $exists = Permisos::where('action', $validated['action'])
-            ->where('route_path', $mv->view_path)
+            ->where('moduleview_id', $validated['moduleview_id'])
             ->exists();
 
         if ($exists) {
             return response()->json([
-                'message' => 'Permission already exists for this route_path and action',
+                'message' => 'Permission already exists for this moduleview and action',
             ], 409);
         }
 
         $permission = Permisos::create([
-            'module'      => $mv->menu,
-            'section'     => $mv->submenu,
-            'resource'    => basename($mv->view_path),
-            'action'      => $validated['action'],
-            'effect'      => 'allow',
-            'description' => $validated['description'] ?? null,
-            'route_path'  => $mv->view_path,
-            'file_name'   => null,
-            'object_id'   => null,
-            'is_enabled'  => true,
-            'level'       => $validated['action'], // si tu CHECK lo exige
+            'action'        => $validated['action'],
+            'moduleview_id' => $validated['moduleview_id'],
+            'name'          => $validated['action'] . ':' . $mv->view_path,
+            'description'   => $validated['description'] ?? "Permission {$validated['action']} for {$mv->menu}/{$mv->submenu}",
         ]);
 
         return response()->json($permission, 201);
