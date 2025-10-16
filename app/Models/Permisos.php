@@ -36,6 +36,23 @@ class Permisos extends Model
     ];
 
     /**
+     * Boot method to auto-generate name if not provided
+     */
+    protected static function boot()
+    {
+        parent::boot();
+        
+        static::creating(function ($permission) {
+            if (empty($permission->name) && $permission->moduleview_id && $permission->action) {
+                $moduleView = ModulesViews::find($permission->moduleview_id);
+                if ($moduleView) {
+                    $permission->name = $permission->action . ':' . $moduleView->view_path;
+                }
+            }
+        });
+    }
+
+    /**
      * The attributes that should be cast.
      *
      * @var array
