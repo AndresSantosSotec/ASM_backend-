@@ -14,7 +14,7 @@ class Permisos extends Model
      *
      * @var string
      */
-    protected $table = 'permissions';
+    protected $table = 'permisos';
 
     /**
      * The primary key for the model.

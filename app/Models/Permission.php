@@ -46,13 +46,4 @@ class Permission extends Model
     {
         return $this->belongsTo(Moduleview::class, 'moduleview_id');
     }
-    
-    /**
-     * Get all users who have this permission.
-     */
-    public function users()
-    {
-        return $this->belongsToMany(User::class, 'userpermissions', 'permission_id', 'user_id')
-            ->withPivot('assigned_at', 'scope');
-    }
 }
