@@ -88,42 +88,6 @@ class RolePermissionController extends Controller
                 ->pluck('id')
                 ->toArray();
 
-            // 3) Si faltan permisos, crearlos automáticamente
-            $foundActions = Permisos::query()
-                ->where('moduleview_id', $moduleviewId)
-                ->whereIn('action', $actions)
-                ->pluck('action')
-                ->toArray();
-
-            $missingActions = array_diff($actions, $foundActions);
-
-            foreach ($missingActions as $action) {
-                try {
-                    $permName = $action . ':' . $mv->view_path;
-
-                    // Verificar si ya existe con ese nombre
-                    $existingPerm = Permisos::where('name', $permName)->first();
-
-                    if (!$existingPerm) {
-                        $perm = Permisos::create([
-                            'moduleview_id' => $moduleviewId,
-                            'action' => $action,
-                            'name' => $permName,
-                            'description' => 'Auto-created ' . $action . ' permission for ' . $mv->submenu
-                        ]);
-                        $ids[] = $perm->id;
-                    } else {
-                        $ids[] = $existingPerm->id;
-                    }
-                } catch (\Exception $e) {
-                    Log::error('RolePermission.update failed to create permission', [
-                        'moduleview_id' => $moduleviewId,
-                        'action' => $action,
-                        'error' => $e->getMessage()
-                    ]);
-                }
-            }
-
             $permissionIds = array_merge($permissionIds, $ids);
         }
 
