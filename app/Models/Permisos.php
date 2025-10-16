@@ -41,7 +41,7 @@ class Permisos extends Model
     protected static function boot()
     {
         parent::boot();
-        
+
         static::creating(function ($permission) {
             if (empty($permission->name) && $permission->moduleview_id && $permission->action) {
                 $moduleView = ModulesViews::find($permission->moduleview_id);
