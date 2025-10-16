@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\UserPermisos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 //use Illuminate\Support\Str;
@@ -347,6 +348,68 @@ class UserController extends Controller
         });
 
         return response()->json($users);
+    }
+
+    /**
+     * Get user's effective permissions (from both role and direct assignments)
+     */
+    public function getPermissions(Request $request, $id)
+    {
+        $user = User::with(['userRole.role', 'roles'])->findOrFail($id);
+        
+        // Get direct user permissions
+        $directPermissions = UserPermisos::with('permission.moduleView')
+            ->where('user_id', $id)
+            ->get()
+            ->map(function ($up) {
+                return [
+                    'id' => $up->permission_id,
+                    'name' => $up->permission->name ?? '',
+                    'action' => $up->permission->action ?? '',
+                    'moduleview_id' => $up->permission->moduleview_id ?? null,
+                    'view_path' => $up->permission->moduleView->view_path ?? '',
+                    'menu' => $up->permission->moduleView->menu ?? '',
+                    'submenu' => $up->permission->moduleView->submenu ?? '',
+                    'source' => 'direct',
+                    'scope' => $up->scope,
+                ];
+            });
+        
+        // Get role-based permissions
+        $rolePermissions = collect();
+        foreach ($user->roles as $role) {
+            $perms = $role->permissions()->with('moduleView')->get()->map(function ($p) use ($role) {
+                return [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'action' => $p->action,
+                    'moduleview_id' => $p->moduleview_id,
+                    'view_path' => $p->moduleView->view_path ?? '',
+                    'menu' => $p->moduleView->menu ?? '',
+                    'submenu' => $p->moduleView->submenu ?? '',
+                    'source' => 'role',
+                    'role_name' => $role->name,
+                ];
+            });
+            $rolePermissions = $rolePermissions->merge($perms);
+        }
+        
+        // Combine and deduplicate
+        $allPermissions = $directPermissions->merge($rolePermissions)
+            ->unique('id')
+            ->values();
+        
+        return response()->json([
+            'success' => true,
+            'user' => [
+                'id' => $user->id,
+                'username' => $user->username,
+                'email' => $user->email,
+                'role' => $user->userRole && $user->userRole->role ? $user->userRole->role->name : ''
+            ],
+            'permissions' => $allPermissions,
+            'total' => $allPermissions->count()
+        ]);
     }
 
     /**
