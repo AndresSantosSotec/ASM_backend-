@@ -18,6 +18,23 @@ class Permission extends Model
         'description',
     ];
 
+    /**
+     * Boot method to auto-generate name if not provided
+     */
+    protected static function boot()
+    {
+        parent::boot();
+        
+        static::creating(function ($permission) {
+            if (empty($permission->name) && $permission->moduleview_id && $permission->action) {
+                $moduleView = ModulesViews::find($permission->moduleview_id);
+                if ($moduleView) {
+                    $permission->name = $permission->action . ':' . $moduleView->view_path;
+                }
+            }
+        });
+    }
+
     public function roles(): BelongsToMany
     {
         return $this->belongsToMany(Role::class, 'rolepermissions')
@@ -28,5 +45,14 @@ class Permission extends Model
     public function moduleview(): BelongsTo
     {
         return $this->belongsTo(Moduleview::class, 'moduleview_id');
+    }
+    
+    /**
+     * Get all users who have this permission.
+     */
+    public function users()
+    {
+        return $this->belongsToMany(User::class, 'userpermissions', 'permission_id', 'user_id')
+            ->withPivot('assigned_at', 'scope');
     }
 }
