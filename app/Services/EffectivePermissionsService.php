@@ -17,8 +17,9 @@ class EffectivePermissionsService
     public function forUser(User $user): array
     {
         // 1) Obtener los moduleview_ids asignados al usuario desde userpermissions
+        // IMPORTANTE: Ahora usa la tabla 'permisos' (user permissions) en lugar de 'permissions' (role permissions)
         $userPermissions = DB::table('userpermissions as up')
-            ->join('permissions as p', 'p.id', '=', 'up.permission_id')
+            ->join('permisos as p', 'p.id', '=', 'up.permission_id')
             ->where('up.user_id', $user->id)
             ->where('p.action', 'view')
             ->whereNotNull('p.moduleview_id')
@@ -50,6 +51,7 @@ class EffectivePermissionsService
         }
 
         // 4) Obtener permisos del rol para esos moduleviews
+        // IMPORTANTE: Aquí sí usa 'permissions' porque son permisos de ROL
         $rows = DB::table('rolepermissions as rp')
             ->join('permissions as p', 'p.id', '=', 'rp.permission_id')
             ->join('moduleviews as mv', 'mv.id', '=', 'p.moduleview_id')

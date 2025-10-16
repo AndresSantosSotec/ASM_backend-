@@ -143,7 +143,8 @@ class RolePermissionService
             
             foreach ($permissionIds as $permissionId) {
                 // Verify permission exists before assigning
-                $permissionExists = DB::table('permissions')->where('id', $permissionId)->exists();
+                // Updated to use 'permisos' table for user permissions
+                $permissionExists = DB::table('permisos')->where('id', $permissionId)->exists();
                 
                 if ($permissionExists) {
                     try {
@@ -159,7 +160,7 @@ class RolePermissionService
                         $skippedCount++;
                     }
                 } else {
-                    Log::warning("Permission ID {$permissionId} does not exist, skipping assignment for user {$user->id}");
+                    Log::warning("Permission ID {$permissionId} does not exist in permisos table, skipping assignment for user {$user->id}");
                     $skippedCount++;
                 }
             }
@@ -193,7 +194,8 @@ class RolePermissionService
         
         switch ($roleId) {
             case 1: // Administrador - todos los permisos
-                return DB::table('permissions')->where('is_enabled', true)->pluck('id')->toArray();
+                // Updated to use 'permisos' table for user permissions
+                return DB::table('permisos')->pluck('id')->toArray();
                 
             case 2: // Docente - permisos 34-43 (Portal Docente)
                 return $this->getExistingPermissionsInRange(34, 43);
@@ -232,11 +234,11 @@ class RolePermissionService
 
     /**
      * Get permissions that exist in a given range
+     * Updated to use 'permisos' table for user permissions
      */
     private function getExistingPermissionsInRange(int $start, int $end): array
     {
-        return DB::table('permissions')
-            ->where('is_enabled', true)
+        return DB::table('permisos')
             ->whereBetween('id', [$start, $end])
             ->pluck('id')
             ->toArray();
@@ -269,7 +271,8 @@ class RolePermissionService
             ];
             
             if (isset($patterns[$roleName])) {
-                $query = DB::table('permissions')->where('is_enabled', true);
+                // Updated to use 'permisos' table for user permissions
+                $query = DB::table('permisos');
                 
                 foreach ($patterns[$roleName] as $field => $value) {
                     if ($value === '%') {
