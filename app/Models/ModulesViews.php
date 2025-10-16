@@ -39,8 +39,19 @@ class ModulesViews extends Model
     }
 
     /**
-     * Get all permissions associated with this module view.
+     * Get all role permissions associated with this module view.
+     * Role permissions define what actions (view, create, edit, delete, export) can be performed.
      * Relationship: permissions.moduleview_id (FK) → moduleviews.id (PK)
+     */
+    public function rolePermissions()
+    {
+        return $this->hasMany(Permission::class, 'moduleview_id', 'id');
+    }
+
+    /**
+     * Get all user permissions associated with this module view.
+     * User permissions define which users can access this view.
+     * Relationship: permisos.moduleview_id (FK) → moduleviews.id (PK)
      */
     public function permissions()
     {
