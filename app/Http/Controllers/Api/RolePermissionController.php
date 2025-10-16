@@ -16,7 +16,7 @@ class RolePermissionController extends Controller
      */
     public function index(Role $role)
     {
-        // Eager load con la relación corregida (permissions por route_path)
+        // Eager load moduleviews with their permissions
         $moduleviews = ModulesViews::with('permissions')
             ->orderBy('menu')->orderBy('submenu')->get();
 
