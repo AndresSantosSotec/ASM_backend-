@@ -38,7 +38,10 @@ class ModulesViews extends Model
         return $this->belongsTo(Modules::class, 'module_id', 'id');
     }
 
-    // 🔧 Relación correcta: permissions.route_path (FK) ↔ moduleviews.view_path (local key)
+    /**
+     * Get all permissions associated with this module view.
+     * Relationship: permissions.moduleview_id (FK) → moduleviews.id (PK)
+     */
     public function permissions()
     {
         return $this->hasMany(Permisos::class, 'moduleview_id', 'id');
