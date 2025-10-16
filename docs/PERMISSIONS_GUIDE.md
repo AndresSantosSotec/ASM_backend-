@@ -30,6 +30,15 @@ php artisan permissions:sync --action=all
 php artisan permissions:sync --action=all --force
 ```
 
+### Corregir Nombres de Permisos Existentes
+```bash
+# Ver qué permisos necesitan corrección (sin hacer cambios)
+php artisan permissions:fix-names --dry-run
+
+# Aplicar las correcciones
+php artisan permissions:fix-names
+```
+
 ## API Endpoints Nuevos
 
 ### Obtener Permisos de un Usuario
@@ -204,12 +213,18 @@ POST /api/permissions
 Si tienes permisos existentes con nombres incorrectos:
 
 ```bash
-# 1. Ejecutar comando de sincronización
-php artisan permissions:sync --action=all --force
+# 1. Verificar el estado actual del sistema
+php tests/verify-permissions.php
 
-# 2. Re-asignar permisos a usuarios existentes
-# Esto dependerá de tu lógica de negocio
-# Puedes usar el endpoint de asignación masiva o el RolePermissionService
+# 2. Corregir nombres de permisos existentes
+php artisan permissions:fix-names --dry-run  # Ver cambios primero
+php artisan permissions:fix-names            # Aplicar cambios
+
+# 3. Crear permisos faltantes
+php artisan permissions:sync --action=all
+
+# 4. Verificar que todo esté correcto
+php tests/verify-permissions.php
 ```
 
 ## Debugging
