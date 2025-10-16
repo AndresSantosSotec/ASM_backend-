@@ -7,6 +7,7 @@ use App\Models\Role;
 use App\Models\Permisos;
 use App\Models\ModulesViews;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class RolePermissionController extends Controller
 {
@@ -93,16 +94,16 @@ class RolePermissionController extends Controller
                 ->whereIn('action', $actions)
                 ->pluck('action')
                 ->toArray();
-            
+
             $missingActions = array_diff($actions, $foundActions);
-            
+
             foreach ($missingActions as $action) {
                 try {
                     $permName = $action . ':' . $mv->view_path;
-                    
+
                     // Verificar si ya existe con ese nombre
                     $existingPerm = Permisos::where('name', $permName)->first();
-                    
+
                     if (!$existingPerm) {
                         $perm = Permisos::create([
                             'moduleview_id' => $moduleviewId,
@@ -115,7 +116,7 @@ class RolePermissionController extends Controller
                         $ids[] = $existingPerm->id;
                     }
                 } catch (\Exception $e) {
-                    \Log::error('RolePermission.update failed to create permission', [
+                    Log::error('RolePermission.update failed to create permission', [
                         'moduleview_id' => $moduleviewId,
                         'action' => $action,
                         'error' => $e->getMessage()
