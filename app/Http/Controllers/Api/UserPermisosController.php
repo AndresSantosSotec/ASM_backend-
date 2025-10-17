@@ -81,10 +81,10 @@ class UserPermisosController extends Controller
         $moduleviewIds = $request->input('permissions', []);
 
         // Mapea TODOS los moduleview_id -> permission_id
-        // Busca permisos directamente por moduleview_id en lugar de JOIN
-        $permMap = DB::table('permissions')
+        // Usa el modelo Permisos para mantener la lógica aislada del módulo de roles
+        $permMap = Permisos::query()
             ->whereIn('moduleview_id', $moduleviewIds)
-            ->where('action', '=', 'view')
+            ->where('action', 'view')
             ->pluck('id', 'moduleview_id')
             ->toArray();
 
@@ -103,23 +103,20 @@ class UserPermisosController extends Controller
                 if ($moduleView) {
                     try {
                         $permName = 'view:' . $moduleView->view_path;
-                        
-                        // Verificar si ya existe un permiso con este nombre
-                        $existingPerm = Permisos::where('name', $permName)->first();
-                        
-                        if (!$existingPerm) {
-                            $perm = Permisos::create([
+
+                        $perm = Permisos::firstOrCreate(
+                            [
                                 'moduleview_id' => $mvId,
-                                'action' => 'view',
+                                'action' => 'view'
+                            ],
+                            [
                                 'name' => $permName,
                                 'description' => 'Auto-created view permission for ' . $moduleView->submenu
-                            ]);
-                            $permMap[$mvId] = $perm->id;
-                            $createdPerms[] = $mvId;
-                        } else {
-                            $permMap[$mvId] = $existingPerm->id;
-                            $createdPerms[] = $mvId;
-                        }
+                            ]
+                        );
+
+                        $permMap[$mvId] = $perm->id;
+                        $createdPerms[] = $mvId;
                     } catch (\Exception $e) {
                         Log::error('UserPermisos.store failed to create permission', [
                             'moduleview_id' => $mvId,
