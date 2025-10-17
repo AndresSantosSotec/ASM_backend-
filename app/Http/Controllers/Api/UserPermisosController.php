@@ -102,23 +102,20 @@ class UserPermisosController extends Controller
                 if ($moduleView) {
                     try {
                         $permName = 'view:' . $moduleView->view_path;
-                        
-                        // Verificar si ya existe un permiso con este nombre
-                        $existingPerm = Permisos::where('name', $permName)->first();
-                        
-                        if (!$existingPerm) {
-                            $perm = Permisos::create([
+
+                        $perm = Permisos::firstOrCreate(
+                            [
                                 'moduleview_id' => $mvId,
-                                'action' => 'view',
+                                'action' => 'view'
+                            ],
+                            [
                                 'name' => $permName,
                                 'description' => 'Auto-created view permission for ' . $moduleView->submenu
-                            ]);
-                            $permMap[$mvId] = $perm->id;
-                            $createdPerms[] = $mvId;
-                        } else {
-                            $permMap[$mvId] = $existingPerm->id;
-                            $createdPerms[] = $mvId;
-                        }
+                            ]
+                        );
+
+                        $permMap[$mvId] = $perm->id;
+                        $createdPerms[] = $mvId;
                     } catch (\Exception $e) {
                         Log::error('UserPermisos.store failed to create permission', [
                             'moduleview_id' => $mvId,

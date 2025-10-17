@@ -14,7 +14,14 @@ class Permisos extends Model
      *
      * @var string
      */
-    protected $table = 'permissions';
+    protected $table = 'permisos';
+
+    /**
+     * Disable timestamps handling since the permisos table does not manage them automatically.
+     *
+     * @var bool
+     */
+    public $timestamps = false;
 
     /**
      * The primary key for the model.
