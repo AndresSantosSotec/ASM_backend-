@@ -61,13 +61,11 @@ class LoginController extends Controller
             ->get();
 
         // Obtener únicamente las vistas de módulos que el usuario tiene asignadas.
-        // Se hace una subconsulta para obtener los moduleview_id desde userpermissions → permissions
+        // Se hace una subconsulta para obtener solo aquellas moduleviews cuyo id esté presente en la tabla de permisos del usuario.
         $allowedViews = ModulesViews::whereIn('id', function($query) use ($user) {
-                $query->select('permissions.moduleview_id')
+                $query->select('permission_id')
                       ->from('userpermissions')
-                      ->join('permissions', 'userpermissions.permission_id', '=', 'permissions.id')
-                      ->where('userpermissions.user_id', $user->id)
-                      ->where('permissions.action', 'view');
+                      ->where('user_id', $user->id);
             })
             ->with('module')
             ->where('status', 1)
