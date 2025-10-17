@@ -81,9 +81,8 @@ class UserPermisosController extends Controller
         $moduleviewIds = $request->input('permissions', []);
 
         // Mapea TODOS los moduleview_id -> permission_id
-        // Busca permisos directamente por moduleview_id en lugar de JOIN
-        $permMap = DB::table('permissions')
-            ->whereIn('moduleview_id', $moduleviewIds)
+        // Busca permisos usando el modelo Permisos (tabla permissions)
+        $permMap = Permisos::whereIn('moduleview_id', $moduleviewIds)
             ->where('action', '=', 'view')
             ->pluck('id', 'moduleview_id')
             ->toArray();
