@@ -44,6 +44,7 @@ class ModulesViews extends Model
      */
     public function permissions()
     {
-        return $this->hasMany(Permisos::class, 'moduleview_id', 'id');
+        return $this->hasMany(Permisos::class, 'moduleview_id', 'id')
+            ->orderBy('action');
     }
 }

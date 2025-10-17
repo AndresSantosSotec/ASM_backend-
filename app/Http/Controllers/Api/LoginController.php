@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Session;
 use App\Models\UserPermisos;
 use App\Models\ModulesViews;
+use App\Models\Permisos;
 use Carbon\Carbon;
 
 class LoginController extends Controller
@@ -56,17 +57,23 @@ class LoginController extends Controller
         $token = $user->createToken('authToken')->plainTextToken;
 
         // Obtener permisos asignados al usuario (opcional, si los necesitas en el frontend)
-        $permissions = UserPermisos::with('permission')
+        $permissions = UserPermisos::with('permission.moduleView.module')
             ->where('user_id', $user->id)
             ->get();
 
         // Obtener únicamente las vistas de módulos que el usuario tiene asignadas.
-        // Se hace una subconsulta para obtener solo aquellas moduleviews cuyo id esté presente en la tabla de permisos del usuario.
-        $allowedViews = ModulesViews::whereIn('id', function($query) use ($user) {
-                $query->select('permission_id')
-                      ->from('userpermissions')
-                      ->where('user_id', $user->id);
-            })
+        // Se hace una subconsulta que respeta la estructura permisos ↔ moduleviews.
+        $allowedViewIds = Permisos::query()
+            ->select('permissions.moduleview_id')
+            ->join('userpermissions', 'permissions.id', '=', 'userpermissions.permission_id')
+            ->where('userpermissions.user_id', $user->id)
+            ->where('permissions.action', 'view')
+            ->whereNotNull('permissions.moduleview_id')
+            ->pluck('moduleview_id')
+            ->unique()
+            ->toArray();
+
+        $allowedViews = ModulesViews::whereIn('id', $allowedViewIds)
             ->with('module')
             ->where('status', 1)
             ->orderBy('order_num')

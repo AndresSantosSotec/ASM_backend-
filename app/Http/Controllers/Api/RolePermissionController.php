@@ -75,20 +75,36 @@ class RolePermissionController extends Controller
             $moduleviewId = $perm['moduleview_id'];
             $actions      = $perm['actions'] ?? [];
 
-            // 1) Obtener el view_path de esa moduleview
+            if (empty($actions)) {
+                continue;
+            }
+
             $mv = ModulesViews::find($moduleviewId);
             if (!$mv) {
                 continue;
             }
 
-            // 2) Buscar en permissions por moduleview_id y action
-            $ids = Permisos::query()
-                ->where('moduleview_id', $moduleviewId)
-                ->whereIn('action', $actions)
-                ->pluck('id')
-                ->toArray();
+            $viewPath = $mv->view_path ?? ('moduleview-' . $moduleviewId);
+            $label = $mv->submenu ?? $mv->menu ?? ('ModuleView #' . $moduleviewId);
 
-            $permissionIds = array_merge($permissionIds, $ids);
+            foreach ($actions as $action) {
+                $permission = Permisos::firstOrCreate(
+                    [
+                        'moduleview_id' => $moduleviewId,
+                        'action'        => $action,
+                    ],
+                    [
+                        'name'        => sprintf('%s:%s', $action, $viewPath),
+                        'description' => sprintf(
+                            'Auto-created %s permission for %s',
+                            $action,
+                            $label
+                        ),
+                    ]
+                );
+
+                $permissionIds[] = $permission->id;
+            }
         }
 
         $permissionIds = array_values(array_unique($permissionIds));

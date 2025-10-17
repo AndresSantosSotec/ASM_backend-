@@ -12,6 +12,11 @@ class Permisos extends Model
     /**
      * The table associated with the model.
      *
+     * Se mantiene el nombre en inglés porque así existe en la base de datos,
+     * pero toda la lógica de permisos individuales se canaliza mediante este
+     * modelo `Permisos`, evitando depender del modelo `Permission` usado para
+     * el flujo de roles.
+     *
      * @var string
      */
     protected $table = 'permissions';
@@ -67,8 +72,7 @@ class Permisos extends Model
     public function users()
     {
         return $this->belongsToMany(User::class, 'userpermissions', 'permission_id', 'user_id')
-            ->withPivot('assigned_at', 'scope')
-            ->withTimestamps();
+            ->withPivot('assigned_at', 'scope');
     }
 
     /**
