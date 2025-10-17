@@ -81,10 +81,9 @@ class UserPermisosController extends Controller
         $moduleviewIds = $request->input('permissions', []);
 
         // Mapea TODOS los moduleview_id -> permission_id
-        // Usa el modelo Permisos para mantener la lógica aislada del módulo de roles
-        $permMap = Permisos::query()
-            ->whereIn('moduleview_id', $moduleviewIds)
-            ->where('action', 'view')
+        // Busca permisos usando el modelo Permisos (tabla permissions)
+        $permMap = Permisos::whereIn('moduleview_id', $moduleviewIds)
+            ->where('action', '=', 'view')
             ->pluck('id', 'moduleview_id')
             ->toArray();
 
