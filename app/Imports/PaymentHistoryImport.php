@@ -329,17 +329,20 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'nombre_estudiante',
             'numero_boleta',
             'monto',
-            'fecha_pago',
-            'mensualidad_aprobada'
+            'fecha_pago'
         ];
 
         $columnasOpcionales = [
             'plan_estudios',
+            'estatus',
             'banco',
             'concepto',
+            'tipo_pago',
             'mes_pago',
+            'ano',
             'mes_inicio',
-            'fila_origen'
+            'fila_origen',
+            'mensualidad_aprobada'
         ];
 
         if (!$primeraFila) {
@@ -438,6 +441,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $mesPago = trim((string)($row['mes_pago'] ?? ''));
         $mesInicio = trim((string)($row['mes_inicio'] ?? ''));
         $mensualidadAprobada = $this->normalizarMonto($row['mensualidad_aprobada'] ?? 0);
+        
+        // 🆕 NUEVAS COLUMNAS
+        $tipoPago = trim(strtoupper((string)($row['tipo_pago'] ?? 'MENSUAL')));
+        $ano = trim((string)($row['ano'] ?? ''));
+        $estatus = trim((string)($row['estatus'] ?? ''));
 
         Log::info("📄 Procesando fila {$numeroFila}", [
             'carnet' => $carnet,
@@ -445,7 +453,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'boleta' => $boleta,
             'monto' => $monto,
             'fecha_pago' => $fechaPago?->toDateString(),
-            'mensualidad_aprobada' => $mensualidadAprobada
+            'mensualidad_aprobada' => $mensualidadAprobada,
+            'tipo_pago' => $tipoPago,
+            'estatus' => $estatus
         ]);
 
         // ✅ Validaciones básicas mejoradas
@@ -491,7 +501,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $numeroFila,
                 $carnet,
                 $mensualidadAprobada,
-                $nombreEstudiante
+                $nombreEstudiante,
+                $tipoPago,
+                $ano
             ) {
                 // ✅ Verificar duplicado por boleta y estudiante
                 $kardexExistente = KardexPago::where('numero_boleta', $boleta)
@@ -547,21 +559,34 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 }
 
                 // 🔥 Buscar cuota con lógica flexible
-                Log::info("🔍 Buscando cuota para asignar al pago", [
-                    'fila' => $numeroFila,
-                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                    'fecha_pago' => $fechaPago->toDateString(),
-                    'monto' => $monto,
-                    'mensualidad_aprobada' => $mensualidadAprobada
-                ]);
+                // 🆕 NUEVO: Solo asignar cuota si el tipo_pago es "MENSUAL"
+                $cuota = null;
+                $esMenual = $this->esPagoMensual($tipoPago);
+                
+                if ($esMenual) {
+                    Log::info("🔍 Buscando cuota para asignar al pago (MENSUAL)", [
+                        'fila' => $numeroFila,
+                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                        'fecha_pago' => $fechaPago->toDateString(),
+                        'monto' => $monto,
+                        'mensualidad_aprobada' => $mensualidadAprobada,
+                        'tipo_pago' => $tipoPago
+                    ]);
 
-                $cuota = $this->buscarCuotaFlexible(
-                    $programaAsignado->estudiante_programa_id,
-                    $fechaPago,
-                    $monto,
-                    $mensualidadAprobada,
-                    $numeroFila
-                );
+                    $cuota = $this->buscarCuotaFlexible(
+                        $programaAsignado->estudiante_programa_id,
+                        $fechaPago,
+                        $monto,
+                        $mensualidadAprobada,
+                        $numeroFila
+                    );
+                } else {
+                    Log::info("⏭️ Saltando asignación de cuota (pago NO es mensual)", [
+                        'fila' => $numeroFila,
+                        'tipo_pago' => $tipoPago,
+                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id
+                    ]);
+                }
 
                 if (!$cuota) {
                     Log::warning("⚠️ No se encontró cuota pendiente para este pago", [
@@ -600,10 +625,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 ]);
 
                 $observaciones = sprintf(
-                    "%s | Estudiante: %s | Mes: %s | Migración fila %d | Programa: %s",
+                    "%s | Estudiante: %s | Mes: %s | Tipo: %s | Migración fila %d | Programa: %s",
                     $concepto,
                     $nombreEstudiante,
                     $mesPago,
+                    $tipoPago,
                     $numeroFila,
                     $programaAsignado->nombre_programa ?? 'N/A'
                 );
@@ -1420,6 +1446,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     /**
      * 🆕 Generar cuotas automáticamente cuando no existen
      * Similar a la lógica de InscripcionesImport
+     * 🔥 ACTUALIZADO: Ahora cuenta pagos "Mensual" del Excel y crea cuotas faltantes
      */
     private function generarCuotasSiFaltan(int $estudianteProgramaId, ?array $row = null)
     {
@@ -1436,40 +1463,67 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 return false;
             }
 
-            // Usar datos del estudiante_programa para generar cuotas
-            $numCuotas = $estudiantePrograma->duracion_meses ?? 0;
+            // Usar duracion_meses del estudiante_programa
+            $numCuotasEsperadas = $estudiantePrograma->duracion_meses ?? 0;
             $cuotaMensual = $estudiantePrograma->cuota_mensual ?? 0;
             $fechaInicio = $estudiantePrograma->fecha_inicio ?? now()->toDateString();
 
             // Si no hay datos suficientes en estudiante_programa, intentar con precio_programa
-            if ($numCuotas <= 0 || $cuotaMensual <= 0) {
+            if ($numCuotasEsperadas <= 0 || $cuotaMensual <= 0) {
                 $precioPrograma = $this->obtenerPrecioPrograma($estudianteProgramaId);
                 if ($precioPrograma) {
-                    $numCuotas = $numCuotas > 0 ? $numCuotas : ($precioPrograma->meses ?? 12);
+                    $numCuotasEsperadas = $numCuotasEsperadas > 0 ? $numCuotasEsperadas : ($precioPrograma->meses ?? 12);
                     $cuotaMensual = $cuotaMensual > 0 ? $cuotaMensual : ($precioPrograma->cuota_mensual ?? 0);
                 }
             }
 
             // Validar que tengamos los datos mínimos
-            if ($numCuotas <= 0 || $cuotaMensual <= 0) {
+            if ($numCuotasEsperadas <= 0 || $cuotaMensual <= 0) {
                 Log::warning("⚠️ No se pueden generar cuotas: datos insuficientes", [
                     'estudiante_programa_id' => $estudianteProgramaId,
-                    'num_cuotas' => $numCuotas,
+                    'num_cuotas_esperadas' => $numCuotasEsperadas,
                     'cuota_mensual' => $cuotaMensual
                 ]);
                 return false;
             }
 
-            Log::info("🔧 Generando cuotas automáticamente", [
+            // Contar cuotas existentes
+            $cuotasExistentes = DB::table('cuotas_programa_estudiante')
+                ->where('estudiante_programa_id', $estudianteProgramaId)
+                ->count();
+
+            Log::info("🔧 Verificando cuotas para generar", [
                 'estudiante_programa_id' => $estudianteProgramaId,
-                'num_cuotas' => $numCuotas,
+                'cuotas_esperadas' => $numCuotasEsperadas,
+                'cuotas_existentes' => $cuotasExistentes,
                 'cuota_mensual' => $cuotaMensual,
                 'fecha_inicio' => $fechaInicio
             ]);
 
-            // Generar las cuotas
+            // Si ya tiene todas las cuotas esperadas, no hacer nada
+            if ($cuotasExistentes >= $numCuotasEsperadas) {
+                Log::info("✅ Ya existen suficientes cuotas", [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'cuotas_existentes' => $cuotasExistentes,
+                    'cuotas_esperadas' => $numCuotasEsperadas
+                ]);
+                return false;
+            }
+
+            // Calcular cuántas cuotas faltan por crear
+            $cuotasFaltantes = $numCuotasEsperadas - $cuotasExistentes;
+
+            Log::info("🔧 Generando cuotas faltantes", [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'cuotas_faltantes' => $cuotasFaltantes,
+                'num_cuotas_esperadas' => $numCuotasEsperadas,
+                'cuota_mensual' => $cuotaMensual,
+                'fecha_inicio' => $fechaInicio
+            ]);
+
+            // Generar las cuotas faltantes
             $cuotas = [];
-            for ($i = 1; $i <= $numCuotas; $i++) {
+            for ($i = $cuotasExistentes + 1; $i <= $numCuotasEsperadas; $i++) {
                 $fechaVencimiento = Carbon::parse($fechaInicio)
                     ->addMonths($i - 1)
                     ->toDateString();
@@ -1490,7 +1544,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
             Log::info("✅ Cuotas generadas exitosamente", [
                 'estudiante_programa_id' => $estudianteProgramaId,
-                'cantidad_cuotas' => count($cuotas)
+                'cantidad_cuotas_creadas' => count($cuotas),
+                'total_cuotas_ahora' => $numCuotasEsperadas
             ]);
 
             // Limpiar cache para forzar recarga
@@ -1505,6 +1560,38 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ]);
             return false;
         }
+    }
+
+    /**
+     * 🆕 Determinar si un pago es de tipo mensual
+     * Acepta variaciones como: MENSUAL, Mensual, mensualidad, etc.
+     * Rechaza: ESPECIAL, INSCRIPCIÓN, RECARGO, etc.
+     */
+    private function esPagoMensual(string $tipoPago): bool
+    {
+        $tipoPagoNormalizado = strtoupper(trim($tipoPago));
+        
+        // Tipos que se consideran mensuales
+        $tiposMensuales = ['MENSUAL', 'MENSUALIDAD', 'CUOTA', 'CUOTA MENSUAL'];
+        
+        foreach ($tiposMensuales as $tipo) {
+            if (str_contains($tipoPagoNormalizado, $tipo)) {
+                return true;
+            }
+        }
+        
+        // Tipos especiales que NO son mensuales
+        $tiposEspeciales = ['ESPECIAL', 'INSCRIPCION', 'INSCRIPCIÓN', 'RECARGO', 'MORA', 'EXTRAORDINARIO'];
+        
+        foreach ($tiposEspeciales as $tipo) {
+            if (str_contains($tipoPagoNormalizado, $tipo)) {
+                return false;
+            }
+        }
+        
+        // Por defecto, si no se reconoce, asumir que es mensual
+        // para mantener compatibilidad con datos antiguos
+        return true;
     }
 
     private function normalizeBank($bank)
