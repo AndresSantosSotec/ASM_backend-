@@ -26,7 +26,6 @@ class EstudiantesImportController extends Controller
             return response()->json(['error' => 'Usuario no autenticado'], 401);
         }
 
-        // Generar un ID único para esta importación
         $importId = Str::uuid();
         $file = $request->file('file');
         $filename = $file->getClientOriginalName();
@@ -34,7 +33,6 @@ class EstudiantesImportController extends Controller
         try {
             DB::beginTransaction();
 
-            // 📝 Log de inicio con más detalles
             Log::info("📂 [Importación $importId] Inicio importación de estudiantes", [
                 'user_id' => $user->id,
                 'user_name' => $user->name,
@@ -44,57 +42,63 @@ class EstudiantesImportController extends Controller
 
             $import = new InscripcionesImport();
 
-            // Configurar el import ID si el método existe
             if (method_exists($import, 'setImportId')) {
                 $import->setImportId($importId);
             }
 
-            // Configurar opciones de skip errors si el método existe
             if ($request->boolean('skip_errors') && method_exists($import, 'skipErrors')) {
                 $import->skipErrors();
             }
 
+            // Ejecutar importación
             Excel::import($import, $file);
 
-            // Obtener información de la importación
+            // Recolectar resultados
             $failures = $import->failures();
-            $failuresCount = $failures->count();
-
-            // Obtener errores de fila si el método existe, sino usar array vacío
             $rowErrors = method_exists($import, 'getRowErrors') ? $import->getRowErrors() : [];
-            $rowErrorsCount = count($rowErrors);
+            $totalRows = method_exists($import, 'getRowCount') ? $import->getRowCount() : 0;
 
-            // Calcular filas exitosas
-            // Si no existe getRowCount, estimamos basado en failures
-            $totalRows = method_exists($import, 'getRowCount') ? $import->getRowCount() : ($failuresCount + count($rowErrors));
+            $failuresCount = $failures->count();
+            $rowErrorsCount = count($rowErrors);
             $successCount = $totalRows - $failuresCount - $rowErrorsCount;
 
-            // 📝 Log de fin con estadísticas
-            Log::info("✅ [Importación $importId] Importación finalizada", [
+            // 🔍 Analizar causas comunes de error
+            $programErrors = [];
+            foreach ($rowErrors as $err) {
+                if (str_contains(strtolower($err['error']), 'programa') || str_contains(strtolower($err['error']), 'no encontrado')) {
+                    $programErrors[] = $err;
+                }
+            }
+
+            // 🧮 Resumen final de estadísticas
+            $summary = [
                 'total_rows' => $totalRows,
-                'success_count' => $successCount,
-                'failures_count' => $failuresCount,
-                'row_errors_count' => $rowErrorsCount,
-            ]);
+                'successful' => max($successCount, 0),
+                'failed' => $failuresCount + $rowErrorsCount,
+                'validation_errors' => $failuresCount,
+                'processing_errors' => $rowErrorsCount,
+                'unknown_programs' => count($programErrors),
+            ];
 
-            // Si hay errores pero el usuario confirmó continuar
-            if (($failures->isNotEmpty() || !empty($rowErrors)) && $request->boolean('confirm')) {
-                Log::warning("⚠️ [Importación $importId] Importación completada con advertencias confirmadas por el usuario", [
-                    'failures' => $failuresCount,
-                    'row_errors' => $rowErrorsCount,
-                ]);
+            // 📝 Crear resumen textual de log
+            $logSummary = [
+                '✅ Registros exitosos' => $summary['successful'],
+                '⚠️ Errores de validación' => $summary['validation_errors'],
+                '❌ Errores de procesamiento' => $summary['processing_errors'],
+                '🚫 Programas no encontrados' => $summary['unknown_programs'],
+            ];
 
-                DB::commit();
+            Log::info("📊 [Importación $importId] Resumen de resultados", $logSummary);
+
+            // Si hay errores
+            if ($summary['failed'] > 0) {
+                DB::commit(); // permitimos guardar lo que sí se insertó
 
                 return response()->json([
                     'status' => 'partial_success',
-                    'message' => 'Importación completada con algunos errores.',
+                    'message' => 'Importación completada con errores en algunos registros.',
                     'import_id' => $importId,
-                    'statistics' => [
-                        'total_rows' => $totalRows,
-                        'successful' => $successCount,
-                        'failed' => $failuresCount + $rowErrorsCount,
-                    ],
+                    'summary' => $summary,
                     'details' => [
                         'failures' => $failures->map(fn($f) => [
                             'row' => $f->row(),
@@ -103,59 +107,30 @@ class EstudiantesImportController extends Controller
                             'values' => $f->values(),
                         ]),
                         'row_errors' => $rowErrors,
+                        'program_errors' => $programErrors,
                     ],
                 ], 207);
             }
 
-            // Si hay errores y no se confirmó continuar
-            if ($failures->isNotEmpty() || !empty($rowErrors)) {
-                Log::warning("⚠️ [Importación $importId] Importación con errores no confirmados", [
-                    'failures' => $failuresCount,
-                    'row_errors' => $rowErrorsCount,
-                ]);
-
-                DB::rollBack();
-
-                return response()->json([
-                    'status' => 'validation_error',
-                    'message' => 'Se encontraron errores en el archivo. Revise los detalles.',
-                    'import_id' => $importId,
-                    'requires_confirmation' => true,
-                    'error_summary' => [
-                        'total_errors' => $failuresCount + $rowErrorsCount,
-                        'validation_errors' => $failuresCount,
-                        'processing_errors' => $rowErrorsCount,
-                    ],
-                    'sample_errors' => array_merge(
-                        $failures->take(3)->map(fn($f) => [
-                            'row' => $f->row(),
-                            'attribute' => $f->attribute(),
-                            'errors' => $f->errors(),
-                        ])->toArray(),
-                        array_slice($rowErrors, 0, 3)
-                    ),
-                ], 422);
-            }
-
+            // Si todo fue exitoso
             DB::commit();
 
             Log::info("🎉 [Importación $importId] Importación completada con éxito", [
                 'rows_processed' => $totalRows,
+                'user_id' => $user->id,
             ]);
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Importación completada exitosamente.',
                 'import_id' => $importId,
-                'statistics' => [
-                    'total_rows' => $totalRows,
-                ],
+                'summary' => $summary,
             ], 200);
 
         } catch (ExcelValidationException $e) {
             DB::rollBack();
 
-            Log::error("❌ [Importación $importId] Error de validación al importar estudiantes", [
+            Log::error("❌ [Importación $importId] Error de validación", [
                 'file' => $filename,
                 'errors' => $e->errors(),
                 'user_id' => $user->id,
@@ -171,7 +146,7 @@ class EstudiantesImportController extends Controller
         } catch (\Throwable $e) {
             DB::rollBack();
 
-            Log::error("❌ [Importación $importId] Error crítico al importar estudiantes", [
+            Log::error("❌ [Importación $importId] Error crítico", [
                 'file' => $filename,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),

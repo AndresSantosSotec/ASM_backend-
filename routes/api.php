@@ -57,7 +57,6 @@ use App\Http\Controllers\Api\EstudiantePagosController;
 use App\Http\Controllers\Api\DashboardFinancieroController;
 use App\Http\Controllers\Api\EmailController;
 use App\Http\Controllers\Api\AdminEstudiantePagosController;
-use App\Http\Controllers\Api\DocentesController;
 use App\Http\Controllers\Api\GestionPagosController;
 use App\Http\Controllers\Api\EstudiantesController;
 use App\Http\Controllers\Api\AdministracionController;
@@ -731,6 +730,13 @@ Route::prefix('moodle')->middleware('auth:sanctum')->group(function () {
     Route::get('/consultas', [MoodleConsultasController::class, 'cursosPorCarnet']);
     Route::get('/programacion-cursos', [MoodleConsultasController::class, 'programacionCursos']);
 });
+
+
+Route::prefix('Mantenimientos')->group(function () {
+
+
+});
+
 
 
 Route::apiResource('rules', RuleController::class);
