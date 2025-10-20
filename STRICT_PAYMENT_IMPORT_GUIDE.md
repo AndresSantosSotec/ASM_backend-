@@ -39,9 +39,11 @@ año: Carbon::now()->year
 
 #### Validación de Duplicados
 Antes de insertar, valida que no exista otro registro con:
-- `numero_boleta` + `estudiante_programa_id` + `fecha_pago`
+- `numero_boleta` + `estudiante_programa_id` (que corresponde al carnet) + `fecha_pago`
 
 Si existe, se registra error tipo `PAGO_DUPLICADO` y se omite la inserción.
+
+**Nota**: La validación interna usa `estudiante_programa_id` porque es la clave foránea en la tabla, pero conceptualmente corresponde al `carnet` del estudiante.
 
 ## 📊 Estructura del Archivo Excel
 
@@ -245,7 +247,8 @@ $reporteExitos = $import->getReporteExitos();
 
 ### Problema: "PAGO_DUPLICADO"
 **Solución**: Verificar que:
-- No exista ya un pago con el mismo `numero_boleta` + `carnet` + `fecha_pago`
+- No exista ya un pago con el mismo `numero_boleta` + `estudiante_programa_id` + `fecha_pago`
+  (el `estudiante_programa_id` se obtiene del `carnet` del estudiante)
 - Si es duplicado real, eliminar del Excel
 - Si no es duplicado, verificar que los datos sean correctos
 
