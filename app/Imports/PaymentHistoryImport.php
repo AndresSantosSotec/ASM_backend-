@@ -11,12 +11,14 @@ use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use App\Models\KardexPago;
+use App\Models\AdicionalEstudiante;
 use App\Models\CuotaProgramaEstudiante;
 use App\Models\ReconciliationRecord;
 use App\Models\PrecioPrograma;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
+use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
 class PaymentHistoryImport implements ToCollection, WithHeadingRow
 {
@@ -41,6 +43,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     // 🆕 NUEVO: Servicio de estudiantes
     private EstudianteService $estudianteService;
+
+    private const DEFAULT_PAYMENT_DATE = '2020-01-01';
+    private const DEFAULT_BANK = 'No especificado';
+    private const DEFAULT_PAYMENT_TYPE = 'Mensual';
 
     public function __construct(int $uploaderId, string $tipoArchivo = 'cardex_directo')
     {
@@ -329,20 +335,28 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'nombre_estudiante',
             'numero_boleta',
             'monto',
-            'fecha_pago'
         ];
 
         $columnasOpcionales = [
-            'plan_estudios',
-            'estatus',
-            'banco',
-            'concepto',
+            'fecha_pago',
             'tipo_pago',
             'mes_pago',
             'ano',
+            'año',
+            'anio',
             'mes_inicio',
+            'plan_estudios',
+            'estatus',
+            'asesor',
+            'empresa_donde_labora',
+            'telefono',
+            'mail',
+            'banco',
+            'concepto',
             'fila_origen',
-            'mensualidad_aprobada'
+            'mensualidad_aprobada',
+            'notas_pago',
+            'nomenclatura'
         ];
 
         if (!$primeraFila) {
@@ -356,12 +370,31 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $columnasEncontradas = array_keys($primeraFila->toArray());
         $columnasFaltantes = array_diff($columnasRequeridas, $columnasEncontradas);
 
-        return [
+        $resultado = [
             'valido' => empty($columnasFaltantes),
             'faltantes' => array_values($columnasFaltantes),
             'encontradas' => $columnasEncontradas,
             'opcionales_encontradas' => array_intersect($columnasOpcionales, $columnasEncontradas)
         ];
+
+        if (!in_array('fecha_pago', $columnasEncontradas, true)) {
+            $this->advertencias[] = [
+                'tipo' => 'COLUMNA_FALTANTE_NO_CRITICA',
+                'advertencia' => 'Columna fecha_pago ausente, se usará fecha por defecto en filas sin valor explícito.',
+            ];
+
+            Log::warning('⚠️ Columna fecha_pago ausente, se utilizará la fecha por defecto para los pagos.');
+        }
+
+        if (!in_array('tipo_pago', $columnasEncontradas, true)) {
+            Log::info('ℹ️ Columna tipo_pago ausente, se asumirá "Mensual" por defecto.');
+        }
+
+        if (!in_array('mes_pago', $columnasEncontradas, true)) {
+            Log::info('ℹ️ Columna mes_pago ausente, se utilizará la fecha del pago para determinar mes/año.');
+        }
+
+        return $resultado;
     }
 
     /**
@@ -429,43 +462,57 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     private function procesarPagoIndividual($row, Collection $programasEstudiante, $numeroFila)
     {
-        // ✅ Extraer y normalizar datos
         $carnet = $this->normalizarCarnet($row['carnet']);
         $nombreEstudiante = trim($row['nombre_estudiante'] ?? '');
-        $boleta = $this->normalizarBoleta($row['numero_boleta'] ?? '');
+        $numeroBoletaOriginal = trim((string)($row['numero_boleta'] ?? ''));
+        $numeroBoletaNormalizada = $this->normalizarBoleta($numeroBoletaOriginal);
         $monto = $this->normalizarMonto($row['monto'] ?? 0);
-        $fechaPago = $this->normalizarFecha($row['fecha_pago'] ?? null);
+
+        $fechaPagoString = $this->parseDate($row['fecha_pago'] ?? null, self::DEFAULT_PAYMENT_DATE);
+        if (empty($row['fecha_pago'])) {
+            Log::warning("⚠️ Fila {$numeroFila} sin fecha_pago, asignando fecha por defecto.");
+        }
+        $fechaPago = Carbon::parse($fechaPagoString);
+
         $bancoRaw = trim((string)($row['banco'] ?? ''));
-        $banco = empty($bancoRaw) ? 'EFECTIVO' : $bancoRaw;
-        $concepto = trim((string)($row['concepto'] ?? 'Cuota mensual'));
-        $mesPago = trim((string)($row['mes_pago'] ?? ''));
+        $banco = $bancoRaw !== '' ? $bancoRaw : self::DEFAULT_BANK;
+
+        $concepto = trim((string)($row['concepto'] ?? ''));
+        $tipoPagoOriginal = trim((string)($row['tipo_pago'] ?? ''));
+        if ($tipoPagoOriginal === '') {
+            $tipoPagoOriginal = self::DEFAULT_PAYMENT_TYPE;
+        }
+        $tipoPagoNormalizado = strtoupper($tipoPagoOriginal);
+
+        $notasPago = $this->normalizarCampoLibre($row['notas_pago'] ?? null);
+        $nomenclatura = $this->normalizarCampoLibre($row['nomenclatura'] ?? null);
+
+        $mesPago = $this->parsearMes($row['mes_pago'] ?? null);
+        $anioPago = $this->parsearAnio($row['año'] ?? ($row['ano'] ?? null), $fechaPago);
         $mesInicio = trim((string)($row['mes_inicio'] ?? ''));
         $mensualidadAprobada = $this->normalizarMonto($row['mensualidad_aprobada'] ?? 0);
-        
-        // 🆕 NUEVAS COLUMNAS
-        $tipoPago = trim(strtoupper((string)($row['tipo_pago'] ?? 'MENSUAL')));
-        $ano = trim((string)($row['ano'] ?? ''));
-        $estatus = trim((string)($row['estatus'] ?? ''));
 
         Log::info("📄 Procesando fila {$numeroFila}", [
             'carnet' => $carnet,
             'nombre' => $nombreEstudiante,
-            'boleta' => $boleta,
+            'boleta_original' => $numeroBoletaOriginal,
+            'boleta_normalizada' => $numeroBoletaNormalizada,
             'monto' => $monto,
-            'fecha_pago' => $fechaPago?->toDateString(),
+            'fecha_pago' => $fechaPago->toDateString(),
             'mensualidad_aprobada' => $mensualidadAprobada,
-            'tipo_pago' => $tipoPago,
-            'estatus' => $estatus
+            'tipo_pago' => $tipoPagoOriginal,
+            'mes_pago' => $row['mes_pago'] ?? null,
+            'anio_pago' => $row['año'] ?? ($row['ano'] ?? null)
         ]);
 
-        // ✅ Validaciones básicas mejoradas
-        $validacion = $this->validarDatosPago($boleta, $monto, $fechaPago, $numeroFila);
+        $this->guardarInformacionAdicionalEstudiante($carnet, $notasPago, $nomenclatura);
+
+        $validacion = $this->validarDatosPago($numeroBoletaOriginal, $monto, $fechaPago, $numeroFila);
         if (!$validacion['valido']) {
             $this->advertencias[] = $validacion['advertencia'];
             return;
         }
 
-        // ✅ Identificar programa correcto
         $programaAsignado = $this->identificarProgramaCorrecto(
             $programasEstudiante,
             $mensualidadAprobada,
@@ -480,554 +527,512 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'fila' => $numeroFila,
                 'carnet' => $carnet,
                 'error' => 'No se pudo identificar el programa correcto para este pago',
-                'programas_disponibles' => $programasEstudiante->count(),
-                'mensualidad' => $mensualidadAprobada,
-                'monto_pago' => $monto,
-                'fecha_pago' => $fechaPago->toDateString()
             ];
+
+            Log::error("❌ No se pudo identificar programa", [
+                'carnet' => $carnet,
+                'mensualidad' => $mensualidadAprobada,
+                'monto' => $monto,
+                'fecha_pago' => $fechaPago->toDateString()
+            ]);
             return;
         }
 
-        // ✅ TRANSACCIÓN con manejo de errores robusto
-        try {
-            DB::transaction(function () use (
-                $programaAsignado,
-                $boleta,
-                $monto,
-                $fechaPago,
-                $banco,
-                $concepto,
-                $mesPago,
-                $numeroFila,
-                $carnet,
-                $mensualidadAprobada,
-                $nombreEstudiante,
-                $tipoPago,
-                $ano
-            ) {
-                // ✅ Verificar duplicado por boleta y estudiante
-                $kardexExistente = KardexPago::where('numero_boleta', $boleta)
-                    ->where('estudiante_programa_id', $programaAsignado->estudiante_programa_id)
-                    ->first();
-
-                if ($kardexExistente) {
-                    Log::info("⚠️ Kardex duplicado detectado (por boleta+estudiante)", [
-                        'kardex_id' => $kardexExistente->id,
-                        'boleta' => $boleta,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id
-                    ]);
-
-                    $this->advertencias[] = [
-                        'tipo' => 'DUPLICADO',
-                        'fila' => $numeroFila,
-                        'advertencia' => "Pago ya registrado anteriormente",
-                        'kardex_id' => $kardexExistente->id,
-                        'boleta' => $boleta,
-                        'accion' => 'omitido'
-                    ];
-                    return;
-                }
-
-                // ✅ Verificar duplicado por fingerprint (más preciso, incluye fecha)
-                $bancoNormalizado = $this->normalizeBank($banco);
-                $boletaNormalizada = $this->normalizeReceiptNumber($boleta);
-                $fechaYmd = $fechaPago->format('Y-m-d');
-                $fingerprint = hash('sha256',
-                    $bancoNormalizado.'|'.$boletaNormalizada.'|'.$programaAsignado->estudiante_programa_id.'|'.$fechaYmd);
-
-                $kardexPorFingerprint = KardexPago::where('boleta_fingerprint', $fingerprint)->first();
-
-                if ($kardexPorFingerprint) {
-                    Log::info("⚠️ Kardex duplicado detectado (por fingerprint)", [
-                        'kardex_id' => $kardexPorFingerprint->id,
-                        'fingerprint' => $fingerprint,
-                        'boleta' => $boleta,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                        'fecha_pago' => $fechaYmd
-                    ]);
-
-                    $this->advertencias[] = [
-                        'tipo' => 'DUPLICADO',
-                        'fila' => $numeroFila,
-                        'advertencia' => "Pago ya registrado anteriormente (mismo fingerprint)",
-                        'kardex_id' => $kardexPorFingerprint->id,
-                        'boleta' => $boleta,
-                        'fingerprint' => substr($fingerprint, 0, 16) . '...',
-                        'accion' => 'omitido'
-                    ];
-                    return;
-                }
-
-                // 🔥 Buscar cuota con lógica flexible
-                // 🆕 NUEVO: Solo asignar cuota si el tipo_pago es "MENSUAL"
-                $cuota = null;
-                $esMenual = $this->esPagoMensual($tipoPago);
-                
-                if ($esMenual) {
-                    Log::info("🔍 Buscando cuota para asignar al pago (MENSUAL)", [
-                        'fila' => $numeroFila,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                        'fecha_pago' => $fechaPago->toDateString(),
-                        'monto' => $monto,
-                        'mensualidad_aprobada' => $mensualidadAprobada,
-                        'tipo_pago' => $tipoPago
-                    ]);
-
-                    $cuota = $this->buscarCuotaFlexible(
-                        $programaAsignado->estudiante_programa_id,
-                        $fechaPago,
-                        $monto,
-                        $mensualidadAprobada,
-                        $numeroFila
-                    );
-                } else {
-                    Log::info("⏭️ Saltando asignación de cuota (pago NO es mensual)", [
-                        'fila' => $numeroFila,
-                        'tipo_pago' => $tipoPago,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id
-                    ]);
-                }
-
-                if (!$cuota) {
-                    Log::warning("⚠️ No se encontró cuota pendiente para este pago", [
-                        'fila' => $numeroFila,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                        'fecha_pago' => $fechaPago->toDateString(),
-                        'monto' => $monto
-                    ]);
-
-                    $this->advertencias[] = [
-                        'tipo' => 'SIN_CUOTA',
-                        'fila' => $numeroFila,
-                        'advertencia' => 'No se encontró cuota pendiente compatible. El Kardex se creará sin cuota asignada.',
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                        'fecha_pago' => $fechaPago->toDateString(),
-                        'monto' => $monto,
-                        'recomendacion' => 'Revisar si las cuotas del programa están correctamente configuradas'
-                    ];
-                } else {
-                    Log::info("✅ Cuota asignada al pago", [
-                        'fila' => $numeroFila,
-                        'cuota_id' => $cuota->id,
-                        'numero_cuota' => $cuota->numero_cuota,
-                        'monto_cuota' => $cuota->monto
-                    ]);
-                }
-
-                // ✅ Crear Kardex con información completa
-                Log::info("🔍 Creando registro en kardex_pagos", [
-                    'fila' => $numeroFila,
-                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                    'cuota_id' => $cuota ? $cuota->id : null,
-                    'numero_boleta' => $boleta,
-                    'monto' => $monto,
-                    'banco' => $banco
-                ]);
-
-                $observaciones = sprintf(
-                    "%s | Estudiante: %s | Mes: %s | Tipo: %s | Migración fila %d | Programa: %s",
-                    $concepto,
-                    $nombreEstudiante,
-                    $mesPago,
-                    $tipoPago,
-                    $numeroFila,
-                    $programaAsignado->nombre_programa ?? 'N/A'
-                );
-
-                $kardex = KardexPago::create([
-                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                    'cuota_id' => $cuota ? $cuota->id : null,
-                    'numero_boleta' => $boleta,
-                    'monto_pagado' => $monto,
-                    'fecha_pago' => $fechaPago,
-                    'fecha_recibo' => $fechaPago,
-                    'banco' => $banco,
-                    'estado_pago' => 'aprobado',
-                    'observaciones' => $observaciones,
-                ]);
-
-                $this->kardexCreados++;
-                $this->totalAmount += $monto;
-
-                Log::info("✅ Kardex creado exitosamente", [
-                    'kardex_id' => $kardex->id,
-                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                    'cuota_id' => $cuota ? $cuota->id : 'SIN CUOTA',
-                    'programa' => $programaAsignado->nombre_programa ?? 'N/A',
-                    'numero_boleta' => $boleta,
-                    'monto' => $monto,
-                    'fila' => $numeroFila
-                ]);
-
-                // ✅ Actualizar cuota y conciliar si existe cuota
-                if ($cuota) {
-                    $this->actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $monto);
-                } else {
-                    Log::info("⏭️ Saltando actualización de cuota (no se asignó cuota)", [
-                        'kardex_id' => $kardex->id,
-                        'fila' => $numeroFila
-                    ]);
-                }
-
-                $this->procesados++;
-
-                $this->detalles[] = [
-                    'accion' => 'pago_registrado',
-                    'fila' => $numeroFila,
-                    'carnet' => $carnet,
-                    'nombre' => $nombreEstudiante,
-                    'kardex_id' => $kardex->id,
-                    'cuota_id' => $cuota ? $cuota->id : null,
-                    'programa' => $programaAsignado->nombre_programa ?? 'N/A',
-                    'monto' => $monto,
-                    'fecha_pago' => $fechaPago->toDateString()
-                ];
-            });
-        } catch (\Throwable $ex) {
-            Log::error("❌ Error en transacción fila {$numeroFila}", [
-                'error' => $ex->getMessage(),
-                'carnet' => $carnet,
-                'file' => $ex->getFile(),
-                'line' => $ex->getLine()
-            ]);
-
-            // ✅ Add error to array and continue processing (don't re-throw)
-            $this->errores[] = [
-                'tipo' => 'ERROR_PROCESAMIENTO_PAGO',
-                'fila' => $numeroFila,
-                'carnet' => $carnet,
-                'boleta' => $boleta ?? 'N/A',
-                'error' => $ex->getMessage(),
-                'trace' => config('app.debug') ? array_slice(explode("\n", $ex->getTraceAsString()), 0, 3) : null
-            ];
-
-            // Don't re-throw - allow processing to continue with next payment
-        }
-    }
-
-    private function buscarCuotaFlexible(
-        int $estudianteProgramaId,
-        Carbon $fechaPago,
-        float $montoPago,
-        float $mensualidadAprobada,
-        int $numeroFila
-    ) {
-        $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
-            ->where('estado', 'pendiente')
-            ->sortBy('fecha_vencimiento');
-
-        // 🔥 NUEVO: Si no hay cuotas, intentar generarlas automáticamente
-        if ($cuotasPendientes->isEmpty()) {
-            Log::warning("⚠️ No hay cuotas pendientes para este programa", [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'fila' => $numeroFila
-            ]);
-
-            // Intentar generar cuotas automáticamente
-            $generado = $this->generarCuotasSiFaltan($estudianteProgramaId, null);
-
-            if ($generado) {
-                // Recargar cuotas después de la generación
-                $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
-                    ->where('estado', 'pendiente')
-                    ->sortBy('fecha_vencimiento');
-
-                Log::info("✅ Cuotas generadas y recargadas", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'cuotas_disponibles' => $cuotasPendientes->count()
-                ]);
-
-                // Si aún no hay cuotas después de generar, retornar null
-                if ($cuotasPendientes->isEmpty()) {
-                    return null;
-                }
-            } else {
-                // Si no se pudieron generar, intentar al menos validar con el precio del programa
-                $precioPrograma = $this->obtenerPrecioPrograma($estudianteProgramaId);
-                if ($precioPrograma) {
-                    Log::info("💰 Precio de programa encontrado para validación", [
-                        'estudiante_programa_id' => $estudianteProgramaId,
-                        'cuota_mensual' => $precioPrograma->cuota_mensual,
-                        'inscripcion' => $precioPrograma->inscripcion,
-                        'monto_pago' => $montoPago
-                    ]);
-
-                    // Validar si el monto coincide con el precio del programa
-                    $tolerancia = max(100, $precioPrograma->cuota_mensual * 0.50);
-                    $diferenciaCuota = abs($precioPrograma->cuota_mensual - $montoPago);
-                    $diferenciaInscripcion = abs($precioPrograma->inscripcion - $montoPago);
-
-                    if ($diferenciaCuota <= $tolerancia || $diferenciaInscripcion <= $tolerancia) {
-                        Log::info("✅ Monto validado contra precio de programa", [
-                            'monto_pago' => $montoPago,
-                            'cuota_mensual_programa' => $precioPrograma->cuota_mensual,
-                            'inscripcion_programa' => $precioPrograma->inscripcion,
-                            'tolerancia' => $tolerancia
-                        ]);
-                    }
-                }
-
-                return null;
-            }
-        }
-
-        Log::info("🔍 Buscando cuota compatible", [
-            'cuotas_pendientes' => $cuotasPendientes->count(),
-            'monto_pago' => $montoPago,
-            'mensualidad_aprobada' => $mensualidadAprobada,
-            'fila' => $numeroFila
-        ]);
-
-        // ✅ PRIORIDAD 1: Coincidencia exacta con mensualidad aprobada
-        // 🔥 TOLERANCIA MÁXIMA: 50% o mínimo Q100 para importación histórica
-        if ($mensualidadAprobada > 0) {
-            $tolerancia = max(100, $mensualidadAprobada * 0.50);
-            $cuotaExacta = $cuotasPendientes->first(function ($cuota) use ($mensualidadAprobada, $tolerancia) {
-                $diferencia = abs($cuota->monto - $mensualidadAprobada);
-                return $diferencia <= $tolerancia;
-            });
-
-            if ($cuotaExacta) {
-                Log::info("✅ Cuota encontrada por mensualidad aprobada", [
-                    'cuota_id' => $cuotaExacta->id,
-                    'monto_cuota' => $cuotaExacta->monto,
-                    'mensualidad_aprobada' => $mensualidadAprobada,
-                    'monto_pago' => $montoPago,
-                    'diferencia' => abs($cuotaExacta->monto - $mensualidadAprobada),
-                    'tolerancia_usada' => $tolerancia
-                ]);
-                return $cuotaExacta;
-            }
-        }
-
-        // ✅ PRIORIDAD 2: Coincidencia con monto de pago
-        // 🔥 TOLERANCIA MÁXIMA: 50% o mínimo Q100 para importación histórica
-        $tolerancia = max(100, $montoPago * 0.50);
-        $cuotaPorMonto = $cuotasPendientes->first(function ($cuota) use ($montoPago, $tolerancia) {
-            $diferencia = abs($cuota->monto - $montoPago);
-            return $diferencia <= $tolerancia;
-        });
-
-        if ($cuotaPorMonto) {
-            Log::info("✅ Cuota encontrada por monto de pago", [
-                'cuota_id' => $cuotaPorMonto->id,
-                'monto_cuota' => $cuotaPorMonto->monto,
-                'monto_pago' => $montoPago,
-                'diferencia' => abs($cuotaPorMonto->monto - $montoPago),
-                'tolerancia_usada' => $tolerancia
-            ]);
-            return $cuotaPorMonto;
-        }
-
-        // 🔥 PRIORIDAD 3: PAGO PARCIAL (con tolerancia aumentada)
-        // Ahora acepta desde 30% del monto de la cuota (antes era 50%)
-        $cuotaParcial = $cuotasPendientes->first(function ($cuota) use ($montoPago) {
-            if ($cuota->monto == 0) return false;
-
-            $porcentajePago = ($montoPago / $cuota->monto) * 100;
-            return $porcentajePago >= 30 && $montoPago < $cuota->monto;
-        });
-
-        if ($cuotaParcial) {
-            $discrepancia = $cuotaParcial->monto - $montoPago;
-            $this->pagosParciales++;
-            $this->totalDiscrepancias += $discrepancia;
-
-            Log::warning("⚠️ PAGO PARCIAL DETECTADO", [
-                'fila' => $numeroFila,
-                'cuota_id' => $cuotaParcial->id,
-                'monto_cuota' => $cuotaParcial->monto,
-                'monto_pagado' => $montoPago,
-                'diferencia' => round($discrepancia, 2),
-                'porcentaje_pagado' => round(($montoPago / $cuotaParcial->monto) * 100, 2)
-            ]);
-
-            $this->advertencias[] = [
-                'tipo' => 'PAGO_PARCIAL',
-                'fila' => $numeroFila,
-                'advertencia' => sprintf(
-                    'Pago parcial: Q%.2f de Q%.2f (falta Q%.2f = %.1f%%)',
-                    $montoPago,
-                    $cuotaParcial->monto,
-                    $discrepancia,
-                    ($discrepancia / $cuotaParcial->monto) * 100
-                ),
-                'cuota_id' => $cuotaParcial->id,
-                'monto_cuota' => $cuotaParcial->monto,
-                'monto_pagado' => $montoPago,
-                'diferencia' => round($discrepancia, 2),
-                'recomendacion' => 'Revisar si hubo renegociación, beca o descuento no registrado en el sistema'
-            ];
-
-            return $cuotaParcial;
-        }
-
-        // 🔥 PRIORIDAD 4: CUALQUIER CUOTA PENDIENTE (tolerancia extrema para importación histórica)
-        // Buscar cualquier cuota que esté cerca del monto, con tolerancia del 100%
-        $cuotaToleranciaExtrema = $cuotasPendientes->first(function ($cuota) use ($montoPago) {
-            $diferencia = abs($cuota->monto - $montoPago);
-            $toleranciaExtrema = max($cuota->monto, $montoPago);
-            return $diferencia <= $toleranciaExtrema;
-        });
-
-        if ($cuotaToleranciaExtrema) {
-            $diferencia = abs($cuotaToleranciaExtrema->monto - $montoPago);
-
-            Log::warning("⚠️ Cuota encontrada con tolerancia extrema (100%)", [
-                'cuota_id' => $cuotaToleranciaExtrema->id,
-                'monto_cuota' => $cuotaToleranciaExtrema->monto,
-                'monto_pago' => $montoPago,
-                'diferencia' => round($diferencia, 2),
-                'porcentaje_diferencia' => $cuotaToleranciaExtrema->monto > 0
-                    ? round(($diferencia / $cuotaToleranciaExtrema->monto) * 100, 2)
-                    : 0
-            ]);
-
-            $this->advertencias[] = [
-                'tipo' => 'DIFERENCIA_MONTO_EXTREMA',
-                'fila' => $numeroFila,
-                'advertencia' => sprintf(
-                    'Gran diferencia: Cuota Q%.2f vs Pago Q%.2f (diferencia Q%.2f)',
-                    $cuotaToleranciaExtrema->monto,
-                    $montoPago,
-                    $diferencia
-                ),
-                'cuota_id' => $cuotaToleranciaExtrema->id,
-                'recomendacion' => 'Revisar si el pago corresponde a esta cuota o si hay ajuste de precio'
-            ];
-
-            return $cuotaToleranciaExtrema;
-        }
-
-        // ✅ PRIORIDAD 5: Primera cuota pendiente (sin restricción de monto)
-        // Si llegamos aquí, tomar cualquier cuota pendiente para no perder el pago
-        $primeraCuota = $cuotasPendientes->first();
-
-        if ($primeraCuota) {
-            $diferencia = abs($primeraCuota->monto - $montoPago);
-
-            Log::warning("⚠️ Usando primera cuota pendiente sin validación de monto (última opción)", [
-                'cuota_id' => $primeraCuota->id,
-                'fecha_vencimiento' => $primeraCuota->fecha_vencimiento,
-                'monto_cuota' => $primeraCuota->monto,
-                'monto_pago' => $montoPago,
-                'diferencia' => round($diferencia, 2)
-            ]);
-
-            $this->advertencias[] = [
-                'tipo' => 'CUOTA_FORZADA',
-                'fila' => $numeroFila,
-                'advertencia' => sprintf(
-                    'Cuota asignada forzadamente: Cuota Q%.2f vs Pago Q%.2f (diferencia Q%.2f)',
-                    $primeraCuota->monto,
-                    $montoPago,
-                    $diferencia
-                ),
-                'cuota_id' => $primeraCuota->id,
-                'recomendacion' => 'Verificar manualmente esta asignación de cuota'
-            ];
-
-            return $primeraCuota;
-        }
-
-        return null;
-    }
-
-    private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $montoPago)
-    {
-        $diferencia = $cuota->monto - $montoPago;
-
-        Log::info("🔄 PASO 5: Actualizando estado de cuota", [
+        Log::info("✅ Programa asignado", [
             'fila' => $numeroFila,
-            'cuota_id' => $cuota->id,
-            'numero_cuota' => $cuota->numero_cuota,
-            'monto_cuota' => $cuota->monto,
-            'monto_pago' => $montoPago,
-            'diferencia' => round($diferencia, 2),
-            'estado_anterior' => $cuota->estado
+            'programa_id' => $programaAsignado->programa_id,
+            'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+            'programa' => $programaAsignado->nombre_programa ?? 'N/A'
         ]);
 
-        $cuota->update([
-            'estado' => 'pagado',
-            'paid_at' => $kardex->fecha_pago,
-        ]);
+        $esPagoMensual = $this->esPagoMensual($tipoPagoNormalizado);
 
-        $this->cuotasActualizadas++;
+        DB::transaction(function () use (
+            $programaAsignado,
+            $carnet,
+            $nombreEstudiante,
+            $numeroBoletaOriginal,
+            $numeroBoletaNormalizada,
+            $monto,
+            $fechaPago,
+            $banco,
+            $concepto,
+            $numeroFila,
+            $tipoPagoOriginal,
+            $tipoPagoNormalizado,
+            $mesPago,
+            $anioPago,
+            $esPagoMensual
+        ) {
+            $cuota = null;
+            $cuotaCreada = false;
 
-        Log::info("✅ PASO 5 EXITOSO: Cuota marcada como pagada", [
-            'cuota_id' => $cuota->id,
-            'numero_cuota' => $cuota->numero_cuota,
-            'estado_nuevo' => 'pagado',
-            'paid_at' => $kardex->fecha_pago->toDateString()
-        ]);
+            if ($esPagoMensual) {
+                [$cuota, $cuotaCreada] = $this->obtenerOCrearCuotaMensual(
+                    $programaAsignado,
+                    $monto,
+                    $mesPago,
+                    $anioPago,
+                    $fechaPago,
+                    $numeroFila
+                );
+            }
 
-        if (abs($diferencia) > 100) {
-            Log::info("💰 Cuota actualizada con diferencia", [
-                'cuota_id' => $cuota->id,
-                'monto_cuota' => $cuota->monto,
-                'monto_pagado' => $montoPago,
-                'diferencia' => round($diferencia, 2),
-                'tipo' => $diferencia > 0 ? 'PAGO_MENOR' : 'SOBREPAGO'
+
+            Log::info("🔄 Iniciando transacción para fila {$numeroFila}");
+
+            $referenciaParaGuardar = $numeroBoletaOriginal !== ''
+                ? $numeroBoletaOriginal
+                : sprintf('HIST-%05d', $numeroFila);
+
+            $referenciaParaVerificacion = $referenciaParaGuardar;
+            $kardexExistente = KardexPago::where('numero_boleta', $referenciaParaVerificacion)
+                ->where('estudiante_programa_id', $programaAsignado->estudiante_programa_id)
+                ->first();
+
+            if ($kardexExistente) {
+                Log::info("⚠️ Kardex duplicado detectado (por boleta+estudiante)", [
+                    'kardex_id' => $kardexExistente->id,
+                    'boleta' => $referenciaParaVerificacion,
+                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                ]);
+
+                $this->advertencias[] = [
+                    'tipo' => 'DUPLICADO',
+                    'fila' => $numeroFila,
+                    'advertencia' => 'Pago ya registrado anteriormente',
+                    'kardex_id' => $kardexExistente->id,
+                    'boleta' => $referenciaParaVerificacion,
+                    'accion' => 'omitido',
+                ];
+                return;
+            }
+
+            $bancoNormalizado = $this->normalizeBank($banco);
+            $boletaNormalizadaVerificacion = $this->normalizeReceiptNumber($referenciaParaVerificacion);
+            $fechaYmd = $fechaPago->toDateString();
+            $fingerprintKardex = hash('sha256', implode('|', [
+                $bancoNormalizado,
+                $boletaNormalizadaVerificacion,
+                $programaAsignado->estudiante_programa_id,
+                $fechaYmd,
+            ]));
+
+            $kardexPorFingerprint = KardexPago::where('boleta_fingerprint', $fingerprintKardex)->first();
+
+            if ($kardexPorFingerprint) {
+                Log::info("⚠️ Kardex duplicado detectado (por fingerprint)", [
+                    'kardex_id' => $kardexPorFingerprint->id,
+                    'fingerprint' => $fingerprintKardex,
+                    'boleta' => $referenciaParaVerificacion,
+                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                ]);
+
+                $this->advertencias[] = [
+                    'tipo' => 'DUPLICADO',
+                    'fila' => $numeroFila,
+                    'advertencia' => 'Pago ya registrado anteriormente (mismo fingerprint)',
+                    'kardex_id' => $kardexPorFingerprint->id,
+                    'boleta' => $referenciaParaVerificacion,
+                    'accion' => 'omitido',
+                ];
+                return;
+            }
+
+            if ($numeroBoletaOriginal === '') {
+                Log::warning("⚠️ Fila {$numeroFila} sin numero_boleta, generando referencia automática", [
+                    'referencia_generada' => $referenciaParaGuardar
+                ]);
+            }
+
+            $kardex = KardexPago::create([
+                'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                'cuota_id' => $cuota?->id,
+                'numero_boleta' => $referenciaParaGuardar,
+                'monto_pagado' => $monto,
+                'fecha_pago' => $fechaPago,
+                'fecha_recibo' => $fechaPago,
+                'banco' => $banco,
+                'metodo_pago' => $tipoPagoOriginal,
+                'estado_pago' => 'pagado',
+                'observaciones' => $concepto !== '' ? $concepto : null,
+                'uploaded_by' => $this->uploaderId,
+                'created_by' => $this->uploaderId,
             ]);
+
+            $this->kardexCreados++;
+            $this->totalAmount += $monto;
+
+            $contextoConciliacion = [
+                'banco' => $banco,
+                'monto' => $monto,
+                'carnet' => $carnet,
+                'programa_id' => $programaAsignado->programa_id,
+                'prospecto_id' => $programaAsignado->prospecto_id ?? null,
+                'numero_boleta_original' => $numeroBoletaOriginal,
+                'numero_boleta_normalizada' => $numeroBoletaNormalizada,
+                'fecha_pago' => $fechaPago,
+                'concepto' => $concepto,
+                'tipo_pago' => $tipoPagoNormalizado,
+                'referencia_guardada' => $referenciaParaGuardar,
+                'cuota_creada' => $cuotaCreada,
+            ];
+
+            $this->actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $contextoConciliacion);
+
+            $this->procesados++;
+
+            $this->detalles[] = [
+                'accion' => 'pago_registrado',
+                'fila' => $numeroFila,
+                'carnet' => $carnet,
+                'nombre' => $nombreEstudiante,
+                'kardex_id' => $kardex->id,
+                'cuota_id' => $cuota?->id,
+                'programa' => $programaAsignado->nombre_programa ?? 'N/A',
+                'monto' => $monto,
+                'fecha_pago' => $fechaPago->toDateString(),
+                'numero_boleta' => $referenciaParaGuardar,
+                'concepto' => $concepto,
+                'tipo_pago' => $tipoPagoOriginal,
+            ];
+        });
+    }
+
+
+    private function obtenerOCrearCuotaMensual($programaAsignado, float $montoPago, ?int $mes, ?int $anio, Carbon $fechaPago, int $numeroFila): array
+    {
+        if ($montoPago <= 0) {
+            Log::warning("⚠️ Monto inválido para generar cuota", [
+                'fila' => $numeroFila,
+                'monto' => $montoPago,
+            ]);
+
+            return [null, false];
         }
 
-        Log::info("🔍 PASO 6: Creando registro de conciliación", [
-            'kardex_id' => $kardex->id,
-            'banco' => $banco,
-            'boleta' => $kardex->numero_boleta,
-            'monto' => $kardex->monto_pagado
+        $estudianteProgramaId = $programaAsignado->estudiante_programa_id;
+        $anio = $anio ?? $fechaPago->year;
+        $mes = $mes ?? $fechaPago->month;
+        $fechaVencimiento = $this->construirFechaVencimiento($mes, $anio, $fechaPago);
+
+        Log::info("🔍 Buscando cuota por mes/año", [
+            'estudiante_programa_id' => $estudianteProgramaId,
+            'mes' => $mes,
+            'anio' => $anio,
+            'fecha_vencimiento' => $fechaVencimiento->toDateString(),
+            'monto_pago' => $montoPago,
         ]);
+
+        $cuotas = CuotaProgramaEstudiante::where('estudiante_programa_id', $estudianteProgramaId)
+            ->whereYear('fecha_vencimiento', $fechaVencimiento->year)
+            ->whereMonth('fecha_vencimiento', $fechaVencimiento->month)
+            ->orderBy('id')
+            ->get();
+
+        $cuotaSeleccionada = $cuotas->first(function (CuotaProgramaEstudiante $cuota) use ($montoPago) {
+            $base = (float)$cuota->monto;
+            if ($base <= 0) {
+                return true;
+            }
+
+            return abs($montoPago - $base) <= ($base * 0.10);
+        });
+
+        if (!$cuotaSeleccionada && $cuotas->isNotEmpty()) {
+            $cuotaSeleccionada = $cuotas->first();
+        }
+
+        if ($cuotaSeleccionada) {
+            Log::info("✅ Cuota existente reutilizada", [
+                'cuota_id' => $cuotaSeleccionada->id,
+                'monto_anterior' => $cuotaSeleccionada->monto,
+                'monto_pago' => $montoPago,
+            ]);
+
+            $cambios = [];
+            if ((float)$cuotaSeleccionada->monto !== (float)$montoPago) {
+                $cambios['monto'] = $montoPago;
+            }
+
+            if ($cuotaSeleccionada->fecha_vencimiento->toDateString() !== $fechaVencimiento->toDateString()) {
+                $cambios['fecha_vencimiento'] = $fechaVencimiento->toDateString();
+            }
+
+            $cambios['estado'] = 'pagado';
+            $cambios['paid_at'] = $fechaPago;
+
+            if (!empty($cambios)) {
+                $cuotaSeleccionada->fill($cambios);
+                $cuotaSeleccionada->save();
+            }
+
+            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+            return [$cuotaSeleccionada->fresh(), false];
+        }
+
+        $numeroCuota = CuotaProgramaEstudiante::where('estudiante_programa_id', $estudianteProgramaId)
+            ->max('numero_cuota');
+        $numeroCuota = $numeroCuota ? $numeroCuota + 1 : 1;
+
+        $nuevaCuota = CuotaProgramaEstudiante::create([
+            'estudiante_programa_id' => $estudianteProgramaId,
+            'numero_cuota' => $numeroCuota,
+            'fecha_vencimiento' => $fechaVencimiento->toDateString(),
+            'monto' => $montoPago,
+            'estado' => 'pagado',
+            'paid_at' => $fechaPago,
+        ]);
+
+        unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+        Log::info("🆕 Cuota creada automáticamente", [
+            'cuota_id' => $nuevaCuota->id,
+            'estudiante_programa_id' => $estudianteProgramaId,
+            'mes' => $mes,
+            'anio' => $anio,
+            'monto' => $montoPago,
+        ]);
+
+        return [$nuevaCuota, true];
+    }
+
+    private function construirFechaVencimiento(?int $mes, ?int $anio, Carbon $fallback): Carbon
+    {
+        $anio = $anio ?? $fallback->year;
+        $mes = $mes ?? $fallback->month;
+
+        try {
+            return Carbon::createFromDate($anio, $mes, 1);
+        } catch (\Throwable $e) {
+            Log::warning("⚠️ Mes o año inválido en datos de pago", [
+                'mes' => $mes,
+                'anio' => $anio,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $fallback->copy();
+        }
+    }
+
+    private function parsearMes($valor): ?int
+    {
+        if ($valor === null) {
+            return null;
+        }
+
+        $valor = trim((string)$valor);
+        if ($valor === '') {
+            return null;
+        }
+
+        if (is_numeric($valor)) {
+            $mes = (int)$valor;
+            return $mes >= 1 && $mes <= 12 ? $mes : null;
+        }
+
+        $normalizado = mb_strtolower($valor, 'UTF-8');
+        $normalizado = strtr($normalizado, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u'
+        ]);
+        $normalizado = preg_replace('/[^a-z]/', '', $normalizado);
+
+        $mapa = [
+            'enero' => 1,
+            'ene' => 1,
+            'febrero' => 2,
+            'feb' => 2,
+            'marzo' => 3,
+            'mar' => 3,
+            'abril' => 4,
+            'abr' => 4,
+            'mayo' => 5,
+            'may' => 5,
+            'junio' => 6,
+            'jun' => 6,
+            'julio' => 7,
+            'jul' => 7,
+            'agosto' => 8,
+            'ago' => 8,
+            'septiembre' => 9,
+            'setiembre' => 9,
+            'sep' => 9,
+            'octubre' => 10,
+            'oct' => 10,
+            'noviembre' => 11,
+            'nov' => 11,
+            'diciembre' => 12,
+            'dic' => 12,
+        ];
+
+        return $mapa[$normalizado] ?? null;
+    }
+
+    private function parsearAnio($valor, Carbon $fechaReferencia): int
+    {
+        if (is_numeric($valor)) {
+            $anio = (int)$valor;
+            return $anio >= 1900 && $anio <= 2100 ? $anio : $fechaReferencia->year;
+        }
+
+        if (is_string($valor)) {
+            if (preg_match('/(19|20)\\d{2}/', $valor, $coincidencias)) {
+                return (int)$coincidencias[0];
+            }
+        }
+
+        return $fechaReferencia->year;
+    }
+    private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, array $contexto)
+    {
+        $montoPago = $contexto['monto'] ?? $kardex->monto_pagado;
+        $banco = $contexto['banco'] ?? $kardex->banco;
+        $carnet = $contexto['carnet'] ?? '';
+        $programaId = $contexto['programa_id'] ?? null;
+        $prospectoId = $contexto['prospecto_id'] ?? null;
+        $fechaPago = $contexto['fecha_pago'] instanceof Carbon
+            ? $contexto['fecha_pago']
+            : Carbon::parse($kardex->fecha_pago);
+        $referenciaOriginal = $contexto['numero_boleta_original'] ?? '';
+        $referenciaGuardada = $contexto['referencia_guardada'] ?? $kardex->numero_boleta;
+        $referenciaParaFingerprint = $referenciaOriginal !== '' ? $referenciaOriginal : $referenciaGuardada;
+
+        if ($cuota) {
+            $diferencia = (float)$cuota->monto - (float)$montoPago;
+
+            Log::info("🔄 Actualizando cuota asociada", [
+                'fila' => $numeroFila,
+                'cuota_id' => $cuota->id,
+                'monto_actual' => $cuota->monto,
+                'monto_pago' => $montoPago,
+                'diferencia' => round($diferencia, 2),
+                'creada_durante_import' => $contexto['cuota_creada'] ?? false,
+            ]);
+
+            $cambios = [];
+            if ((float)$cuota->monto !== (float)$montoPago) {
+                $cambios['monto'] = $montoPago;
+            }
+
+            if (($cuota->estado ?? null) !== 'pagado') {
+                $cambios['estado'] = 'pagado';
+            }
+
+            $cambios['paid_at'] = $fechaPago;
+
+            if (!empty($cambios)) {
+                $cuota->fill($cambios);
+                $cuota->save();
+            }
+
+            $this->cuotasActualizadas++;
+        } else {
+            Log::info("⏭️ Pago sin cuota asociada", [
+                'fila' => $numeroFila,
+                'kardex_id' => $kardex->id,
+                'motivo' => 'Pago no clasificado como mensual',
+            ]);
+        }
 
         $bancoNormalizado = $this->normalizeBank($banco);
-        $boletaNormalizada = $this->normalizeReceiptNumber($kardex->numero_boleta);
-        $fechaYmd = Carbon::parse($kardex->fecha_pago)->format('Y-m-d');
-        $fingerprint = $this->makeFingerprint($bancoNormalizado, $boletaNormalizada, $kardex->monto_pagado, $fechaYmd);
+        $referenciaNormalizada = $this->normalizeReceiptNumber($referenciaParaFingerprint ?: $referenciaGuardada);
+        $fechaYmd = $fechaPago->toDateString();
+        $fingerprint = $this->makeFingerprint($carnet, $programaId, $referenciaParaFingerprint, $montoPago, $fechaYmd);
 
-        if (ReconciliationRecord::where('fingerprint', $fingerprint)->exists()) {
-            Log::warning("⚠️ Conciliación duplicada detectada", [
+        $payloadBase = [
+            'prospecto_id' => $prospectoId,
+            'bank' => $banco,
+            'bank_normalized' => $bancoNormalizado,
+            'reference' => $referenciaGuardada,
+            'reference_normalized' => $referenciaNormalizada,
+            'amount' => $montoPago,
+            'date' => $fechaYmd,
+            'status' => 'conciliado',
+            'fingerprint' => $fingerprint,
+            'kardex_pago_id' => $kardex->id,
+        ];
+
+        $record = ReconciliationRecord::where('fingerprint', $fingerprint)->first();
+
+        if ($record) {
+            $record->fill($payloadBase);
+            $record->save();
+
+            Log::info("🔁 Conciliación actualizada", [
                 'fingerprint' => $fingerprint,
-                'boleta' => $kardex->numero_boleta
+                'kardex_id' => $kardex->id,
             ]);
+        } else {
+            $payloadBase['uploaded_by'] = $this->uploaderId;
+
+            ReconciliationRecord::create($payloadBase);
+            $this->conciliaciones++;
+
+            Log::info("✅ Conciliación creada", [
+                'fingerprint' => $fingerprint,
+                'kardex_id' => $kardex->id,
+            ]);
+        }
+    }
+
+    private function guardarInformacionAdicionalEstudiante(string $carnet, ?string $notasPago, ?string $nomenclatura): void
+    {
+        $datos = [];
+
+        if ($notasPago !== null) {
+            $datos['notas_pago'] = $notasPago;
+        }
+
+        if ($nomenclatura !== null) {
+            $datos['nomenclatura'] = $nomenclatura;
+        }
+
+        if (empty($datos)) {
             return;
         }
 
         try {
-            ReconciliationRecord::create([
-                'bank' => $banco,
-                'bank_normalized' => $bancoNormalizado,
-                'reference' => $kardex->numero_boleta ?: 'HIST-' . $kardex->id,
-                'reference_normalized' => $boletaNormalizada ?: 'HIST' . $kardex->id,
-                'amount' => $kardex->monto_pagado,
-                'date' => $fechaYmd,
-                'fingerprint' => $fingerprint,
-                'status' => 'conciliado',
-                'kardex_pago_id' => $kardex->id,
-            ]);
+            $registro = AdicionalEstudiante::updateOrCreate(
+                ['carnet' => $carnet],
+                $datos
+            );
 
-            $this->conciliaciones++;
-
-            Log::info("✅ PASO 6 EXITOSO: Conciliación creada", [
-                'kardex_id' => $kardex->id,
-                'fingerprint' => $fingerprint,
-                'status' => 'conciliado'
+            Log::info('📝 Información adicional de estudiante guardada', [
+                'carnet' => $carnet,
+                'campos_actualizados' => array_keys($datos),
+                'registro_id' => $registro->id,
             ]);
         } catch (\Throwable $e) {
-            Log::error("❌ PASO 6 FALLIDO: Error creando conciliación", [
+            Log::error('❌ Error guardando información adicional de estudiante', [
+                'carnet' => $carnet,
+                'datos' => $datos,
                 'error' => $e->getMessage(),
-                'kardex_id' => $kardex->id,
-                'fingerprint' => $fingerprint,
-                'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 3)
             ]);
+
+            $this->advertencias[] = [
+                'tipo' => 'INFO_ADICIONAL_NO_GUARDADA',
+                'carnet' => $carnet,
+                'advertencia' => 'No se pudo guardar la información adicional del estudiante',
+                'error' => $e->getMessage(),
+            ];
         }
+    }
+
+    private function normalizarCampoLibre($valor): ?string
+    {
+        if ($valor === null) {
+            return null;
+        }
+
+        $valorNormalizado = trim((string)$valor);
+
+        return $valorNormalizado === '' ? null : $valorNormalizado;
     }
 
     private function validarDatosPago($boleta, $monto, $fechaPago, $numeroFila): array
     {
         $errores = [];
-
-        if (empty($boleta) || trim($boleta) === '') {
-            $errores[] = 'Boleta vacía o inválida';
-        }
 
         if (!is_numeric($monto) || $monto <= 0) {
             $errores[] = "Monto inválido o negativo: {$monto}";
@@ -1052,6 +1057,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     ]
                 ]
             ];
+        }
+
+        if (empty($boleta) || trim($boleta) === '') {
+            Log::warning("⚠️ Fila {$numeroFila} sin numero_boleta explícito. Se generará referencia automática.");
         }
 
         return ['valido' => true];
@@ -1596,30 +1605,38 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     private function normalizeBank($bank)
     {
-        if (empty($bank) || $bank === 'N/A' || $bank === 'No especificado') {
-            return 'EFECTIVO';
+        if ($bank === null) {
+            return strtoupper(self::DEFAULT_BANK);
         }
 
-        $bank = strtoupper(trim($bank));
+        $bank = trim((string)$bank);
+        if ($bank === '' || strcasecmp($bank, 'N/A') === 0 || strcasecmp($bank, self::DEFAULT_BANK) === 0) {
+            return strtoupper(self::DEFAULT_BANK);
+        }
+
+        $bankUpper = strtoupper($bank);
 
         $bankMappings = [
-            'BAC' => 'BAC',
-            'BI' => 'BI',
             'BANCO INDUSTRIAL' => 'BI',
+            'INDUSTRIAL' => 'BI',
+            'BI' => 'BI',
+            'BAC' => 'BAC',
             'BANTRAB' => 'BANTRAB',
             'PROMERICA' => 'PROMERICA',
             'GYT' => 'GYT',
+            'G&T' => 'GYT',
+            'G Y T' => 'GYT',
             'VISA' => 'VISA',
             'MASTERCARD' => 'MASTERCARD',
         ];
 
-        foreach ($bankMappings as $key => $normalized) {
-            if (str_contains($bank, $key)) {
-                return $normalized;
+        foreach ($bankMappings as $clave => $normalizado) {
+            if (str_contains($bankUpper, $clave)) {
+                return $normalizado;
             }
         }
 
-        return $bank;
+        return $bankUpper;
     }
 
     private function normalizeReceiptNumber($receiptNumber)
@@ -1631,16 +1648,17 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return strtoupper(preg_replace('/[^a-zA-Z0-9]/', '', $receiptNumber));
     }
 
-    private function makeFingerprint($bank, $reference, $amount, $date)
+    private function makeFingerprint($carnet, $programaId, $reference, $amount, $date)
     {
-        $data = [
-            'bank' => $bank,
-            'reference' => $reference,
-            'amount' => round($amount, 2),
-            'date' => $date
+        $componentes = [
+            strtoupper(trim((string)$carnet)),
+            (string)($programaId ?? '0'),
+            trim((string)$reference) !== '' ? trim((string)$reference) : 'SIN_REFERENCIA',
+            number_format((float)$amount, 2, '.', ''),
+            $date,
         ];
 
-        return md5(implode('|', $data));
+        return hash('sha256', implode('|', $componentes));
     }
 
     private function normalizarCarnet($carnet)
@@ -1671,42 +1689,39 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return $resultado;
     }
 
+    protected function parseDate($value, ?string $default = self::DEFAULT_PAYMENT_DATE): string
+    {
+        if ($value === null || $value === '') {
+            return $default ?? Carbon::now()->toDateString();
+        }
+
+        try {
+            if (is_numeric($value)) {
+                return Carbon::instance(ExcelDate::excelToDateTimeObject((float)$value))->toDateString();
+            }
+
+            $clean = preg_replace('/[^0-9\/-]/', '', trim((string)$value));
+            $clean = preg_replace('/\/+/', '/', $clean);
+
+            foreach (['d/m/Y', 'Y-m-d', 'm/d/Y'] as $format) {
+                try {
+                    return Carbon::createFromFormat($format, $clean)->toDateString();
+                } catch (\Exception $ignored) {
+                }
+            }
+
+            return Carbon::parse($clean)->toDateString();
+        } catch (\Throwable $e) {
+            $fallback = $default ?? Carbon::now()->toDateString();
+            Log::warning("⚠️ Fecha inválida: {$value}. Usando valor por defecto: {$fallback}");
+            return $fallback;
+        }
+    }
+
     private function normalizarFecha($fecha)
     {
-        try {
-            if (is_numeric($fecha)) {
-                $baseDate = Carbon::create(1899, 12, 30);
-                $resultado = $baseDate->addDays(intval($fecha));
-
-                Log::debug('📅 Fecha normalizada desde Excel', [
-                    'original' => $fecha,
-                    'resultado' => $resultado->toDateString()
-                ]);
-
-                return $resultado;
-            }
-
-            if (empty($fecha) || trim($fecha) === '') {
-                Log::debug('⚠️ Fecha vacía detectada');
-                return null;
-            }
-
-            $resultado = Carbon::parse($fecha);
-
-            Log::debug('📅 Fecha parseada desde string', [
-                'original' => $fecha,
-                'resultado' => $resultado->toDateString()
-            ]);
-
-            return $resultado;
-        } catch (\Exception $e) {
-            Log::warning('⚠️ Error normalizando fecha', [
-                'fecha' => $fecha,
-                'tipo' => gettype($fecha),
-                'error' => $e->getMessage()
-            ]);
-            return null;
-        }
+        $fechaNormalizada = $this->parseDate($fecha, self::DEFAULT_PAYMENT_DATE);
+        return Carbon::parse($fechaNormalizada);
     }
 
     /**
