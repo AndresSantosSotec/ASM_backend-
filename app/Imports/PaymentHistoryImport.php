@@ -11,6 +11,7 @@ use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use App\Models\KardexPago;
+use App\Models\AdicionalEstudiante;
 use App\Models\CuotaProgramaEstudiante;
 use App\Models\ReconciliationRecord;
 use App\Models\PrecioPrograma;
@@ -347,7 +348,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'ano',
             'mes_inicio',
             'fila_origen',
-            'mensualidad_aprobada'
+            'mensualidad_aprobada',
+            'notas_pago',
+            'nomenclatura'
         ];
 
         if (!$primeraFila) {
@@ -456,6 +459,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
         $tipoPagoNormalizado = strtoupper($tipoPagoOriginal);
 
+        $notasPago = $this->normalizarCampoLibre($row['notas_pago'] ?? null);
+        $nomenclatura = $this->normalizarCampoLibre($row['nomenclatura'] ?? null);
+
         $mesPago = $this->parsearMes($row['mes_pago'] ?? null);
         $anioPago = $this->parsearAnio($row['año'] ?? ($row['ano'] ?? null), $fechaPago);
         $mesInicio = trim((string)($row['mes_inicio'] ?? ''));
@@ -473,6 +479,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'mes_pago' => $row['mes_pago'] ?? null,
             'anio_pago' => $row['año'] ?? ($row['ano'] ?? null)
         ]);
+
+        $this->guardarInformacionAdicionalEstudiante($carnet, $notasPago, $nomenclatura);
 
         $validacion = $this->validarDatosPago($numeroBoletaOriginal, $monto, $fechaPago, $numeroFila);
         if (!$validacion['valido']) {
@@ -941,6 +949,60 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'kardex_id' => $kardex->id,
             ]);
         }
+    }
+
+    private function guardarInformacionAdicionalEstudiante(string $carnet, ?string $notasPago, ?string $nomenclatura): void
+    {
+        $datos = [];
+
+        if ($notasPago !== null) {
+            $datos['notas_pago'] = $notasPago;
+        }
+
+        if ($nomenclatura !== null) {
+            $datos['nomenclatura'] = $nomenclatura;
+        }
+
+        if (empty($datos)) {
+            return;
+        }
+
+        try {
+            $registro = AdicionalEstudiante::updateOrCreate(
+                ['carnet' => $carnet],
+                $datos
+            );
+
+            Log::info('📝 Información adicional de estudiante guardada', [
+                'carnet' => $carnet,
+                'campos_actualizados' => array_keys($datos),
+                'registro_id' => $registro->id,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('❌ Error guardando información adicional de estudiante', [
+                'carnet' => $carnet,
+                'datos' => $datos,
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->advertencias[] = [
+                'tipo' => 'INFO_ADICIONAL_NO_GUARDADA',
+                'carnet' => $carnet,
+                'advertencia' => 'No se pudo guardar la información adicional del estudiante',
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    private function normalizarCampoLibre($valor): ?string
+    {
+        if ($valor === null) {
+            return null;
+        }
+
+        $valorNormalizado = trim((string)$valor);
+
+        return $valorNormalizado === '' ? null : $valorNormalizado;
     }
 
     private function validarDatosPago($boleta, $monto, $fechaPago, $numeroFila): array
