@@ -335,18 +335,24 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'nombre_estudiante',
             'numero_boleta',
             'monto',
-            'fecha_pago'
         ];
 
         $columnasOpcionales = [
-            'plan_estudios',
-            'estatus',
-            'banco',
-            'concepto',
+            'fecha_pago',
             'tipo_pago',
             'mes_pago',
             'ano',
+            'año',
+            'anio',
             'mes_inicio',
+            'plan_estudios',
+            'estatus',
+            'asesor',
+            'empresa_donde_labora',
+            'telefono',
+            'mail',
+            'banco',
+            'concepto',
             'fila_origen',
             'mensualidad_aprobada',
             'notas_pago',
@@ -364,12 +370,31 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $columnasEncontradas = array_keys($primeraFila->toArray());
         $columnasFaltantes = array_diff($columnasRequeridas, $columnasEncontradas);
 
-        return [
+        $resultado = [
             'valido' => empty($columnasFaltantes),
             'faltantes' => array_values($columnasFaltantes),
             'encontradas' => $columnasEncontradas,
             'opcionales_encontradas' => array_intersect($columnasOpcionales, $columnasEncontradas)
         ];
+
+        if (!in_array('fecha_pago', $columnasEncontradas, true)) {
+            $this->advertencias[] = [
+                'tipo' => 'COLUMNA_FALTANTE_NO_CRITICA',
+                'advertencia' => 'Columna fecha_pago ausente, se usará fecha por defecto en filas sin valor explícito.',
+            ];
+
+            Log::warning('⚠️ Columna fecha_pago ausente, se utilizará la fecha por defecto para los pagos.');
+        }
+
+        if (!in_array('tipo_pago', $columnasEncontradas, true)) {
+            Log::info('ℹ️ Columna tipo_pago ausente, se asumirá "Mensual" por defecto.');
+        }
+
+        if (!in_array('mes_pago', $columnasEncontradas, true)) {
+            Log::info('ℹ️ Columna mes_pago ausente, se utilizará la fecha del pago para determinar mes/año.');
+        }
+
+        return $resultado;
     }
 
     /**
