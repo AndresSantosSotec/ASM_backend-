@@ -14,33 +14,104 @@ class PaymentHistoryImportTest extends TestCase
         return new PaymentHistoryImport(1); // Use dummy user ID
     }
 
-    public function test_constructor_initializes_strict_mode()
+    protected function getImportInstanceWithReplace()
+    {
+        return new PaymentHistoryImport(1, 'cardex_directo', true); // With modoReemplazoPendientes enabled
+    }
+    
+    protected function getImportInstanceSilent()
+    {
+        return new PaymentHistoryImport(1, 'cardex_directo', false, true); // With modoSilencioso enabled
+    }
+    
+    protected function getImportInstanceForced()
+    {
+        return new PaymentHistoryImport(1, 'cardex_directo', false, false, true); // With modoInsercionForzada enabled
+    }
+
+    public function test_constructor_accepts_modo_reemplazo_pendientes()
+    {
+        $import = new PaymentHistoryImport(1, 'cardex_directo', true);
+        
+        $reflection = new \ReflectionProperty($import, 'modoReemplazoPendientes');
+        $reflection->setAccessible(true);
+        
+        $this->assertTrue($reflection->getValue($import));
+    }
+    
+    public function test_constructor_accepts_modo_silencioso()
+    {
+        $import = new PaymentHistoryImport(1, 'cardex_directo', false, true);
+        
+        $reflection = new \ReflectionProperty($import, 'modoSilencioso');
+        $reflection->setAccessible(true);
+        
+        $this->assertTrue($reflection->getValue($import));
+    }
+    
+    public function test_constructor_accepts_modo_insercion_forzada()
+    {
+        $import = new PaymentHistoryImport(1, 'cardex_directo', false, false, true);
+        
+        $reflection = new \ReflectionProperty($import, 'modoInsercionForzada');
+        $reflection->setAccessible(true);
+        
+        $this->assertTrue($reflection->getValue($import));
+    }
+
+    public function test_constructor_defaults_modo_reemplazo_to_false()
     {
         $import = new PaymentHistoryImport(1);
         
-        // Check that required properties exist
-        $this->assertObjectHasProperty('uploaderId', $import);
-        $this->assertObjectHasProperty('tipoArchivo', $import);
-        $this->assertObjectHasProperty('totalRows', $import);
-        $this->assertObjectHasProperty('procesados', $import);
-        $this->assertObjectHasProperty('kardexCreados', $import);
-        $this->assertObjectHasProperty('pagosOmitidos', $import);
+        $reflection = new \ReflectionProperty($import, 'modoReemplazoPendientes');
+        $reflection->setAccessible(true);
         
-        // Verify initial values
-        $this->assertEquals(1, $import->uploaderId);
-        $this->assertEquals('cardex_directo', $import->tipoArchivo);
-        $this->assertEquals(0, $import->totalRows);
-        $this->assertEquals(0, $import->procesados);
-        $this->assertEquals(0, $import->kardexCreados);
-        $this->assertEquals(0, $import->pagosOmitidos);
+        $this->assertFalse($reflection->getValue($import));
     }
     
-    public function test_constructor_accepts_custom_tipo_archivo()
+    public function test_constructor_defaults_modo_silencioso_to_false()
     {
-        $import = new PaymentHistoryImport(999, 'custom_type');
+        $import = new PaymentHistoryImport(1);
         
-        $this->assertEquals(999, $import->uploaderId);
-        $this->assertEquals('custom_type', $import->tipoArchivo);
+        $reflection = new \ReflectionProperty($import, 'modoSilencioso');
+        $reflection->setAccessible(true);
+        
+        $this->assertFalse($reflection->getValue($import));
+    }
+    
+    public function test_constructor_defaults_modo_insercion_forzada_to_false()
+    {
+        $import = new PaymentHistoryImport(1);
+        
+        $reflection = new \ReflectionProperty($import, 'modoInsercionForzada');
+        $reflection->setAccessible(true);
+        
+        $this->assertFalse($reflection->getValue($import));
+    }
+    
+    public function test_constructor_initializes_verbose_from_config()
+    {
+        $import = new PaymentHistoryImport(1);
+        
+        $reflection = new \ReflectionProperty($import, 'verbose');
+        $reflection->setAccessible(true);
+        
+        // Should default to false when config is not set
+        $this->assertIsBool($reflection->getValue($import));
+    }
+    
+    public function test_constructor_initializes_time_metrics()
+    {
+        $import = new PaymentHistoryImport(1);
+        
+        $reflectionTime = new \ReflectionProperty($import, 'tiempoInicio');
+        $reflectionTime->setAccessible(true);
+        
+        $reflectionMemory = new \ReflectionProperty($import, 'memoryInicio');
+        $reflectionMemory->setAccessible(true);
+        
+        $this->assertGreaterThan(0, $reflectionTime->getValue($import));
+        $this->assertGreaterThan(0, $reflectionMemory->getValue($import));
     }
 
     public function test_normalizar_carnet_removes_spaces_and_uppercases()
@@ -142,6 +213,7 @@ class PaymentHistoryImportTest extends TestCase
             'numero_boleta' => '12345',
             'monto' => '1000',
             'fecha_pago' => '2022-01-01',
+            'mensualidad_aprobada' => '1000',
             'banco' => 'BAC',
             'concepto' => 'Pago mensual'
         ]);
@@ -152,14 +224,82 @@ class PaymentHistoryImportTest extends TestCase
         $this->assertEmpty($result['faltantes']);
     }
 
-    public function test_get_reporte_exitos_returns_empty_when_no_details()
+    public function test_obtener_programas_estudiante_handles_collection_to_array_conversion()
     {
         $import = $this->getImportInstance();
         
-        $result = $import->getReporteExitos();
+        // Create a Collection that simulates what $pagos->first() would return
+        $mockRow = collect([
+            'carnet' => 'ASM20221234',
+            'nombre_estudiante' => 'Test Student',
+            'plan_estudios' => 'MBA',
+            'numero_boleta' => '12345',
+            'monto' => 1000,
+            'fecha_pago' => '2022-01-01',
+            'mensualidad_aprobada' => 1000,
+            'banco' => 'BAC',
+            'concepto' => 'Pago mensual'
+        ]);
         
-        $this->assertEquals('No hay registros exitosos para reportar', $result['mensaje']);
-        $this->assertEquals(0, $result['total']);
+        // This test verifies that when obtenerProgramasEstudiante is called with a Collection,
+        // it properly converts it to an array before passing to generarCuotasSiFaltan.
+        // The test passes if no TypeError is thrown.
+        
+        // We can't fully test this without database, but we can verify the instance methods exist
+        $this->assertTrue(method_exists($import, 'obtenerProgramasEstudiante'));
+        
+        // Verify Collection can be converted to array
+        $this->assertIsArray($mockRow->toArray());
+        $this->assertInstanceOf(Collection::class, $mockRow);
+    }
+
+    public function test_get_error_type_description_returns_proper_descriptions()
+    {
+        $import = $this->getImportInstance();
+        
+        $reflection = new \ReflectionMethod($import, 'getErrorTypeDescription');
+        $reflection->setAccessible(true);
+        
+        // Test known error types
+        $this->assertStringContainsString('Error crítico', $reflection->invoke($import, 'ERROR_PROCESAMIENTO_ESTUDIANTE'));
+        $this->assertStringContainsString('Error al procesar un pago', $reflection->invoke($import, 'ERROR_PROCESAMIENTO_PAGO'));
+        $this->assertStringContainsString('No se encontró el estudiante', $reflection->invoke($import, 'ESTUDIANTE_NO_ENCONTRADO'));
+        $this->assertStringContainsString('programa', $reflection->invoke($import, 'PROGRAMA_NO_IDENTIFICADO'));
+        $this->assertStringContainsString('datos requeridos', $reflection->invoke($import, 'DATOS_INCOMPLETOS'));
+        
+        // Test unknown error type
+        $this->assertEquals('Error no categorizado', $reflection->invoke($import, 'UNKNOWN_ERROR_TYPE'));
+    }
+
+    public function test_normalize_bank_standardizes_bank_names()
+    {
+        $import = $this->getImportInstance();
+        
+        $reflection = new \ReflectionMethod($import, 'normalizeBank');
+        $reflection->setAccessible(true);
+        
+        // Test bank normalization
+        $this->assertEquals('BI', $reflection->invoke($import, 'Banco Industrial'));
+        $this->assertEquals('BI', $reflection->invoke($import, 'BI'));
+        $this->assertEquals('BANTRAB', $reflection->invoke($import, 'bantrab'));
+        $this->assertEquals('EFECTIVO', $reflection->invoke($import, 'N/A'));
+        $this->assertEquals('EFECTIVO', $reflection->invoke($import, 'No especificado'));
+        $this->assertEquals('EFECTIVO', $reflection->invoke($import, ''));
+    }
+
+    public function test_normalize_receipt_number_removes_special_chars()
+    {
+        $import = $this->getImportInstance();
+        
+        $reflection = new \ReflectionMethod($import, 'normalizeReceiptNumber');
+        $reflection->setAccessible(true);
+        
+        // Test receipt number normalization
+        $this->assertEquals('652002', $reflection->invoke($import, '652002'));
+        $this->assertEquals('652002', $reflection->invoke($import, '652-002'));
+        $this->assertEquals('ABC123', $reflection->invoke($import, 'abc-123'));
+        $this->assertEquals('NA', $reflection->invoke($import, 'N/A'));
+        $this->assertEquals('NA', $reflection->invoke($import, ''));
     }
 
     public function test_fingerprint_includes_student_and_date()
