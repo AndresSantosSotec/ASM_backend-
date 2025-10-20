@@ -10,6 +10,7 @@ use App\Services\EstudianteService;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
+use App\Models\AdicionalEstudiante;
 use App\Models\KardexPago;
 use App\Models\CuotaProgramaEstudiante;
 use App\Models\ReconciliationRecord;
@@ -38,6 +39,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     private array $estudiantesCache = [];
     private array $cuotasPorEstudianteCache = [];
+    private array $adicionalEstudianteCache = [];
 
     // 🆕 NUEVO: Servicio de estudiantes
     private EstudianteService $estudianteService;
@@ -342,7 +344,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'ano',
             'mes_inicio',
             'fila_origen',
-            'mensualidad_aprobada'
+            'mensualidad_aprobada',
+            'notas_pago',
+            'asesor',
+            'empresa_donde_labora',
+            'telefono',
+            'mail',
+            'nomenclatura'
         ];
 
         if (!$primeraFila) {
@@ -374,6 +382,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         Log::info("=== 👤 PROCESANDO ESTUDIANTE {$carnetNormalizado} ===", [
             'cantidad_pagos' => $pagos->count()
         ]);
+
+        $this->guardarInformacionAdicionalEstudiante($carnetNormalizado, $pagos);
 
         // 🔥 CAMBIO: Pasar primer pago como contexto para creación
         $primerPago = $pagos->first();
@@ -425,6 +435,53 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 ]);
             }
         }
+    }
+
+    private function guardarInformacionAdicionalEstudiante(string $carnet, Collection $pagos): void
+    {
+        if (isset($this->adicionalEstudianteCache[$carnet])) {
+            return;
+        }
+
+        $notasPago = $pagos
+            ->pluck('notas_pago')
+            ->map(fn ($valor, $key) => trim((string) $valor))
+            ->first(fn ($valor, $key) => $valor !== '');
+
+        $nomenclatura = $pagos
+            ->pluck('nomenclatura')
+            ->map(fn ($valor, $key) => trim((string) $valor))
+            ->first(fn ($valor, $key) => $valor !== '');
+
+        if ($notasPago === null && $nomenclatura === null) {
+            $this->adicionalEstudianteCache[$carnet] = true;
+            return;
+        }
+
+        $registro = AdicionalEstudiante::firstOrNew(['carnet' => $carnet]);
+        $cambios = false;
+
+        if ($notasPago !== null && $notasPago !== '' && $registro->notas_pago !== $notasPago) {
+            $registro->notas_pago = $notasPago;
+            $cambios = true;
+        }
+
+        if ($nomenclatura !== null && $nomenclatura !== '' && $registro->nomenclatura !== $nomenclatura) {
+            $registro->nomenclatura = $nomenclatura;
+            $cambios = true;
+        }
+
+        if (!$registro->exists || $cambios) {
+            $registro->save();
+
+            Log::info('🆕 Información adicional de estudiante registrada/actualizada', [
+                'carnet' => $carnet,
+                'notas_pago' => $registro->notas_pago,
+                'nomenclatura' => $registro->nomenclatura,
+            ]);
+        }
+
+        $this->adicionalEstudianteCache[$carnet] = true;
     }
 
     private function procesarPagoIndividual($row, Collection $programasEstudiante, $numeroFila)
