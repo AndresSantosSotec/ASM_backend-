@@ -819,93 +819,65 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         int $numeroFila
     ) {
         $cuotas = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
-            ->sortBy('fecha_vencimiento')
-            ->values();
+            ->sortBy('fecha_vencimiento');
 
         $periodo = $this->obtenerPeriodoDesdeFila($rowData, $fechaPago);
         $mesObjetivo = $periodo['mes'];
         $anioObjetivo = $periodo['anio'];
         $fechaReferencia = $periodo['fecha'];
-        $periodoClave = $mesObjetivo && $anioObjetivo
-            ? sprintf('%04d-%02d', $anioObjetivo, $mesObjetivo)
-            : null;
 
         Log::info('🔍 Buscando cuota basada en periodo declarado en Excel', [
             'estudiante_programa_id' => $estudianteProgramaId,
             'mes' => $mesObjetivo,
             'anio' => $anioObjetivo,
-            'periodo_clave' => $periodoClave,
             'monto_pago' => $montoPago,
             'fila' => $numeroFila,
             'cuotas_existentes' => $cuotas->count()
         ]);
 
-        if ($periodoClave) {
-            $candidatas = $cuotas->filter(function ($cuota) use ($periodoClave) {
+        if ($mesObjetivo && $anioObjetivo) {
+            $cuotaPorPeriodo = $cuotas->first(function ($cuota) use ($mesObjetivo, $anioObjetivo) {
                 if (empty($cuota->fecha_vencimiento)) {
                     return false;
                 }
 
-                return Carbon::parse($cuota->fecha_vencimiento)->format('Y-m') === $periodoClave;
-            })->sortBy('numero_cuota');
-
-            $cuotaPendiente = $candidatas->first(function ($cuota) {
-                return $cuota->estado !== 'pagado';
+                $fecha = Carbon::parse($cuota->fecha_vencimiento);
+                return $fecha->month === $mesObjetivo && $fecha->year === $anioObjetivo;
             });
-
-            $cuotaPorPeriodo = $cuotaPendiente ?: $candidatas->first();
 
             if ($cuotaPorPeriodo) {
                 Log::info('✅ Cuota encontrada por coincidencia de periodo', [
                     'cuota_id' => $cuotaPorPeriodo->id,
                     'fecha_vencimiento' => $cuotaPorPeriodo->fecha_vencimiento,
-                    'monto_cuota' => $cuotaPorPeriodo->monto,
-                    'estado' => $cuotaPorPeriodo->estado
+                    'monto_cuota' => $cuotaPorPeriodo->monto
                 ]);
-
-                return $this->ajustarCuotaDesdeExcel(
-                    $cuotaPorPeriodo,
-                    $fechaReferencia ?: $fechaPago->copy()->startOfMonth(),
-                    $montoPago,
-                    $numeroFila,
-                    $estudianteProgramaId
-                );
+                return $cuotaPorPeriodo;
             }
         }
 
         $cuotaPorMontoExacto = $cuotas->first(function ($cuota) use ($montoPago) {
-            return $cuota->estado !== 'pagado' && abs($cuota->monto - $montoPago) < 0.01;
+            return abs($cuota->monto - $montoPago) < 0.01;
         });
 
         if ($cuotaPorMontoExacto) {
             Log::info('✅ Cuota encontrada por coincidencia exacta de monto', [
                 'cuota_id' => $cuotaPorMontoExacto->id,
-                'monto_cuota' => $cuotaPorMontoExacto->monto,
-                'estado' => $cuotaPorMontoExacto->estado
+                'monto_cuota' => $cuotaPorMontoExacto->monto
             ]);
-
-            return $this->ajustarCuotaDesdeExcel(
-                $cuotaPorMontoExacto,
-                $fechaReferencia ?: $fechaPago->copy()->startOfMonth(),
-                $montoPago,
-                $numeroFila,
-                $estudianteProgramaId
-            );
-        }
-
-        if (!$fechaReferencia) {
-            $fechaReferencia = $fechaPago->copy()->startOfMonth();
+            return $cuotaPorMontoExacto;
         }
 
         $numeroSiguiente = $cuotas->max('numero_cuota');
         $numeroSiguiente = $numeroSiguiente ? $numeroSiguiente + 1 : 1;
 
-        $fechaVencimiento = $this->resolverFechaVencimientoDesdePeriodo($fechaReferencia);
+        if (!$fechaReferencia) {
+            $fechaReferencia = $fechaPago->copy()->startOfMonth();
+        }
 
         $nuevaCuota = CuotaProgramaEstudiante::create([
             'estudiante_programa_id' => $estudianteProgramaId,
             'numero_cuota' => $numeroSiguiente,
-            'fecha_vencimiento' => $fechaVencimiento->toDateString(),
+            'fecha_vencimiento' => $fechaReferencia->toDateString(),
             'monto' => $montoPago,
             'estado' => 'pendiente',
         ]);
@@ -922,56 +894,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         ]);
 
         return $nuevaCuota;
-    }
-
-    private function ajustarCuotaDesdeExcel(
-        CuotaProgramaEstudiante $cuota,
-        Carbon $fechaReferencia,
-        float $montoPago,
-        int $numeroFila,
-        int $estudianteProgramaId
-    ): CuotaProgramaEstudiante {
-        $camposActualizar = [];
-
-        if (empty($cuota->fecha_vencimiento)) {
-            $fechaVencimiento = $this->resolverFechaVencimientoDesdePeriodo($fechaReferencia);
-            $camposActualizar['fecha_vencimiento'] = $fechaVencimiento->toDateString();
-        }
-
-        $diferenciaMonto = $cuota->monto - $montoPago;
-        if (abs($diferenciaMonto) > 0.01) {
-            $this->pagosParciales++;
-            $this->totalDiscrepancias += abs($diferenciaMonto);
-
-            Log::info('💡 Ajustando monto de cuota para que coincida con Excel', [
-                'cuota_id' => $cuota->id,
-                'monto_original' => $cuota->monto,
-                'monto_excel' => $montoPago,
-                'diferencia' => round($diferenciaMonto, 2),
-                'fila' => $numeroFila
-            ]);
-
-            $camposActualizar['monto'] = $montoPago;
-        }
-
-        if (!empty($camposActualizar)) {
-            $camposActualizar['updated_at'] = now();
-            $cuota->fill($camposActualizar);
-            $cuota->save();
-
-            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
-
-            $cuota = $cuota->fresh();
-        }
-
-        return $cuota;
-    }
-
-    private function resolverFechaVencimientoDesdePeriodo(Carbon $fechaReferencia): Carbon
-    {
-        $diaReferencia = min(26, $fechaReferencia->daysInMonth);
-
-        return $fechaReferencia->copy()->setDay($diaReferencia);
     }
 
     private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $montoPago)
