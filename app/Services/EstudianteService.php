@@ -142,7 +142,7 @@ class EstudianteService
             return 0;
         }
 
-        $mensualidad = $this->limpiarMonto($row['mensualidad_aprobada'] ?? 0);
+        $mensualidad = $this->limpiarMonto($row['mensualidad_aprobada'] ?? $row['mensualidad'] ?? $row['monto'] ?? 0);
 
         if ($mensualidad <= 0) {
             Log::warning("⚠️ No se pueden generar cuotas: mensualidad = 0", [
@@ -153,6 +153,9 @@ class EstudianteService
 
         // Calcular número de cuotas (por defecto 12 si no se especifica)
         $numCuotas = (int)($row['numero_de_cuotas'] ?? 12);
+        if ($numCuotas <= 0) {
+            $numCuotas = 12;
+        }
 
         // Fecha de inicio basada en mes_inicio o fecha_pago
         $fechaInicio = $this->parseFechaInicio($row);
@@ -260,8 +263,11 @@ class EstudianteService
         // Crear nueva relación
         $fechaInicio = $this->parseFechaInicio($row);
         $numCuotas = (int)($row['numero_de_cuotas'] ?? 12);
+        if ($numCuotas <= 0) {
+            $numCuotas = 12;
+        }
         $fechaFin = $fechaInicio->copy()->addMonths($numCuotas);
-        $mensualidad = $this->limpiarMonto($row['mensualidad_aprobada'] ?? 0);
+        $mensualidad = $this->limpiarMonto($row['mensualidad_aprobada'] ?? $row['mensualidad'] ?? $row['monto'] ?? 0);
 
         $estudiantePrograma = EstudiantePrograma::create([
             'prospecto_id' => $prospecto->id,
@@ -312,6 +318,15 @@ class EstudianteService
 
     private function parseFechaInicio(array $row): Carbon
     {
+        if (!empty($row['mes_pago']) || !empty($row['mes']) || !empty($row['año']) || !empty($row['ano'])) {
+            $mes = $this->normalizeMonth($row['mes_pago'] ?? $row['mes'] ?? null);
+            $anio = $this->normalizeYear($row['año'] ?? $row['ano'] ?? null);
+
+            if ($mes && $anio) {
+                return Carbon::create($anio, $mes, 1)->startOfMonth();
+            }
+        }
+
         // Prioridad: mes_inicio > fecha_pago > fecha predeterminada (2020-04-01)
         if (!empty($row['mes_inicio'])) {
             try {
@@ -333,6 +348,99 @@ class EstudianteService
         // Si no hay fecha de inicio ni fecha de pago, usar fecha predeterminada
         // en lugar de now() para mantener consistencia en migraciones históricas
         return Carbon::parse('2020-04-01')->startOfMonth();
+    }
+
+    private function normalizeMonth($mes): ?int
+    {
+        if (is_null($mes)) {
+            return null;
+        }
+
+        if (is_numeric($mes)) {
+            $numero = (int) $mes;
+            if ($numero >= 1 && $numero <= 12) {
+                return $numero;
+            }
+        }
+
+        $mes = strtolower(trim((string) $mes));
+        $mes = strtr($mes, ['á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u']);
+        $mes = preg_replace('/[^a-z]/', '', $mes);
+
+        $map = [
+            'enero' => 1,
+            'ene' => 1,
+            'january' => 1,
+            'jan' => 1,
+            'febrero' => 2,
+            'feb' => 2,
+            'february' => 2,
+            'marzo' => 3,
+            'mar' => 3,
+            'march' => 3,
+            'abril' => 4,
+            'abr' => 4,
+            'april' => 4,
+            'mayo' => 5,
+            'may' => 5,
+            'junio' => 6,
+            'jun' => 6,
+            'june' => 6,
+            'julio' => 7,
+            'jul' => 7,
+            'july' => 7,
+            'agosto' => 8,
+            'ago' => 8,
+            'august' => 8,
+            'aug' => 8,
+            'septiembre' => 9,
+            'setiembre' => 9,
+            'sep' => 9,
+            'sept' => 9,
+            'september' => 9,
+            'octubre' => 10,
+            'oct' => 10,
+            'october' => 10,
+            'noviembre' => 11,
+            'nov' => 11,
+            'november' => 11,
+            'diciembre' => 12,
+            'dic' => 12,
+            'december' => 12,
+            'dec' => 12,
+        ];
+
+        return $map[$mes] ?? null;
+    }
+
+    private function normalizeYear($anio): ?int
+    {
+        if (is_null($anio)) {
+            return null;
+        }
+
+        if (is_numeric($anio)) {
+            $numero = (int) $anio;
+            if ($numero < 100) {
+                $numero += $numero >= 50 ? 1900 : 2000;
+            }
+
+            if ($numero >= 1900 && $numero <= 2100) {
+                return $numero;
+            }
+        }
+
+        $anio = preg_replace('/[^0-9]/', '', (string) $anio);
+        if ($anio === '') {
+            return null;
+        }
+
+        $numero = (int) $anio;
+        if ($numero < 100) {
+            $numero += $numero >= 50 ? 1900 : 2000;
+        }
+
+        return ($numero >= 1900 && $numero <= 2100) ? $numero : null;
     }
 
     private function normalizeCarnet(?string $carnet): string
