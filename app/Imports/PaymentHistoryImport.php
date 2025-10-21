@@ -846,7 +846,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $periodo = $this->obtenerPeriodoDesdeFila($rowData, $fechaPago);
         $mesObjetivo = $periodo['mes'];
         $anioObjetivo = $periodo['anio'];
-        $fechaReferencia = $periodo['fecha'];
+        $cuotaPorPeriodo = null;
+        $cuotaPorMontoExacto = null;
 
         Log::info('🔍 Buscando cuota basada en periodo declarado en Excel', [
             'estudiante_programa_id' => $estudianteProgramaId,
@@ -887,57 +888,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
                 return $cuotaPorPeriodo;
             }
-
-            $numeroSiguiente = $cuotas->max('numero_cuota');
-            $numeroSiguiente = $numeroSiguiente ? $numeroSiguiente + 1 : 1;
-
-            try {
-                $fechaVencimiento = Carbon::create($anioObjetivo, $mesObjetivo, 1)->endOfMonth();
-            } catch (\Throwable $e) {
-                Log::warning('⚠️ No se pudo normalizar periodo declarado, usando fecha de pago como respaldo', [
-                    'mes' => $mesObjetivo,
-                    'anio' => $anioObjetivo,
-                    'error' => $e->getMessage()
-                ]);
-
-                $fechaVencimiento = $fechaReferencia
-                    ? $fechaReferencia->copy()->endOfMonth()
-                    : ($fechaPago ? $fechaPago->copy()->endOfMonth() : now()->endOfMonth());
-            }
-
-            $nuevaCuota = CuotaProgramaEstudiante::create([
+            Log::warning('⚠️ No se encontró cuota existente que coincida con el periodo declarado', [
                 'estudiante_programa_id' => $estudianteProgramaId,
-                'numero_cuota' => $numeroSiguiente,
-                'fecha_vencimiento' => $fechaVencimiento->toDateString(),
-                'monto' => $montoPago,
-                'estado' => 'pendiente',
-            ]);
-
-            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
-
-            $periodoNormalizado = $this->formatearPeriodo($mesObjetivo, $anioObjetivo);
-
-            Log::info('🆕 Cuota creada automáticamente desde el Excel', [
-                'cuota_id' => $nuevaCuota->id,
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'numero_cuota' => $nuevaCuota->numero_cuota,
-                'fecha_vencimiento' => $nuevaCuota->fecha_vencimiento,
-                'monto' => $nuevaCuota->monto,
+                'mes' => $mesObjetivo,
+                'anio' => $anioObjetivo,
+                'monto_pago' => $montoPago,
                 'fila' => $numeroFila,
-                'periodo_pago' => $periodoNormalizado
+                'tipo_archivo' => $this->tipoArchivo,
             ]);
-
-            $this->registrarDesfasePeriodo(
-                $fechaPago,
-                $mesObjetivo,
-                $anioObjetivo,
-                $estudianteProgramaId,
-                $numeroFila,
-                'cuota_creada',
-                $nuevaCuota->id
-            );
-
-            return $nuevaCuota;
         }
 
         $cuotaPorMontoExacto = $cuotas->first(function ($cuota) use ($montoPago) {
@@ -952,36 +910,27 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             return $cuotaPorMontoExacto;
         }
 
-        $numeroSiguiente = $cuotas->max('numero_cuota');
-        $numeroSiguiente = $numeroSiguiente ? $numeroSiguiente + 1 : 1;
-
-        if (!$fechaReferencia) {
-            $fechaReferencia = $fechaPago ? $fechaPago->copy()->startOfMonth() : now()->startOfMonth();
+        if ($mesObjetivo && $anioObjetivo) {
+            $this->registrarDesfasePeriodo(
+                $fechaPago,
+                $mesObjetivo,
+                $anioObjetivo,
+                $estudianteProgramaId,
+                $numeroFila,
+                'sin_coincidencia'
+            );
         }
 
-        $fechaVencimiento = $fechaReferencia->copy()->endOfMonth();
-
-        $nuevaCuota = CuotaProgramaEstudiante::create([
+        Log::warning('⚠️ No se encontró cuota pendiente compatible. No se generará automáticamente.', [
             'estudiante_programa_id' => $estudianteProgramaId,
-            'numero_cuota' => $numeroSiguiente,
-            'fecha_vencimiento' => $fechaVencimiento->toDateString(),
-            'monto' => $montoPago,
-            'estado' => 'pendiente',
-        ]);
-
-        unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
-
-        Log::info('🆕 Cuota creada automáticamente desde el Excel', [
-            'cuota_id' => $nuevaCuota->id,
-            'estudiante_programa_id' => $estudianteProgramaId,
-            'numero_cuota' => $nuevaCuota->numero_cuota,
-            'fecha_vencimiento' => $nuevaCuota->fecha_vencimiento,
-            'monto' => $nuevaCuota->monto,
+            'mes' => $mesObjetivo,
+            'anio' => $anioObjetivo,
+            'monto_pago' => $montoPago,
             'fila' => $numeroFila,
-            'periodo_pago' => $fechaVencimiento->format('Y-m')
+            'tipo_archivo' => $this->tipoArchivo,
         ]);
 
-        return $nuevaCuota;
+        return null;
     }
 
     private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $montoPago)
@@ -1488,6 +1437,15 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
      */
     private function generarCuotasSiFaltan(int $estudianteProgramaId, ?array $row = null)
     {
+        if ($this->tipoArchivo === 'cardex_directo') {
+            Log::info('⏭️ Omitiendo generación automática de cuotas para importación histórica', [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'tipo_archivo' => $this->tipoArchivo,
+            ]);
+
+            return false;
+        }
+
         try {
             // Obtener datos del estudiante_programa
             $estudiantePrograma = DB::table('estudiante_programa')
