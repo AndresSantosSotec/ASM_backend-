@@ -781,12 +781,22 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
                 // ✅ Actualizar cuota y conciliar si existe cuota
                 if ($cuota) {
-                    $this->actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $monto);
+                    $this->actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $monto);
                 } else {
                     Log::info("⏭️ Saltando actualización de cuota (no se asignó cuota)", [
                         'kardex_id' => $kardex->id,
                         'fila' => $numeroFila
                     ]);
+
+                    if ($this->tipoArchivo === 'cardex_directo') {
+                        Log::info('🔄 Creando conciliación para kardex sin cuota (importación directa)', [
+                            'kardex_id' => $kardex->id,
+                            'fila' => $numeroFila,
+                            'motivo' => 'cardex_directo_sin_cuota'
+                        ]);
+
+                        $this->crearConciliacionDesdeKardex($kardex, 'sin_cuota_cardex_directo');
+                    }
                 }
 
                 $this->procesados++;
@@ -933,7 +943,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return null;
     }
 
-    private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $montoPago)
+    private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $montoPago)
     {
         $diferencia = $cuota->monto - $montoPago;
 
@@ -971,36 +981,51 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ]);
         }
 
+        $this->crearConciliacionDesdeKardex($kardex, 'actualizacion_cuota');
+    }
+
+    private function crearConciliacionDesdeKardex($kardex, string $contexto)
+    {
+        $bancoOriginal = $kardex->banco ?? '';
+        $bancoNormalizado = $this->normalizeBank($bancoOriginal);
+        $boletaNormalizada = $this->normalizeReceiptNumber($kardex->numero_boleta);
+        $boletaNormalizadaFinal = $boletaNormalizada !== 'N/A' ? $boletaNormalizada : 'HIST' . $kardex->id;
+        $referenciaOriginal = $kardex->numero_boleta ?: 'HIST-' . $kardex->id;
+        $referenciaNormalizada = $boletaNormalizadaFinal;
+        $fechaYmd = Carbon::parse($kardex->fecha_pago)->format('Y-m-d');
+        $fingerprint = $this->makeFingerprint($bancoNormalizado, $referenciaNormalizada, $kardex->monto_pagado, $fechaYmd);
+
         Log::info("🔍 PASO 6: Creando registro de conciliación", [
             'kardex_id' => $kardex->id,
-            'banco' => $banco,
+            'banco' => $bancoOriginal,
+            'banco_normalizado' => $bancoNormalizado,
             'boleta' => $kardex->numero_boleta,
-            'monto' => $kardex->monto_pagado
+            'boleta_normalizada' => $boletaNormalizada,
+            'boleta_normalizada_final' => $boletaNormalizadaFinal,
+            'monto' => $kardex->monto_pagado,
+            'contexto' => $contexto,
         ]);
-
-        $bancoNormalizado = $this->normalizeBank($banco);
-        $boletaNormalizada = $this->normalizeReceiptNumber($kardex->numero_boleta);
-        $fechaYmd = Carbon::parse($kardex->fecha_pago)->format('Y-m-d');
-        $fingerprint = $this->makeFingerprint($bancoNormalizado, $boletaNormalizada, $kardex->monto_pagado, $fechaYmd);
 
         if (ReconciliationRecord::where('fingerprint', $fingerprint)->exists()) {
             Log::warning("⚠️ Conciliación duplicada detectada", [
                 'fingerprint' => $fingerprint,
-                'boleta' => $kardex->numero_boleta
+                'boleta' => $kardex->numero_boleta,
+                'contexto' => $contexto,
             ]);
             return;
         }
 
         try {
             ReconciliationRecord::create([
-                'bank' => $banco,
+                'bank' => $bancoOriginal !== '' ? $bancoOriginal : 'N/A',
                 'bank_normalized' => $bancoNormalizado,
-                'reference' => $kardex->numero_boleta ?: 'HIST-' . $kardex->id,
-                'reference_normalized' => $boletaNormalizada ?: 'HIST' . $kardex->id,
+                'reference' => $referenciaOriginal,
+                'reference_normalized' => $referenciaNormalizada,
                 'amount' => $kardex->monto_pagado,
                 'date' => $fechaYmd,
                 'fingerprint' => $fingerprint,
                 'status' => 'conciliado',
+                'uploaded_by' => $this->uploaderId,
                 'kardex_pago_id' => $kardex->id,
             ]);
 
@@ -1009,13 +1034,15 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             Log::info("✅ PASO 6 EXITOSO: Conciliación creada", [
                 'kardex_id' => $kardex->id,
                 'fingerprint' => $fingerprint,
-                'status' => 'conciliado'
+                'status' => 'conciliado',
+                'contexto' => $contexto,
             ]);
         } catch (\Throwable $e) {
             Log::error("❌ PASO 6 FALLIDO: Error creando conciliación", [
                 'error' => $e->getMessage(),
                 'kardex_id' => $kardex->id,
                 'fingerprint' => $fingerprint,
+                'contexto' => $contexto,
                 'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 3)
             ]);
         }
