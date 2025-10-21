@@ -6,6 +6,7 @@ use Tests\TestCase;
 use App\Imports\PaymentHistoryImport;
 use Illuminate\Support\Collection;
 use Carbon\Carbon;
+use Mockery;
 
 class PaymentHistoryImportTest extends TestCase
 {
@@ -167,7 +168,7 @@ class PaymentHistoryImportTest extends TestCase
     public function test_normalizar_boleta_handles_compound_receipts()
     {
         $import = $this->getImportInstance();
-        
+
         $reflection = new \ReflectionMethod($import, 'normalizarBoleta');
         $reflection->setAccessible(true);
         
@@ -175,6 +176,19 @@ class PaymentHistoryImportTest extends TestCase
         $this->assertEquals('545109', $reflection->invoke($import, '545109 / 1740192'));
         $this->assertEquals('12345', $reflection->invoke($import, '12345'));
         $this->assertEquals('ABC123', $reflection->invoke($import, 'abc-123'));
+    }
+
+    public function test_formatear_periodo_returns_normalized_string()
+    {
+        $import = $this->getImportInstance();
+
+        $reflection = new \ReflectionMethod($import, 'formatearPeriodo');
+        $reflection->setAccessible(true);
+
+        $this->assertEquals('2021-07', $reflection->invoke($import, 7, 2021));
+        $this->assertEquals('2023-12', $reflection->invoke($import, 12, 2023));
+        $this->assertNull($reflection->invoke($import, null, 2023));
+        $this->assertNull($reflection->invoke($import, 5, null));
     }
 
 
@@ -347,18 +361,78 @@ class PaymentHistoryImportTest extends TestCase
     public function test_fingerprint_distinguishes_different_dates()
     {
         // Test that the new fingerprint format distinguishes payments on different dates
-        
+
         $banco = 'BI';
         $boleta = '901002';
         $estudiante = 5;
         $fecha1 = '2020-08-01';
         $fecha2 = '2020-09-01';
-        
+
         // Calculate fingerprints
         $fp1 = hash('sha256', $banco.'|'.$boleta.'|'.$estudiante.'|'.$fecha1);
         $fp2 = hash('sha256', $banco.'|'.$boleta.'|'.$estudiante.'|'.$fecha2);
-        
+
         // Fingerprints should be different for different dates
         $this->assertNotEquals($fp1, $fp2, 'Fingerprints should differ when payment dates differ');
+    }
+
+    public function test_buscar_cuota_flexible_creates_periodo_specific_quota()
+    {
+        $import = $this->getImportInstance();
+
+        $cuotasIniciales = collect([
+            (object) [
+                'id' => 10,
+                'numero_cuota' => 1,
+                'fecha_vencimiento' => '2021-06-30',
+                'monto' => 1500.00,
+                'estado' => 'pendiente',
+            ],
+            (object) [
+                'id' => 11,
+                'numero_cuota' => 2,
+                'fecha_vencimiento' => '2021-08-31',
+                'monto' => 1500.00,
+                'estado' => 'pendiente',
+            ],
+        ]);
+
+        $cacheProperty = new \ReflectionProperty($import, 'cuotasPorEstudianteCache');
+        $cacheProperty->setAccessible(true);
+        $cacheProperty->setValue($import, [123 => $cuotasIniciales]);
+
+        $mock = Mockery::mock('alias:App\\Models\\CuotaProgramaEstudiante');
+        $mock->shouldReceive('create')->once()->with(Mockery::on(function ($data) {
+            $this->assertEquals(123, $data['estudiante_programa_id']);
+            $this->assertEquals(3, $data['numero_cuota']);
+            $this->assertEquals('2021-07-31', $data['fecha_vencimiento']);
+            $this->assertEquals(1500.00, $data['monto']);
+            $this->assertEquals('pendiente', $data['estado']);
+            return true;
+        }))->andReturn((object) [
+            'id' => 99,
+            'numero_cuota' => 3,
+            'fecha_vencimiento' => '2021-07-31',
+            'monto' => 1500.00,
+            'estado' => 'pendiente',
+        ]);
+
+        $metodo = new \ReflectionMethod($import, 'buscarCuotaFlexible');
+        $metodo->setAccessible(true);
+
+        $row = [
+            'mes_pago' => 'Julio',
+            'año' => '2021',
+        ];
+
+        $fechaPago = Carbon::parse('2023-01-15');
+
+        try {
+            $resultado = $metodo->invoke($import, 123, $row, $fechaPago, 1500.00, 42);
+            $this->assertEquals(99, $resultado->id);
+            $this->assertEquals('2021-07-31', $resultado->fecha_vencimiento);
+        } finally {
+            Mockery::close();
+        }
     }
 }

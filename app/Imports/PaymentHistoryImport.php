@@ -17,6 +17,7 @@ use App\Models\ReconciliationRecord;
 use App\Models\PrecioPrograma;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class PaymentHistoryImport implements ToCollection, WithHeadingRow
@@ -41,6 +42,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     private array $cuotasPorEstudianteCache = [];
     private array $adicionalEstudianteCache = [];
     private ?string $columnaMensualidad = null;
+
+    private ?bool $kardexTienePeriodoPago = null;
 
     // 🆕 NUEVO: Servicio de estudiantes
     private EstudianteService $estudianteService;
@@ -549,6 +552,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $ano = trim((string) $this->obtenerValorFila($rowArray, ['año', 'ano'], ''));
         $estatus = trim((string) $this->obtenerValorFila($rowArray, ['estatus'], ''));
 
+        $periodoPagoInfo = $this->obtenerPeriodoDesdeFila($rowArray, $fechaPago);
+        $periodoPagoString = $this->formatearPeriodo($periodoPagoInfo['mes'], $periodoPagoInfo['anio']);
+
         Log::info("📄 Procesando fila {$numeroFila}", [
             'carnet' => $carnet,
             'nombre' => $nombreEstudiante,
@@ -560,6 +566,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'plan_estudios' => $planEstudios,
             'mes_pago' => $mesPago,
             'ano' => $ano,
+            'periodo_mes_normalizado' => $periodoPagoInfo['mes'],
+            'periodo_anio_normalizado' => $periodoPagoInfo['anio'],
         ]);
 
         // ✅ Validaciones básicas mejoradas
@@ -608,7 +616,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $ano,
                 $planEstudios,
                 $estatus,
-                $rowArray
+                $rowArray,
+                $periodoPagoString,
+                $periodoPagoInfo
             ) {
                 // ✅ Verificar duplicado por boleta y estudiante
                 $kardexExistente = KardexPago::where('numero_boleta', $boleta)
@@ -724,18 +734,20 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'banco' => $banco
                 ]);
 
+                $periodoDescripcion = $periodoPagoString ?? 'SIN_PERIODO';
                 $observaciones = sprintf(
-                    "%s | Estudiante: %s | Mes: %s | Año: %s | Tipo: %s | Migración fila %d | Programa: %s",
+                    "%s | Estudiante: %s | Mes: %s | Año: %s | Periodo normalizado: %s | Tipo: %s | Migración fila %d | Programa: %s",
                     $concepto,
                     $nombreEstudiante,
                     $mesPago,
                     $ano !== '' ? $ano : $fechaPago->format('Y'),
+                    $periodoDescripcion,
                     $tipoPagoOriginal,
                     $numeroFila,
                     $programaAsignado->nombre_programa ?? 'N/A'
                 );
 
-                $kardex = KardexPago::create([
+                $kardexData = [
                     'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
                     'cuota_id' => $cuota ? $cuota->id : null,
                     'numero_boleta' => $boleta,
@@ -745,7 +757,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'banco' => $banco,
                     'estado_pago' => 'aprobado',
                     'observaciones' => $observaciones,
-                ]);
+                ];
+
+                if ($periodoPagoString && $this->kardexSoportaPeriodoPago()) {
+                    $kardexData['periodo_pago'] = $periodoPagoString;
+                }
+
+                $kardex = KardexPago::create($kardexData);
 
                 $this->kardexCreados++;
                 $this->totalAmount += $monto;
@@ -757,7 +775,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'programa' => $programaAsignado->nombre_programa ?? 'N/A',
                     'numero_boleta' => $boleta,
                     'monto' => $monto,
-                    'fila' => $numeroFila
+                    'fila' => $numeroFila,
+                    'periodo_pago' => $periodoPagoString
                 ]);
 
                 // ✅ Actualizar cuota y conciliar si existe cuota
@@ -786,7 +805,10 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'plan_estudios' => $planEstudios,
                     'estatus' => $estatus,
                     'mes_pago' => $mesPago,
-                    'ano' => $ano !== '' ? $ano : $fechaPago->format('Y')
+                    'ano' => $ano !== '' ? $ano : $fechaPago->format('Y'),
+                    'periodo_pago' => $periodoPagoString,
+                    'periodo_mes_normalizado' => $periodoPagoInfo['mes'],
+                    'periodo_anio_normalizado' => $periodoPagoInfo['anio']
                 ];
             });
         } catch (\Throwable $ex) {
@@ -849,10 +871,73 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 Log::info('✅ Cuota encontrada por coincidencia de periodo', [
                     'cuota_id' => $cuotaPorPeriodo->id,
                     'fecha_vencimiento' => $cuotaPorPeriodo->fecha_vencimiento,
-                    'monto_cuota' => $cuotaPorPeriodo->monto
+                    'monto_cuota' => $cuotaPorPeriodo->monto,
+                    'periodo_pago' => $this->formatearPeriodo($mesObjetivo, $anioObjetivo)
                 ]);
+
+                $this->registrarDesfasePeriodo(
+                    $fechaPago,
+                    $mesObjetivo,
+                    $anioObjetivo,
+                    $estudianteProgramaId,
+                    $numeroFila,
+                    'coincidencia_existente',
+                    $cuotaPorPeriodo->id
+                );
+
                 return $cuotaPorPeriodo;
             }
+
+            $numeroSiguiente = $cuotas->max('numero_cuota');
+            $numeroSiguiente = $numeroSiguiente ? $numeroSiguiente + 1 : 1;
+
+            try {
+                $fechaVencimiento = Carbon::create($anioObjetivo, $mesObjetivo, 1)->endOfMonth();
+            } catch (\Throwable $e) {
+                Log::warning('⚠️ No se pudo normalizar periodo declarado, usando fecha de pago como respaldo', [
+                    'mes' => $mesObjetivo,
+                    'anio' => $anioObjetivo,
+                    'error' => $e->getMessage()
+                ]);
+
+                $fechaVencimiento = $fechaReferencia
+                    ? $fechaReferencia->copy()->endOfMonth()
+                    : ($fechaPago ? $fechaPago->copy()->endOfMonth() : now()->endOfMonth());
+            }
+
+            $nuevaCuota = CuotaProgramaEstudiante::create([
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'numero_cuota' => $numeroSiguiente,
+                'fecha_vencimiento' => $fechaVencimiento->toDateString(),
+                'monto' => $montoPago,
+                'estado' => 'pendiente',
+            ]);
+
+            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+            $periodoNormalizado = $this->formatearPeriodo($mesObjetivo, $anioObjetivo);
+
+            Log::info('🆕 Cuota creada automáticamente desde el Excel', [
+                'cuota_id' => $nuevaCuota->id,
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'numero_cuota' => $nuevaCuota->numero_cuota,
+                'fecha_vencimiento' => $nuevaCuota->fecha_vencimiento,
+                'monto' => $nuevaCuota->monto,
+                'fila' => $numeroFila,
+                'periodo_pago' => $periodoNormalizado
+            ]);
+
+            $this->registrarDesfasePeriodo(
+                $fechaPago,
+                $mesObjetivo,
+                $anioObjetivo,
+                $estudianteProgramaId,
+                $numeroFila,
+                'cuota_creada',
+                $nuevaCuota->id
+            );
+
+            return $nuevaCuota;
         }
 
         $cuotaPorMontoExacto = $cuotas->first(function ($cuota) use ($montoPago) {
@@ -871,13 +956,15 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $numeroSiguiente = $numeroSiguiente ? $numeroSiguiente + 1 : 1;
 
         if (!$fechaReferencia) {
-            $fechaReferencia = $fechaPago->copy()->startOfMonth();
+            $fechaReferencia = $fechaPago ? $fechaPago->copy()->startOfMonth() : now()->startOfMonth();
         }
+
+        $fechaVencimiento = $fechaReferencia->copy()->endOfMonth();
 
         $nuevaCuota = CuotaProgramaEstudiante::create([
             'estudiante_programa_id' => $estudianteProgramaId,
             'numero_cuota' => $numeroSiguiente,
-            'fecha_vencimiento' => $fechaReferencia->toDateString(),
+            'fecha_vencimiento' => $fechaVencimiento->toDateString(),
             'monto' => $montoPago,
             'estado' => 'pendiente',
         ]);
@@ -890,7 +977,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'numero_cuota' => $nuevaCuota->numero_cuota,
             'fecha_vencimiento' => $nuevaCuota->fecha_vencimiento,
             'monto' => $nuevaCuota->monto,
-            'fila' => $numeroFila
+            'fila' => $numeroFila,
+            'periodo_pago' => $fechaVencimiento->format('Y-m')
         ]);
 
         return $nuevaCuota;
@@ -1613,6 +1701,61 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'anio' => $anio,
             'fecha' => $fecha,
         ];
+    }
+
+    private function formatearPeriodo(?int $mes, ?int $anio): ?string
+    {
+        if (!$mes || !$anio) {
+            return null;
+        }
+
+        return sprintf('%04d-%02d', $anio, $mes);
+    }
+
+    private function registrarDesfasePeriodo(
+        ?Carbon $fechaPago,
+        ?int $mesObjetivo,
+        ?int $anioObjetivo,
+        int $estudianteProgramaId,
+        int $numeroFila,
+        string $contexto,
+        ?int $cuotaId = null
+    ): void {
+        if (!$fechaPago || !$mesObjetivo || !$anioObjetivo) {
+            return;
+        }
+
+        if ((int) $fechaPago->format('m') === $mesObjetivo && (int) $fechaPago->format('Y') === $anioObjetivo) {
+            return;
+        }
+
+        Log::info('📌 Diferencia entre fecha de pago y periodo objetivo', [
+            'estudiante_programa_id' => $estudianteProgramaId,
+            'fila' => $numeroFila,
+            'fecha_pago_real' => $fechaPago->toDateString(),
+            'periodo_objetivo' => sprintf('%04d-%02d', $anioObjetivo, $mesObjetivo),
+            'contexto' => $contexto,
+            'cuota_id' => $cuotaId,
+        ]);
+    }
+
+    private function kardexSoportaPeriodoPago(): bool
+    {
+        if ($this->kardexTienePeriodoPago !== null) {
+            return $this->kardexTienePeriodoPago;
+        }
+
+        try {
+            $this->kardexTienePeriodoPago = Schema::hasColumn('kardex_pagos', 'periodo_pago');
+        } catch (\Throwable $e) {
+            Log::warning('⚠️ No se pudo verificar la columna periodo_pago en kardex_pagos', [
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->kardexTienePeriodoPago = false;
+        }
+
+        return $this->kardexTienePeriodoPago;
     }
 
     private function normalizarMes($mes): ?int
