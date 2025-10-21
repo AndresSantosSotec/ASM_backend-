@@ -781,12 +781,22 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
                 // ✅ Actualizar cuota y conciliar si existe cuota
                 if ($cuota) {
-                    $this->actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $monto);
+                    $this->actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $monto);
                 } else {
                     Log::info("⏭️ Saltando actualización de cuota (no se asignó cuota)", [
                         'kardex_id' => $kardex->id,
                         'fila' => $numeroFila
                     ]);
+
+                    if ($this->tipoArchivo === 'cardex_directo') {
+                        Log::info('🔄 Creando conciliación para kardex sin cuota (importación directa)', [
+                            'kardex_id' => $kardex->id,
+                            'fila' => $numeroFila,
+                            'motivo' => 'cardex_directo_sin_cuota'
+                        ]);
+
+                        $this->crearConciliacionDesdeKardex($kardex, 'sin_cuota_cardex_directo');
+                    }
                 }
 
                 $this->procesados++;
@@ -846,7 +856,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $periodo = $this->obtenerPeriodoDesdeFila($rowData, $fechaPago);
         $mesObjetivo = $periodo['mes'];
         $anioObjetivo = $periodo['anio'];
-        $fechaReferencia = $periodo['fecha'];
+        $cuotaPorPeriodo = null;
+        $cuotaPorMontoExacto = null;
 
         Log::info('🔍 Buscando cuota basada en periodo declarado en Excel', [
             'estudiante_programa_id' => $estudianteProgramaId,
@@ -887,57 +898,14 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
                 return $cuotaPorPeriodo;
             }
-
-            $numeroSiguiente = $cuotas->max('numero_cuota');
-            $numeroSiguiente = $numeroSiguiente ? $numeroSiguiente + 1 : 1;
-
-            try {
-                $fechaVencimiento = Carbon::create($anioObjetivo, $mesObjetivo, 1)->endOfMonth();
-            } catch (\Throwable $e) {
-                Log::warning('⚠️ No se pudo normalizar periodo declarado, usando fecha de pago como respaldo', [
-                    'mes' => $mesObjetivo,
-                    'anio' => $anioObjetivo,
-                    'error' => $e->getMessage()
-                ]);
-
-                $fechaVencimiento = $fechaReferencia
-                    ? $fechaReferencia->copy()->endOfMonth()
-                    : ($fechaPago ? $fechaPago->copy()->endOfMonth() : now()->endOfMonth());
-            }
-
-            $nuevaCuota = CuotaProgramaEstudiante::create([
+            Log::warning('⚠️ No se encontró cuota existente que coincida con el periodo declarado', [
                 'estudiante_programa_id' => $estudianteProgramaId,
-                'numero_cuota' => $numeroSiguiente,
-                'fecha_vencimiento' => $fechaVencimiento->toDateString(),
-                'monto' => $montoPago,
-                'estado' => 'pendiente',
-            ]);
-
-            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
-
-            $periodoNormalizado = $this->formatearPeriodo($mesObjetivo, $anioObjetivo);
-
-            Log::info('🆕 Cuota creada automáticamente desde el Excel', [
-                'cuota_id' => $nuevaCuota->id,
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'numero_cuota' => $nuevaCuota->numero_cuota,
-                'fecha_vencimiento' => $nuevaCuota->fecha_vencimiento,
-                'monto' => $nuevaCuota->monto,
+                'mes' => $mesObjetivo,
+                'anio' => $anioObjetivo,
+                'monto_pago' => $montoPago,
                 'fila' => $numeroFila,
-                'periodo_pago' => $periodoNormalizado
+                'tipo_archivo' => $this->tipoArchivo,
             ]);
-
-            $this->registrarDesfasePeriodo(
-                $fechaPago,
-                $mesObjetivo,
-                $anioObjetivo,
-                $estudianteProgramaId,
-                $numeroFila,
-                'cuota_creada',
-                $nuevaCuota->id
-            );
-
-            return $nuevaCuota;
         }
 
         $cuotaPorMontoExacto = $cuotas->first(function ($cuota) use ($montoPago) {
@@ -952,39 +920,30 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             return $cuotaPorMontoExacto;
         }
 
-        $numeroSiguiente = $cuotas->max('numero_cuota');
-        $numeroSiguiente = $numeroSiguiente ? $numeroSiguiente + 1 : 1;
-
-        if (!$fechaReferencia) {
-            $fechaReferencia = $fechaPago ? $fechaPago->copy()->startOfMonth() : now()->startOfMonth();
+        if ($mesObjetivo && $anioObjetivo) {
+            $this->registrarDesfasePeriodo(
+                $fechaPago,
+                $mesObjetivo,
+                $anioObjetivo,
+                $estudianteProgramaId,
+                $numeroFila,
+                'sin_coincidencia'
+            );
         }
 
-        $fechaVencimiento = $fechaReferencia->copy()->endOfMonth();
-
-        $nuevaCuota = CuotaProgramaEstudiante::create([
+        Log::warning('⚠️ No se encontró cuota pendiente compatible. No se generará automáticamente.', [
             'estudiante_programa_id' => $estudianteProgramaId,
-            'numero_cuota' => $numeroSiguiente,
-            'fecha_vencimiento' => $fechaVencimiento->toDateString(),
-            'monto' => $montoPago,
-            'estado' => 'pendiente',
-        ]);
-
-        unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
-
-        Log::info('🆕 Cuota creada automáticamente desde el Excel', [
-            'cuota_id' => $nuevaCuota->id,
-            'estudiante_programa_id' => $estudianteProgramaId,
-            'numero_cuota' => $nuevaCuota->numero_cuota,
-            'fecha_vencimiento' => $nuevaCuota->fecha_vencimiento,
-            'monto' => $nuevaCuota->monto,
+            'mes' => $mesObjetivo,
+            'anio' => $anioObjetivo,
+            'monto_pago' => $montoPago,
             'fila' => $numeroFila,
-            'periodo_pago' => $fechaVencimiento->format('Y-m')
+            'tipo_archivo' => $this->tipoArchivo,
         ]);
 
-        return $nuevaCuota;
+        return null;
     }
 
-    private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $montoPago)
+    private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $montoPago)
     {
         $diferencia = $cuota->monto - $montoPago;
 
@@ -1022,36 +981,51 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             ]);
         }
 
+        $this->crearConciliacionDesdeKardex($kardex, 'actualizacion_cuota');
+    }
+
+    private function crearConciliacionDesdeKardex($kardex, string $contexto)
+    {
+        $bancoOriginal = $kardex->banco ?? '';
+        $bancoNormalizado = $this->normalizeBank($bancoOriginal);
+        $boletaNormalizada = $this->normalizeReceiptNumber($kardex->numero_boleta);
+        $boletaNormalizadaFinal = $boletaNormalizada !== 'N/A' ? $boletaNormalizada : 'HIST' . $kardex->id;
+        $referenciaOriginal = $kardex->numero_boleta ?: 'HIST-' . $kardex->id;
+        $referenciaNormalizada = $boletaNormalizadaFinal;
+        $fechaYmd = Carbon::parse($kardex->fecha_pago)->format('Y-m-d');
+        $fingerprint = $this->makeFingerprint($bancoNormalizado, $referenciaNormalizada, $kardex->monto_pagado, $fechaYmd);
+
         Log::info("🔍 PASO 6: Creando registro de conciliación", [
             'kardex_id' => $kardex->id,
-            'banco' => $banco,
+            'banco' => $bancoOriginal,
+            'banco_normalizado' => $bancoNormalizado,
             'boleta' => $kardex->numero_boleta,
-            'monto' => $kardex->monto_pagado
+            'boleta_normalizada' => $boletaNormalizada,
+            'boleta_normalizada_final' => $boletaNormalizadaFinal,
+            'monto' => $kardex->monto_pagado,
+            'contexto' => $contexto,
         ]);
-
-        $bancoNormalizado = $this->normalizeBank($banco);
-        $boletaNormalizada = $this->normalizeReceiptNumber($kardex->numero_boleta);
-        $fechaYmd = Carbon::parse($kardex->fecha_pago)->format('Y-m-d');
-        $fingerprint = $this->makeFingerprint($bancoNormalizado, $boletaNormalizada, $kardex->monto_pagado, $fechaYmd);
 
         if (ReconciliationRecord::where('fingerprint', $fingerprint)->exists()) {
             Log::warning("⚠️ Conciliación duplicada detectada", [
                 'fingerprint' => $fingerprint,
-                'boleta' => $kardex->numero_boleta
+                'boleta' => $kardex->numero_boleta,
+                'contexto' => $contexto,
             ]);
             return;
         }
 
         try {
             ReconciliationRecord::create([
-                'bank' => $banco,
+                'bank' => $bancoOriginal !== '' ? $bancoOriginal : 'N/A',
                 'bank_normalized' => $bancoNormalizado,
-                'reference' => $kardex->numero_boleta ?: 'HIST-' . $kardex->id,
-                'reference_normalized' => $boletaNormalizada ?: 'HIST' . $kardex->id,
+                'reference' => $referenciaOriginal,
+                'reference_normalized' => $referenciaNormalizada,
                 'amount' => $kardex->monto_pagado,
                 'date' => $fechaYmd,
                 'fingerprint' => $fingerprint,
                 'status' => 'conciliado',
+                'uploaded_by' => $this->uploaderId,
                 'kardex_pago_id' => $kardex->id,
             ]);
 
@@ -1060,13 +1034,15 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             Log::info("✅ PASO 6 EXITOSO: Conciliación creada", [
                 'kardex_id' => $kardex->id,
                 'fingerprint' => $fingerprint,
-                'status' => 'conciliado'
+                'status' => 'conciliado',
+                'contexto' => $contexto,
             ]);
         } catch (\Throwable $e) {
             Log::error("❌ PASO 6 FALLIDO: Error creando conciliación", [
                 'error' => $e->getMessage(),
                 'kardex_id' => $kardex->id,
                 'fingerprint' => $fingerprint,
+                'contexto' => $contexto,
                 'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 3)
             ]);
         }
@@ -1488,6 +1464,15 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
      */
     private function generarCuotasSiFaltan(int $estudianteProgramaId, ?array $row = null)
     {
+        if ($this->tipoArchivo === 'cardex_directo') {
+            Log::info('⏭️ Omitiendo generación automática de cuotas para importación histórica', [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'tipo_archivo' => $this->tipoArchivo,
+            ]);
+
+            return false;
+        }
+
         try {
             // Obtener datos del estudiante_programa
             $estudiantePrograma = DB::table('estudiante_programa')
