@@ -338,19 +338,19 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $columnasRequeridas = [
             'carnet',
             'nombre_estudiante',
-            'numero_boleta',
-            'monto',
-            'fecha_pago'
-        ];
-
-        $columnasOpcionales = [
             'plan_estudios',
             'estatus',
+            'numero_boleta',
+            'monto',
+            'fecha_pago',
             'banco',
             'concepto',
             'tipo_pago',
             'mes_pago',
             'ano',
+        ];
+
+        $columnasOpcionales = [
             'mes_inicio',
             'fila_origen',
             'mensualidad_aprobada',
@@ -372,32 +372,47 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
 
         $columnasEncontradas = array_keys($primeraFila->toArray());
-        $columnasFaltantes = array_diff($columnasRequeridas, $columnasEncontradas);
-
-        $this->columnaMensualidad = null;
-        $mapaColumnasNormalizadas = [];
+        $normalizadasEncontradas = [];
         foreach ($columnasEncontradas as $columna) {
-            $mapaColumnasNormalizadas[strtolower(trim($columna))] = $columna;
+            $normalizadasEncontradas[$this->normalizarClave($columna)] = $columna;
         }
 
+        $faltantes = [];
+        foreach ($columnasRequeridas as $columnaRequerida) {
+            $clave = $this->normalizarClave($columnaRequerida);
+            if (!array_key_exists($clave, $normalizadasEncontradas)) {
+                $faltantes[] = $columnaRequerida;
+            }
+        }
+
+        // Detectar columna de mensualidad (opcional)
+        $this->columnaMensualidad = null;
         foreach ([
             'mensualidad_aprobada',
             'mensualidad',
             'mensualidad aprobada',
             'mensualidad_aprobado',
         ] as $aliasMensualidad) {
-            $aliasNormalizado = strtolower($aliasMensualidad);
-            if (isset($mapaColumnasNormalizadas[$aliasNormalizado])) {
-                $this->columnaMensualidad = $mapaColumnasNormalizadas[$aliasNormalizado];
+            $clave = $this->normalizarClave($aliasMensualidad);
+            if (isset($normalizadasEncontradas[$clave])) {
+                $this->columnaMensualidad = $normalizadasEncontradas[$clave];
                 break;
             }
         }
 
+        $opcionalesEncontradas = [];
+        foreach ($columnasOpcionales as $opcional) {
+            $clave = $this->normalizarClave($opcional);
+            if (isset($normalizadasEncontradas[$clave])) {
+                $opcionalesEncontradas[] = $normalizadasEncontradas[$clave];
+            }
+        }
+
         return [
-            'valido' => empty($columnasFaltantes),
-            'faltantes' => array_values($columnasFaltantes),
+            'valido' => empty($faltantes),
+            'faltantes' => $faltantes,
             'encontradas' => $columnasEncontradas,
-            'opcionales_encontradas' => array_intersect($columnasOpcionales, $columnasEncontradas),
+            'opcionales_encontradas' => $opcionalesEncontradas,
             'columna_mensualidad_detectada' => $this->columnaMensualidad,
         ];
     }
@@ -516,23 +531,23 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     private function procesarPagoIndividual($row, Collection $programasEstudiante, $numeroFila)
     {
-        // ✅ Extraer y normalizar datos
-        $carnet = $this->normalizarCarnet($row['carnet']);
-        $nombreEstudiante = trim($row['nombre_estudiante'] ?? '');
-        $boleta = $this->normalizarBoleta($row['numero_boleta'] ?? '');
-        $monto = $this->normalizarMonto($row['monto'] ?? 0);
-        $fechaPago = $this->normalizarFecha($row['fecha_pago'] ?? null);
-        $bancoRaw = trim((string)($row['banco'] ?? ''));
-        $banco = empty($bancoRaw) ? 'EFECTIVO' : $bancoRaw;
-        $concepto = trim((string)($row['concepto'] ?? 'Cuota mensual'));
-        $mesPago = trim((string)($row['mes_pago'] ?? ''));
-        $mesInicio = trim((string)($row['mes_inicio'] ?? ''));
-        $mensualidadAprobada = $this->normalizarMonto($row['mensualidad_aprobada'] ?? 0);
+        $rowArray = $row instanceof Collection ? $row->toArray() : $row;
 
-        // 🆕 NUEVAS COLUMNAS
-        $tipoPago = trim(strtoupper((string)($row['tipo_pago'] ?? 'MENSUAL')));
-        $ano = trim((string)($row['ano'] ?? ''));
-        $estatus = trim((string)($row['estatus'] ?? ''));
+        // ✅ Extraer y normalizar datos
+        $carnet = $this->normalizarCarnet((string) $this->obtenerValorFila($rowArray, ['carnet'], ''));
+        $nombreEstudiante = trim((string) $this->obtenerValorFila($rowArray, ['nombre_estudiante'], ''));
+        $boleta = $this->normalizarBoleta($this->obtenerValorFila($rowArray, ['numero_boleta'], ''));
+        $monto = $this->normalizarMonto($this->obtenerValorFila($rowArray, ['monto'], 0));
+        $fechaPago = $this->normalizarFecha($this->obtenerValorFila($rowArray, ['fecha_pago'], null));
+        $bancoRaw = trim((string) $this->obtenerValorFila($rowArray, ['banco'], ''));
+        $banco = $bancoRaw === '' ? 'EFECTIVO' : $bancoRaw;
+        $concepto = trim((string) $this->obtenerValorFila($rowArray, ['concepto'], 'Cuota mensual'));
+        $mesPago = trim((string) $this->obtenerValorFila($rowArray, ['mes_pago'], ''));
+        $planEstudios = trim((string) $this->obtenerValorFila($rowArray, ['plan_estudios', 'plan_estudio', 'plan'], ''));
+        $tipoPagoOriginal = trim((string) $this->obtenerValorFila($rowArray, ['tipo_pago'], 'MENSUAL'));
+        $tipoPagoNormalizado = strtoupper($tipoPagoOriginal);
+        $ano = trim((string) $this->obtenerValorFila($rowArray, ['año', 'ano'], ''));
+        $estatus = trim((string) $this->obtenerValorFila($rowArray, ['estatus'], ''));
 
         Log::info("📄 Procesando fila {$numeroFila}", [
             'carnet' => $carnet,
@@ -540,9 +555,11 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'boleta' => $boleta,
             'monto' => $monto,
             'fecha_pago' => $fechaPago?->toDateString(),
-            'mensualidad_aprobada' => $mensualidadAprobada,
-            'tipo_pago' => $tipoPago,
-            'estatus' => $estatus
+            'tipo_pago' => $tipoPagoNormalizado,
+            'estatus' => $estatus,
+            'plan_estudios' => $planEstudios,
+            'mes_pago' => $mesPago,
+            'ano' => $ano,
         ]);
 
         // ✅ Validaciones básicas mejoradas
@@ -555,10 +572,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         // ✅ Identificar programa correcto
         $programaAsignado = $this->identificarProgramaCorrecto(
             $programasEstudiante,
-            $mensualidadAprobada,
             $monto,
             $fechaPago,
-            $mesInicio
+            $rowArray
         );
 
         if (!$programaAsignado) {
@@ -568,7 +584,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 'carnet' => $carnet,
                 'error' => 'No se pudo identificar el programa correcto para este pago',
                 'programas_disponibles' => $programasEstudiante->count(),
-                'mensualidad' => $mensualidadAprobada,
                 'monto_pago' => $monto,
                 'fecha_pago' => $fechaPago->toDateString()
             ];
@@ -587,10 +602,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $mesPago,
                 $numeroFila,
                 $carnet,
-                $mensualidadAprobada,
                 $nombreEstudiante,
-                $tipoPago,
-                $ano
+                $tipoPagoNormalizado,
+                $tipoPagoOriginal,
+                $ano,
+                $planEstudios,
+                $estatus,
+                $rowArray
             ) {
                 // ✅ Verificar duplicado por boleta y estudiante
                 $kardexExistente = KardexPago::where('numero_boleta', $boleta)
@@ -598,21 +616,19 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     ->first();
 
                 if ($kardexExistente) {
-                    Log::info("⚠️ Kardex duplicado detectado (por boleta+estudiante)", [
+                    Log::info("⚠️ Kardex duplicado detectado (por boleta+estudiante) - se registrará nuevamente", [
                         'kardex_id' => $kardexExistente->id,
                         'boleta' => $boleta,
                         'estudiante_programa_id' => $programaAsignado->estudiante_programa_id
                     ]);
-
                     $this->advertencias[] = [
                         'tipo' => 'DUPLICADO',
                         'fila' => $numeroFila,
-                        'advertencia' => "Pago ya registrado anteriormente",
+                        'advertencia' => "Pago duplicado según boleta. Se registró nuevamente por requerimiento.",
                         'kardex_id' => $kardexExistente->id,
                         'boleta' => $boleta,
-                        'accion' => 'omitido'
+                        'accion' => 'registrado'
                     ];
-                    return;
                 }
 
                 // ✅ Verificar duplicado por fingerprint (más preciso, incluye fecha)
@@ -625,30 +641,28 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 $kardexPorFingerprint = KardexPago::where('boleta_fingerprint', $fingerprint)->first();
 
                 if ($kardexPorFingerprint) {
-                    Log::info("⚠️ Kardex duplicado detectado (por fingerprint)", [
+                    Log::info("⚠️ Kardex duplicado detectado (por fingerprint) - se registrará nuevamente", [
                         'kardex_id' => $kardexPorFingerprint->id,
                         'fingerprint' => $fingerprint,
                         'boleta' => $boleta,
                         'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
                         'fecha_pago' => $fechaYmd
                     ]);
-
                     $this->advertencias[] = [
                         'tipo' => 'DUPLICADO',
                         'fila' => $numeroFila,
-                        'advertencia' => "Pago ya registrado anteriormente (mismo fingerprint)",
+                        'advertencia' => "Pago duplicado según fingerprint. Se registró nuevamente por requerimiento.",
                         'kardex_id' => $kardexPorFingerprint->id,
                         'boleta' => $boleta,
                         'fingerprint' => substr($fingerprint, 0, 16) . '...',
-                        'accion' => 'omitido'
+                        'accion' => 'registrado'
                     ];
-                    return;
                 }
 
                 // 🔥 Buscar cuota con lógica flexible
                 // 🆕 NUEVO: Solo asignar cuota si el tipo_pago es "MENSUAL"
                 $cuota = null;
-                $esMenual = $this->esPagoMensual($tipoPago);
+                $esMenual = $this->esPagoMensual($tipoPagoNormalizado);
 
                 if ($esMenual) {
                     Log::info("🔍 Buscando cuota para asignar al pago (MENSUAL)", [
@@ -656,21 +670,20 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                         'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
                         'fecha_pago' => $fechaPago->toDateString(),
                         'monto' => $monto,
-                        'mensualidad_aprobada' => $mensualidadAprobada,
-                        'tipo_pago' => $tipoPago
+                        'tipo_pago' => $tipoPagoNormalizado
                     ]);
 
                     $cuota = $this->buscarCuotaFlexible(
                         $programaAsignado->estudiante_programa_id,
+                        $rowArray,
                         $fechaPago,
                         $monto,
-                        $mensualidadAprobada,
                         $numeroFila
                     );
                 } else {
                     Log::info("⏭️ Saltando asignación de cuota (pago NO es mensual)", [
                         'fila' => $numeroFila,
-                        'tipo_pago' => $tipoPago,
+                        'tipo_pago' => $tipoPagoNormalizado,
                         'estudiante_programa_id' => $programaAsignado->estudiante_programa_id
                     ]);
                 }
@@ -712,11 +725,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 ]);
 
                 $observaciones = sprintf(
-                    "%s | Estudiante: %s | Mes: %s | Tipo: %s | Migración fila %d | Programa: %s",
+                    "%s | Estudiante: %s | Mes: %s | Año: %s | Tipo: %s | Migración fila %d | Programa: %s",
                     $concepto,
                     $nombreEstudiante,
                     $mesPago,
-                    $tipoPago,
+                    $ano !== '' ? $ano : $fechaPago->format('Y'),
+                    $tipoPagoOriginal,
                     $numeroFila,
                     $programaAsignado->nombre_programa ?? 'N/A'
                 );
@@ -767,7 +781,12 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     'cuota_id' => $cuota ? $cuota->id : null,
                     'programa' => $programaAsignado->nombre_programa ?? 'N/A',
                     'monto' => $monto,
-                    'fecha_pago' => $fechaPago->toDateString()
+                    'fecha_pago' => $fechaPago->toDateString(),
+                    'tipo_pago' => $tipoPagoOriginal,
+                    'plan_estudios' => $planEstudios,
+                    'estatus' => $estatus,
+                    'mes_pago' => $mesPago,
+                    'ano' => $ano !== '' ? $ano : $fechaPago->format('Y')
                 ];
             });
         } catch (\Throwable $ex) {
@@ -794,230 +813,165 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     private function buscarCuotaFlexible(
         int $estudianteProgramaId,
+        array $rowData,
         Carbon $fechaPago,
         float $montoPago,
-        float $mensualidadAprobada,
         int $numeroFila
     ) {
-        $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
-            ->where('estado', 'pendiente')
-            ->sortBy('fecha_vencimiento');
+        $cuotas = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
+            ->sortBy('fecha_vencimiento')
+            ->values();
 
-        // 🔥 NUEVO: Si no hay cuotas, intentar generarlas automáticamente
-        if ($cuotasPendientes->isEmpty()) {
-            Log::warning("⚠️ No hay cuotas pendientes para este programa", [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'fila' => $numeroFila
-            ]);
+        $periodo = $this->obtenerPeriodoDesdeFila($rowData, $fechaPago);
+        $mesObjetivo = $periodo['mes'];
+        $anioObjetivo = $periodo['anio'];
+        $fechaReferencia = $periodo['fecha'];
+        $periodoClave = $mesObjetivo && $anioObjetivo
+            ? sprintf('%04d-%02d', $anioObjetivo, $mesObjetivo)
+            : null;
 
-            // Intentar generar cuotas automáticamente
-            $generado = $this->generarCuotasSiFaltan($estudianteProgramaId, null);
+        Log::info('🔍 Buscando cuota basada en periodo declarado en Excel', [
+            'estudiante_programa_id' => $estudianteProgramaId,
+            'mes' => $mesObjetivo,
+            'anio' => $anioObjetivo,
+            'periodo_clave' => $periodoClave,
+            'monto_pago' => $montoPago,
+            'fila' => $numeroFila,
+            'cuotas_existentes' => $cuotas->count()
+        ]);
 
-            if ($generado) {
-                // Recargar cuotas después de la generación
-                $cuotasPendientes = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
-                    ->where('estado', 'pendiente')
-                    ->sortBy('fecha_vencimiento');
+        if ($periodoClave) {
+            $candidatas = $cuotas->filter(function ($cuota) use ($periodoClave) {
+                if (empty($cuota->fecha_vencimiento)) {
+                    return false;
+                }
 
-                Log::info("✅ Cuotas generadas y recargadas", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'cuotas_disponibles' => $cuotasPendientes->count()
+                return Carbon::parse($cuota->fecha_vencimiento)->format('Y-m') === $periodoClave;
+            })->sortBy('numero_cuota');
+
+            $cuotaPendiente = $candidatas->first(function ($cuota) {
+                return $cuota->estado !== 'pagado';
+            });
+
+            $cuotaPorPeriodo = $cuotaPendiente ?: $candidatas->first();
+
+            if ($cuotaPorPeriodo) {
+                Log::info('✅ Cuota encontrada por coincidencia de periodo', [
+                    'cuota_id' => $cuotaPorPeriodo->id,
+                    'fecha_vencimiento' => $cuotaPorPeriodo->fecha_vencimiento,
+                    'monto_cuota' => $cuotaPorPeriodo->monto,
+                    'estado' => $cuotaPorPeriodo->estado
                 ]);
 
-                // Si aún no hay cuotas después de generar, retornar null
-                if ($cuotasPendientes->isEmpty()) {
-                    return null;
-                }
-            } else {
-                // Si no se pudieron generar, intentar al menos validar con el precio del programa
-                $precioPrograma = $this->obtenerPrecioPrograma($estudianteProgramaId);
-                if ($precioPrograma) {
-                    Log::info("💰 Precio de programa encontrado para validación", [
-                        'estudiante_programa_id' => $estudianteProgramaId,
-                        'cuota_mensual' => $precioPrograma->cuota_mensual,
-                        'inscripcion' => $precioPrograma->inscripcion,
-                        'monto_pago' => $montoPago
-                    ]);
-
-                    // Validar si el monto coincide con el precio del programa
-                    $tolerancia = max(100, $precioPrograma->cuota_mensual * 0.50);
-                    $diferenciaCuota = abs($precioPrograma->cuota_mensual - $montoPago);
-                    $diferenciaInscripcion = abs($precioPrograma->inscripcion - $montoPago);
-
-                    if ($diferenciaCuota <= $tolerancia || $diferenciaInscripcion <= $tolerancia) {
-                        Log::info("✅ Monto validado contra precio de programa", [
-                            'monto_pago' => $montoPago,
-                            'cuota_mensual_programa' => $precioPrograma->cuota_mensual,
-                            'inscripcion_programa' => $precioPrograma->inscripcion,
-                            'tolerancia' => $tolerancia
-                        ]);
-                    }
-                }
-
-                return null;
+                return $this->ajustarCuotaDesdeExcel(
+                    $cuotaPorPeriodo,
+                    $fechaReferencia ?: $fechaPago->copy()->startOfMonth(),
+                    $montoPago,
+                    $numeroFila,
+                    $estudianteProgramaId
+                );
             }
         }
 
-        Log::info("🔍 Buscando cuota compatible", [
-            'cuotas_pendientes' => $cuotasPendientes->count(),
-            'monto_pago' => $montoPago,
-            'mensualidad_aprobada' => $mensualidadAprobada,
+        $cuotaPorMontoExacto = $cuotas->first(function ($cuota) use ($montoPago) {
+            return $cuota->estado !== 'pagado' && abs($cuota->monto - $montoPago) < 0.01;
+        });
+
+        if ($cuotaPorMontoExacto) {
+            Log::info('✅ Cuota encontrada por coincidencia exacta de monto', [
+                'cuota_id' => $cuotaPorMontoExacto->id,
+                'monto_cuota' => $cuotaPorMontoExacto->monto,
+                'estado' => $cuotaPorMontoExacto->estado
+            ]);
+
+            return $this->ajustarCuotaDesdeExcel(
+                $cuotaPorMontoExacto,
+                $fechaReferencia ?: $fechaPago->copy()->startOfMonth(),
+                $montoPago,
+                $numeroFila,
+                $estudianteProgramaId
+            );
+        }
+
+        if (!$fechaReferencia) {
+            $fechaReferencia = $fechaPago->copy()->startOfMonth();
+        }
+
+        $numeroSiguiente = $cuotas->max('numero_cuota');
+        $numeroSiguiente = $numeroSiguiente ? $numeroSiguiente + 1 : 1;
+
+        $fechaVencimiento = $this->resolverFechaVencimientoDesdePeriodo($fechaReferencia);
+
+        $nuevaCuota = CuotaProgramaEstudiante::create([
+            'estudiante_programa_id' => $estudianteProgramaId,
+            'numero_cuota' => $numeroSiguiente,
+            'fecha_vencimiento' => $fechaVencimiento->toDateString(),
+            'monto' => $montoPago,
+            'estado' => 'pendiente',
+        ]);
+
+        unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+        Log::info('🆕 Cuota creada automáticamente desde el Excel', [
+            'cuota_id' => $nuevaCuota->id,
+            'estudiante_programa_id' => $estudianteProgramaId,
+            'numero_cuota' => $nuevaCuota->numero_cuota,
+            'fecha_vencimiento' => $nuevaCuota->fecha_vencimiento,
+            'monto' => $nuevaCuota->monto,
             'fila' => $numeroFila
         ]);
 
-        // ✅ PRIORIDAD 1: Coincidencia exacta con mensualidad aprobada
-        // 🔥 TOLERANCIA MÁXIMA: 50% o mínimo Q100 para importación histórica
-        if ($mensualidadAprobada > 0) {
-            $tolerancia = max(100, $mensualidadAprobada * 0.50);
-            $cuotaExacta = $cuotasPendientes->first(function ($cuota) use ($mensualidadAprobada, $tolerancia) {
-                $diferencia = abs($cuota->monto - $mensualidadAprobada);
-                return $diferencia <= $tolerancia;
-            });
+        return $nuevaCuota;
+    }
 
-            if ($cuotaExacta) {
-                Log::info("✅ Cuota encontrada por mensualidad aprobada", [
-                    'cuota_id' => $cuotaExacta->id,
-                    'monto_cuota' => $cuotaExacta->monto,
-                    'mensualidad_aprobada' => $mensualidadAprobada,
-                    'monto_pago' => $montoPago,
-                    'diferencia' => abs($cuotaExacta->monto - $mensualidadAprobada),
-                    'tolerancia_usada' => $tolerancia
-                ]);
-                return $cuotaExacta;
-            }
+    private function ajustarCuotaDesdeExcel(
+        CuotaProgramaEstudiante $cuota,
+        Carbon $fechaReferencia,
+        float $montoPago,
+        int $numeroFila,
+        int $estudianteProgramaId
+    ): CuotaProgramaEstudiante {
+        $camposActualizar = [];
+
+        if (empty($cuota->fecha_vencimiento)) {
+            $fechaVencimiento = $this->resolverFechaVencimientoDesdePeriodo($fechaReferencia);
+            $camposActualizar['fecha_vencimiento'] = $fechaVencimiento->toDateString();
         }
 
-        // ✅ PRIORIDAD 2: Coincidencia con monto de pago
-        // 🔥 TOLERANCIA MÁXIMA: 50% o mínimo Q100 para importación histórica
-        $tolerancia = max(100, $montoPago * 0.50);
-        $cuotaPorMonto = $cuotasPendientes->first(function ($cuota) use ($montoPago, $tolerancia) {
-            $diferencia = abs($cuota->monto - $montoPago);
-            return $diferencia <= $tolerancia;
-        });
-
-        if ($cuotaPorMonto) {
-            Log::info("✅ Cuota encontrada por monto de pago", [
-                'cuota_id' => $cuotaPorMonto->id,
-                'monto_cuota' => $cuotaPorMonto->monto,
-                'monto_pago' => $montoPago,
-                'diferencia' => abs($cuotaPorMonto->monto - $montoPago),
-                'tolerancia_usada' => $tolerancia
-            ]);
-            return $cuotaPorMonto;
-        }
-
-        // 🔥 PRIORIDAD 3: PAGO PARCIAL (con tolerancia aumentada)
-        // Ahora acepta desde 30% del monto de la cuota (antes era 50%)
-        $cuotaParcial = $cuotasPendientes->first(function ($cuota) use ($montoPago) {
-            if ($cuota->monto == 0) return false;
-
-            $porcentajePago = ($montoPago / $cuota->monto) * 100;
-            return $porcentajePago >= 30 && $montoPago < $cuota->monto;
-        });
-
-        if ($cuotaParcial) {
-            $discrepancia = $cuotaParcial->monto - $montoPago;
+        $diferenciaMonto = $cuota->monto - $montoPago;
+        if (abs($diferenciaMonto) > 0.01) {
             $this->pagosParciales++;
-            $this->totalDiscrepancias += $discrepancia;
+            $this->totalDiscrepancias += abs($diferenciaMonto);
 
-            Log::warning("⚠️ PAGO PARCIAL DETECTADO", [
-                'fila' => $numeroFila,
-                'cuota_id' => $cuotaParcial->id,
-                'monto_cuota' => $cuotaParcial->monto,
-                'monto_pagado' => $montoPago,
-                'diferencia' => round($discrepancia, 2),
-                'porcentaje_pagado' => round(($montoPago / $cuotaParcial->monto) * 100, 2)
+            Log::info('💡 Ajustando monto de cuota para que coincida con Excel', [
+                'cuota_id' => $cuota->id,
+                'monto_original' => $cuota->monto,
+                'monto_excel' => $montoPago,
+                'diferencia' => round($diferenciaMonto, 2),
+                'fila' => $numeroFila
             ]);
 
-            $this->advertencias[] = [
-                'tipo' => 'PAGO_PARCIAL',
-                'fila' => $numeroFila,
-                'advertencia' => sprintf(
-                    'Pago parcial: Q%.2f de Q%.2f (falta Q%.2f = %.1f%%)',
-                    $montoPago,
-                    $cuotaParcial->monto,
-                    $discrepancia,
-                    ($discrepancia / $cuotaParcial->monto) * 100
-                ),
-                'cuota_id' => $cuotaParcial->id,
-                'monto_cuota' => $cuotaParcial->monto,
-                'monto_pagado' => $montoPago,
-                'diferencia' => round($discrepancia, 2),
-                'recomendacion' => 'Revisar si hubo renegociación, beca o descuento no registrado en el sistema'
-            ];
-
-            return $cuotaParcial;
+            $camposActualizar['monto'] = $montoPago;
         }
 
-        // 🔥 PRIORIDAD 4: CUALQUIER CUOTA PENDIENTE (tolerancia extrema para importación histórica)
-        // Buscar cualquier cuota que esté cerca del monto, con tolerancia del 100%
-        $cuotaToleranciaExtrema = $cuotasPendientes->first(function ($cuota) use ($montoPago) {
-            $diferencia = abs($cuota->monto - $montoPago);
-            $toleranciaExtrema = max($cuota->monto, $montoPago);
-            return $diferencia <= $toleranciaExtrema;
-        });
+        if (!empty($camposActualizar)) {
+            $camposActualizar['updated_at'] = now();
+            $cuota->fill($camposActualizar);
+            $cuota->save();
 
-        if ($cuotaToleranciaExtrema) {
-            $diferencia = abs($cuotaToleranciaExtrema->monto - $montoPago);
+            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
 
-            Log::warning("⚠️ Cuota encontrada con tolerancia extrema (100%)", [
-                'cuota_id' => $cuotaToleranciaExtrema->id,
-                'monto_cuota' => $cuotaToleranciaExtrema->monto,
-                'monto_pago' => $montoPago,
-                'diferencia' => round($diferencia, 2),
-                'porcentaje_diferencia' => $cuotaToleranciaExtrema->monto > 0
-                    ? round(($diferencia / $cuotaToleranciaExtrema->monto) * 100, 2)
-                    : 0
-            ]);
-
-            $this->advertencias[] = [
-                'tipo' => 'DIFERENCIA_MONTO_EXTREMA',
-                'fila' => $numeroFila,
-                'advertencia' => sprintf(
-                    'Gran diferencia: Cuota Q%.2f vs Pago Q%.2f (diferencia Q%.2f)',
-                    $cuotaToleranciaExtrema->monto,
-                    $montoPago,
-                    $diferencia
-                ),
-                'cuota_id' => $cuotaToleranciaExtrema->id,
-                'recomendacion' => 'Revisar si el pago corresponde a esta cuota o si hay ajuste de precio'
-            ];
-
-            return $cuotaToleranciaExtrema;
+            $cuota = $cuota->fresh();
         }
 
-        // ✅ PRIORIDAD 5: Primera cuota pendiente (sin restricción de monto)
-        // Si llegamos aquí, tomar cualquier cuota pendiente para no perder el pago
-        $primeraCuota = $cuotasPendientes->first();
+        return $cuota;
+    }
 
-        if ($primeraCuota) {
-            $diferencia = abs($primeraCuota->monto - $montoPago);
+    private function resolverFechaVencimientoDesdePeriodo(Carbon $fechaReferencia): Carbon
+    {
+        $diaReferencia = min(26, $fechaReferencia->daysInMonth);
 
-            Log::warning("⚠️ Usando primera cuota pendiente sin validación de monto (última opción)", [
-                'cuota_id' => $primeraCuota->id,
-                'fecha_vencimiento' => $primeraCuota->fecha_vencimiento,
-                'monto_cuota' => $primeraCuota->monto,
-                'monto_pago' => $montoPago,
-                'diferencia' => round($diferencia, 2)
-            ]);
-
-            $this->advertencias[] = [
-                'tipo' => 'CUOTA_FORZADA',
-                'fila' => $numeroFila,
-                'advertencia' => sprintf(
-                    'Cuota asignada forzadamente: Cuota Q%.2f vs Pago Q%.2f (diferencia Q%.2f)',
-                    $primeraCuota->monto,
-                    $montoPago,
-                    $diferencia
-                ),
-                'cuota_id' => $primeraCuota->id,
-                'recomendacion' => 'Verificar manualmente esta asignación de cuota'
-            ];
-
-            return $primeraCuota;
-        }
-
-        return null;
+        return $fechaReferencia->copy()->setDay($diaReferencia);
     }
 
     private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $banco, $montoPago)
@@ -1171,135 +1125,122 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     private function identificarProgramaCorrecto(
         Collection $programas,
-        float $mensualidadAprobada,
         float $montoPago,
         Carbon $fechaPago,
-        string $mesInicio
+        $row
     ) {
+        if ($programas->count() === 0) {
+            return null;
+        }
+
         if ($programas->count() === 1) {
             return $programas->first();
         }
 
-        Log::info("🔍 Identificando programa entre {$programas->count()} opciones", [
-            'mensualidad_aprobada' => $mensualidadAprobada,
+        $rowArray = $row instanceof Collection ? $row->toArray() : (array) $row;
+        $planEstudios = trim((string) $this->obtenerValorFila($rowArray, ['plan_estudios', 'plan_estudio', 'plan'], ''));
+        $planNormalizado = strtoupper(preg_replace('/[^A-Z0-9]/', '', $planEstudios));
+
+        Log::info('🔍 Identificando programa entre múltiples opciones', [
+            'total_programas' => $programas->count(),
+            'plan_estudios' => $planEstudios,
+            'plan_normalizado' => $planNormalizado,
             'monto_pago' => $montoPago,
             'fecha_pago' => $fechaPago->toDateString()
         ]);
 
-        // 🔥 PRIORIDAD 1: Por mensualidad aprobada con tolerancia del 50%
-        if ($mensualidadAprobada > 0) {
-            foreach ($programas as $programa) {
-                $cuotasPrograma = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
+        if ($planNormalizado !== '') {
+            $porPlan = $programas->first(function ($programa) use ($planNormalizado) {
+                $abreviatura = strtoupper(preg_replace('/[^A-Z0-9]/', '', $programa->programa_abreviatura ?? ''));
+                $nombre = strtoupper(preg_replace('/[^A-Z0-9]/', '', $programa->nombre_programa ?? ''));
 
-                // Si hay cuotas, intentar coincidir por monto
-                if ($cuotasPrograma->isNotEmpty()) {
-                    $cuotaCoincidente = $cuotasPrograma->first(function ($cuota) use ($mensualidadAprobada) {
-                        $diferencia = abs($cuota->monto - $mensualidadAprobada);
-                        $tolerancia = max(100, $mensualidadAprobada * 0.50);
-                        return $diferencia <= $tolerancia;
-                    });
+                return $abreviatura === $planNormalizado
+                    || $nombre === $planNormalizado
+                    || ($abreviatura !== '' && str_contains($planNormalizado, $abreviatura))
+                    || ($nombre !== '' && str_contains($planNormalizado, $nombre))
+                    || ($abreviatura !== '' && str_contains($abreviatura, $planNormalizado));
+            });
 
-                    if ($cuotaCoincidente) {
-                        Log::info("✅ Programa identificado por mensualidad aprobada (cuotas)", [
-                            'estudiante_programa_id' => $programa->estudiante_programa_id,
-                            'programa' => $programa->nombre_programa,
-                            'mensualidad' => $mensualidadAprobada,
-                            'cuota_monto' => $cuotaCoincidente->monto
-                        ]);
-                        return $programa;
+            if ($porPlan) {
+                Log::info('✅ Programa identificado por coincidencia de plan_estudios', [
+                    'estudiante_programa_id' => $porPlan->estudiante_programa_id,
+                    'programa' => $porPlan->nombre_programa,
+                    'abreviatura' => $porPlan->programa_abreviatura
+                ]);
+                return $porPlan;
+            }
+        }
+
+        $periodo = $this->obtenerPeriodoDesdeFila($rowArray, $fechaPago);
+        if ($periodo['mes'] && $periodo['anio']) {
+            $porPeriodo = $programas->first(function ($programa) use ($periodo) {
+                $cuotas = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
+
+                return $cuotas->first(function ($cuota) use ($periodo) {
+                    if (empty($cuota->fecha_vencimiento)) {
+                        return false;
                     }
-                } else {
-                    // 🔥 NUEVO: Si no hay cuotas, usar precio del programa
-                    $precioPrograma = $this->obtenerPrecioPrograma($programa->estudiante_programa_id);
-                    if ($precioPrograma) {
-                        $diferencia = abs($precioPrograma->cuota_mensual - $mensualidadAprobada);
-                        $tolerancia = max(100, $mensualidadAprobada * 0.50);
 
-                        if ($diferencia <= $tolerancia) {
-                            Log::info("✅ Programa identificado por mensualidad aprobada (precio programa)", [
-                                'estudiante_programa_id' => $programa->estudiante_programa_id,
-                                'programa' => $programa->nombre_programa,
-                                'mensualidad' => $mensualidadAprobada,
-                                'cuota_mensual_programa' => $precioPrograma->cuota_mensual
-                            ]);
-                            return $programa;
-                        }
-                    }
+                    $fecha = Carbon::parse($cuota->fecha_vencimiento);
+                    return $fecha->month === $periodo['mes'] && $fecha->year === $periodo['anio'];
+                });
+            });
+
+            if ($porPeriodo) {
+                Log::info('✅ Programa identificado por periodo (mes/año)', [
+                    'estudiante_programa_id' => $porPeriodo->estudiante_programa_id,
+                    'programa' => $porPeriodo->nombre_programa,
+                    'periodo_mes' => $periodo['mes'],
+                    'periodo_anio' => $periodo['anio']
+                ]);
+                return $porPeriodo;
+            }
+        }
+
+        foreach ($programas as $programa) {
+            $cuotas = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
+            if ($cuotas->isEmpty()) {
+                continue;
+            }
+
+            $primera = $cuotas->min('fecha_vencimiento');
+            $ultima = $cuotas->max('fecha_vencimiento');
+
+            if ($primera && $ultima) {
+                if ($fechaPago->between(
+                    Carbon::parse($primera)->subDays(15),
+                    Carbon::parse($ultima)->addDays(15)
+                )) {
+                    Log::info('✅ Programa identificado por rango de fechas de cuotas', [
+                        'estudiante_programa_id' => $programa->estudiante_programa_id,
+                        'programa' => $programa->nombre_programa,
+                        'rango' => $primera . ' - ' . $ultima
+                    ]);
+                    return $programa;
                 }
             }
         }
 
-        // 🔥 PRIORIDAD 2: Por rango de fechas
-        foreach ($programas as $programa) {
-            $cuotasPrograma = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
-
-            if ($cuotasPrograma->isEmpty()) {
-                continue;
-            }
-
-            $primeraFecha = $cuotasPrograma->min('fecha_vencimiento');
-            $ultimaFecha = $cuotasPrograma->max('fecha_vencimiento');
-
-            if ($fechaPago->between(
-                Carbon::parse($primeraFecha)->subDays(30),
-                Carbon::parse($ultimaFecha)->addDays(30)
-            )) {
-                Log::info("✅ Programa identificado por rango de fechas", [
-                    'estudiante_programa_id' => $programa->estudiante_programa_id,
-                    'programa' => $programa->nombre_programa,
-                    'rango' => "{$primeraFecha} - {$ultimaFecha}",
-                    'fecha_pago' => $fechaPago->toDateString()
-                ]);
-                return $programa;
-            }
-        }
-
-        // 🔥 PRIORIDAD 3: Por monto de pago con tolerancia del 50%
-        foreach ($programas as $programa) {
-            $cuotasPrograma = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
-
-            $cuotaCoincidente = $cuotasPrograma->first(function ($cuota) use ($montoPago) {
-                $diferencia = abs($cuota->monto - $montoPago);
-                $tolerancia = max(100, $cuota->monto * 0.50);
-                return $diferencia <= $tolerancia;
+        $porMonto = $programas->first(function ($programa) use ($montoPago) {
+            $cuotas = $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id);
+            return $cuotas->first(function ($cuota) use ($montoPago) {
+                return abs($cuota->monto - $montoPago) < 0.01;
             });
+        });
 
-            if ($cuotaCoincidente) {
-                Log::info("✅ Programa identificado por monto de pago", [
-                    'estudiante_programa_id' => $programa->estudiante_programa_id,
-                    'programa' => $programa->nombre_programa,
-                    'monto_pago' => $montoPago
-                ]);
-                return $programa;
-            }
+        if ($porMonto) {
+            Log::info('✅ Programa identificado por coincidencia exacta de monto en cuotas', [
+                'estudiante_programa_id' => $porMonto->estudiante_programa_id,
+                'programa' => $porMonto->nombre_programa,
+                'monto_pago' => $montoPago
+            ]);
+            return $porMonto;
         }
 
-        // 🔥 PRIORIDAD 4: Programa con más cuotas pendientes (probablemente el activo)
-        $programaConMasCuotas = $programas->sortByDesc(function ($programa) {
-            return $this->obtenerCuotasDelPrograma($programa->estudiante_programa_id)
-                ->where('estado', 'pendiente')
-                ->count();
-        })->first();
-
-        if ($programaConMasCuotas) {
-            $cuotasPendientes = $this->obtenerCuotasDelPrograma($programaConMasCuotas->estudiante_programa_id)
-                ->where('estado', 'pendientes')
-                ->count();
-
-            if ($cuotasPendientes > 0) {
-                Log::info("✅ Programa identificado por mayor cantidad de cuotas pendientes", [
-                    'estudiante_programa_id' => $programaConMasCuotas->estudiante_programa_id,
-                    'programa' => $programaConMasCuotas->nombre_programa,
-                    'cuotas_pendientes' => $cuotasPendientes
-                ]);
-                return $programaConMasCuotas;
-            }
-        }
-
-        // 🔥 PRIORIDAD 5: Usar el más reciente (última opción)
-        Log::warning("⚠️ No se pudo identificar programa específico, usando el más reciente", [
+        Log::warning('⚠️ No se pudo identificar programa con reglas específicas, usando el primero disponible', [
             'programas_disponibles' => $programas->count()
         ]);
+
         return $programas->first();
     }
 
@@ -1555,6 +1496,23 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             $cuotaMensual = $estudiantePrograma->cuota_mensual ?? 0;
             $fechaInicio = $estudiantePrograma->fecha_inicio ?? now()->toDateString();
 
+            if ($row) {
+                $periodoReferencia = $this->obtenerPeriodoDesdeFila($row);
+                if ($periodoReferencia['fecha']) {
+                    $fechaInicio = $periodoReferencia['fecha']->toDateString();
+                }
+
+                if ($cuotaMensual <= 0) {
+                    $cuotaMensual = $this->normalizarMonto(
+                        $this->obtenerValorFila($row, ['mensualidad_aprobada', 'mensualidad', 'monto'], 0)
+                    );
+                }
+
+                if ($numCuotasEsperadas <= 0 && isset($row['numero_de_cuotas'])) {
+                    $numCuotasEsperadas = max(1, (int) $row['numero_de_cuotas']);
+                }
+            }
+
             // Si no hay datos suficientes en estudiante_programa, intentar con precio_programa
             if ($numCuotasEsperadas <= 0 || $cuotaMensual <= 0) {
                 $precioPrograma = $this->obtenerPrecioPrograma($estudianteProgramaId);
@@ -1681,27 +1639,176 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return true;
     }
 
-    private function obtenerMensualidadAprobadaDesdeFila($row): float
+    private function obtenerValorFila($row, array $columnas, $default = null)
     {
-        $valorMensualidad = 0;
-
-        if ($this->columnaMensualidad !== null) {
-            $valorMensualidad = $row[$this->columnaMensualidad] ?? 0;
-        } elseif (isset($row['mensualidad_aprobada'])) {
-            $valorMensualidad = $row['mensualidad_aprobada'];
-        } elseif (isset($row['mensualidad'])) {
-            $valorMensualidad = $row['mensualidad'];
+        if ($row instanceof Collection) {
+            $row = $row->toArray();
         }
 
-        if (is_string($valorMensualidad)) {
-            $valorMensualidad = trim($valorMensualidad);
+        foreach ($columnas as $columna) {
+            if (is_array($row) && array_key_exists($columna, $row)) {
+                $valor = $row[$columna];
+                if ($valor !== null && $valor !== '') {
+                    return $valor;
+                }
+            }
         }
 
-        if ($valorMensualidad === '' || $valorMensualidad === null) {
-            return 0.0;
+        return $default;
+    }
+
+    private function obtenerPeriodoDesdeFila($row, ?Carbon $fechaPago = null): array
+    {
+        $rowArray = $row instanceof Collection ? $row->toArray() : (array) $row;
+
+        $mesRaw = $this->obtenerValorFila($rowArray, ['mes_pago', 'mes']);
+        $anioRaw = $this->obtenerValorFila($rowArray, ['año', 'ano', 'anio', 'year']);
+
+        $mes = $this->normalizarMes($mesRaw);
+        $anio = $this->normalizarAnio($anioRaw);
+
+        if (!$mes && $fechaPago) {
+            $mes = (int) $fechaPago->format('m');
         }
 
-        return $this->normalizarMonto($valorMensualidad);
+        if (!$anio && $fechaPago) {
+            $anio = (int) $fechaPago->format('Y');
+        }
+
+        $fecha = null;
+        if ($mes && $anio) {
+            try {
+                $fecha = Carbon::create($anio, $mes, 1)->startOfMonth();
+            } catch (\Throwable $e) {
+                $fecha = $fechaPago ? $fechaPago->copy()->startOfMonth() : null;
+            }
+        } elseif ($fechaPago) {
+            $fecha = $fechaPago->copy()->startOfMonth();
+        }
+
+        return [
+            'mes' => $mes,
+            'anio' => $anio,
+            'fecha' => $fecha,
+        ];
+    }
+
+    private function normalizarMes($mes): ?int
+    {
+        if (is_null($mes)) {
+            return null;
+        }
+
+        if ($mes instanceof Carbon) {
+            return (int) $mes->format('m');
+        }
+
+        if (is_numeric($mes)) {
+            $numero = (int) $mes;
+            if ($numero >= 1 && $numero <= 12) {
+                return $numero;
+            }
+        }
+
+        $mes = strtolower(trim((string) $mes));
+        $mes = strtr($mes, ['á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u']);
+        $mes = preg_replace('/[^a-z]/', '', $mes);
+
+        $map = [
+            'enero' => 1,
+            'ene' => 1,
+            'january' => 1,
+            'jan' => 1,
+            'febrero' => 2,
+            'feb' => 2,
+            'february' => 2,
+            'marzo' => 3,
+            'mar' => 3,
+            'march' => 3,
+            'abril' => 4,
+            'abr' => 4,
+            'april' => 4,
+            'mayo' => 5,
+            'may' => 5,
+            'junio' => 6,
+            'jun' => 6,
+            'june' => 6,
+            'julio' => 7,
+            'jul' => 7,
+            'july' => 7,
+            'agosto' => 8,
+            'ago' => 8,
+            'august' => 8,
+            'aug' => 8,
+            'septiembre' => 9,
+            'setiembre' => 9,
+            'sep' => 9,
+            'sept' => 9,
+            'september' => 9,
+            'octubre' => 10,
+            'oct' => 10,
+            'october' => 10,
+            'noviembre' => 11,
+            'nov' => 11,
+            'november' => 11,
+            'diciembre' => 12,
+            'dic' => 12,
+            'december' => 12,
+            'dec' => 12,
+        ];
+
+        return $map[$mes] ?? null;
+    }
+
+    private function normalizarAnio($anio): ?int
+    {
+        if (is_null($anio)) {
+            return null;
+        }
+
+        if ($anio instanceof Carbon) {
+            return (int) $anio->format('Y');
+        }
+
+        if (is_numeric($anio)) {
+            $numero = (int) $anio;
+            if ($numero < 100) {
+                $numero += $numero >= 50 ? 1900 : 2000;
+            }
+
+            if ($numero >= 1900 && $numero <= 2100) {
+                return $numero;
+            }
+        }
+
+        $anio = preg_replace('/[^0-9]/', '', (string) $anio);
+        if ($anio === '') {
+            return null;
+        }
+
+        $numero = (int) $anio;
+        if ($numero < 100) {
+            $numero += $numero >= 50 ? 1900 : 2000;
+        }
+
+        return ($numero >= 1900 && $numero <= 2100) ? $numero : null;
+    }
+
+    private function normalizarClave(string $valor): string
+    {
+        $valor = strtolower(trim($valor));
+        $valor = strtr($valor, [
+            'á' => 'a',
+            'é' => 'e',
+            'í' => 'i',
+            'ó' => 'o',
+            'ú' => 'u',
+            'ü' => 'u',
+            'ñ' => 'n',
+        ]);
+        $valor = preg_replace('/[^a-z0-9]+/', '_', $valor);
+
+        return trim($valor, '_');
     }
 
     private function normalizeBank($bank)
