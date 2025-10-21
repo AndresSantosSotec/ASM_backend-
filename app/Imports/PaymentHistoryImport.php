@@ -3,8 +3,8 @@
 namespace App\Imports;
 
 // ✅ AGREGAR ESTAS LÍNEAS AL INICIO
-ini_set('memory_limit', '2048M'); // 1 GB
-ini_set('max_execution_time', '1500'); // 10 minutos
+ini_set('memory_limit', '2048M'); //
+ini_set('max_execution_time', '1500'); //
 
 use App\Services\EstudianteService;
 use Illuminate\Support\Collection;
@@ -527,8 +527,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $concepto = trim((string)($row['concepto'] ?? 'Cuota mensual'));
         $mesPago = trim((string)($row['mes_pago'] ?? ''));
         $mesInicio = trim((string)($row['mes_inicio'] ?? ''));
-        $mensualidadAprobada = $this->obtenerMensualidadAprobadaDesdeFila($row);
-        
+        $mensualidadAprobada = $this->normalizarMonto($row['mensualidad_aprobada'] ?? 0);
+
         // 🆕 NUEVAS COLUMNAS
         $tipoPago = trim(strtoupper((string)($row['tipo_pago'] ?? 'MENSUAL')));
         $ano = trim((string)($row['ano'] ?? ''));
@@ -649,7 +649,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 // 🆕 NUEVO: Solo asignar cuota si el tipo_pago es "MENSUAL"
                 $cuota = null;
                 $esMenual = $this->esPagoMensual($tipoPago);
-                
+
                 if ($esMenual) {
                     Log::info("🔍 Buscando cuota para asignar al pago (MENSUAL)", [
                         'fila' => $numeroFila,
