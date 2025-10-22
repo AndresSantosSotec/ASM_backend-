@@ -14,7 +14,6 @@ use App\Models\AdicionalEstudiante;
 use App\Models\KardexPago;
 use App\Models\CuotaProgramaEstudiante;
 use App\Models\ReconciliationRecord;
-use App\Models\PrecioPrograma;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -1420,13 +1419,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             }
         }
 
-        // 🔥 NUEVO: Generar cuotas si no existen
-        foreach ($programas as $programa) {
-            // Convert Collection to array if needed
-            $rowArray = $row instanceof Collection ? $row->toArray() : $row;
-            $this->generarCuotasSiFaltan($programa->estudiante_programa_id, $rowArray);
-        }
-
         $this->estudiantesCache[$carnet] = $programas;
 
         return $programas;
@@ -1478,187 +1470,21 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return $cuotas;
     }
 
-    /**
-     * 🆕 Obtener precio estándar del programa
-     * Útil cuando no existen cuotas creadas para validar montos
-     */
-    private function obtenerPrecioPrograma(int $estudianteProgramaId)
+    private function guardarResumenMigracion(array $reporte): void
     {
         try {
-            // Obtener programa_id del estudiante_programa
-            $estudiantePrograma = DB::table('estudiante_programa')
-                ->where('id', $estudianteProgramaId)
-                ->first();
+            $ruta = 'import_reports/payment_history_summary_' . now()->format('Ymd_His') . '.json';
+            Storage::disk('local')->put($ruta, json_encode($reporte, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
-            if (!$estudiantePrograma) {
-                return null;
-            }
-
-            // Buscar el precio del programa
-            $precioPrograma = PrecioPrograma::where('programa_id', $estudiantePrograma->programa_id)->first();
-
-            if ($precioPrograma) {
-                Log::debug("💰 Precio de programa encontrado", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'programa_id' => $estudiantePrograma->programa_id,
-                    'cuota_mensual' => $precioPrograma->cuota_mensual,
-                    'inscripcion' => $precioPrograma->inscripcion,
-                    'meses' => $precioPrograma->meses
-                ]);
-            }
-
-            return $precioPrograma;
+            Log::info('📝 Reporte final de migración almacenado', [
+                'path' => storage_path('app/' . $ruta),
+                'total_duplicados_permitidos' => $reporte['total_duplicados_permitidos'],
+                'total_errores_criticos' => $reporte['total_errores_criticos'],
+            ]);
         } catch (\Throwable $ex) {
-            Log::warning("⚠️ Error al obtener precio de programa", [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'error' => $ex->getMessage()
-            ]);
-            return null;
-        }
-    }
-
-    /**
-     * 🆕 Generar cuotas automáticamente cuando no existen
-     * Similar a la lógica de InscripcionesImport
-     * 🔥 ACTUALIZADO: Ahora cuenta pagos "Mensual" del Excel y crea cuotas faltantes
-     */
-    private function generarCuotasSiFaltan(int $estudianteProgramaId, ?array $row = null)
-    {
-        if ($this->tipoArchivo === 'cardex_directo') {
-            Log::info('⏭️ Omitiendo generación automática de cuotas para importación histórica', [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'tipo_archivo' => $this->tipoArchivo,
-            ]);
-
-            return false;
-        }
-
-        try {
-            // Obtener datos del estudiante_programa
-            $estudiantePrograma = DB::table('estudiante_programa')
-                ->where('id', $estudianteProgramaId)
-                ->first();
-
-            if (!$estudiantePrograma) {
-                Log::warning("⚠️ No se encontró estudiante_programa", [
-                    'estudiante_programa_id' => $estudianteProgramaId
-                ]);
-                return false;
-            }
-
-            // Usar duracion_meses del estudiante_programa
-            $numCuotasEsperadas = $estudiantePrograma->duracion_meses ?? 0;
-            $cuotaMensual = $estudiantePrograma->cuota_mensual ?? 0;
-            $fechaInicio = $estudiantePrograma->fecha_inicio ?? now()->toDateString();
-
-            if ($row) {
-                $periodoReferencia = $this->obtenerPeriodoDesdeFila($row);
-                if ($periodoReferencia['fecha']) {
-                    $fechaInicio = $periodoReferencia['fecha']->toDateString();
-                }
-
-                if ($cuotaMensual <= 0) {
-                    $cuotaMensual = $this->normalizarMonto(
-                        $this->obtenerValorFila($row, ['mensualidad_aprobada', 'mensualidad', 'monto'], 0)
-                    );
-                }
-
-                if ($numCuotasEsperadas <= 0 && isset($row['numero_de_cuotas'])) {
-                    $numCuotasEsperadas = max(1, (int) $row['numero_de_cuotas']);
-                }
-            }
-
-            // Si no hay datos suficientes en estudiante_programa, intentar con precio_programa
-            if ($numCuotasEsperadas <= 0 || $cuotaMensual <= 0) {
-                $precioPrograma = $this->obtenerPrecioPrograma($estudianteProgramaId);
-                if ($precioPrograma) {
-                    $numCuotasEsperadas = $numCuotasEsperadas > 0 ? $numCuotasEsperadas : ($precioPrograma->meses ?? 12);
-                    $cuotaMensual = $cuotaMensual > 0 ? $cuotaMensual : ($precioPrograma->cuota_mensual ?? 0);
-                }
-            }
-
-            // Validar que tengamos los datos mínimos
-            if ($numCuotasEsperadas <= 0 || $cuotaMensual <= 0) {
-                Log::warning("⚠️ No se pueden generar cuotas: datos insuficientes", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'num_cuotas_esperadas' => $numCuotasEsperadas,
-                    'cuota_mensual' => $cuotaMensual
-                ]);
-                return false;
-            }
-
-            // Contar cuotas existentes
-            $cuotasExistentes = DB::table('cuotas_programa_estudiante')
-                ->where('estudiante_programa_id', $estudianteProgramaId)
-                ->count();
-
-            Log::info("🔧 Verificando cuotas para generar", [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'cuotas_esperadas' => $numCuotasEsperadas,
-                'cuotas_existentes' => $cuotasExistentes,
-                'cuota_mensual' => $cuotaMensual,
-                'fecha_inicio' => $fechaInicio
-            ]);
-
-            // Si ya tiene todas las cuotas esperadas, no hacer nada
-            if ($cuotasExistentes >= $numCuotasEsperadas) {
-                Log::info("✅ Ya existen suficientes cuotas", [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'cuotas_existentes' => $cuotasExistentes,
-                    'cuotas_esperadas' => $numCuotasEsperadas
-                ]);
-                return false;
-            }
-
-            // Calcular cuántas cuotas faltan por crear
-            $cuotasFaltantes = $numCuotasEsperadas - $cuotasExistentes;
-
-            Log::info("🔧 Generando cuotas faltantes", [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'cuotas_faltantes' => $cuotasFaltantes,
-                'num_cuotas_esperadas' => $numCuotasEsperadas,
-                'cuota_mensual' => $cuotaMensual,
-                'fecha_inicio' => $fechaInicio
-            ]);
-
-            // Generar las cuotas faltantes
-            $cuotas = [];
-            for ($i = $cuotasExistentes + 1; $i <= $numCuotasEsperadas; $i++) {
-                $fechaVencimiento = Carbon::parse($fechaInicio)
-                    ->addMonths($i - 1)
-                    ->toDateString();
-
-                $cuotas[] = [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'numero_cuota' => $i,
-                    'fecha_vencimiento' => $fechaVencimiento,
-                    'monto' => $cuotaMensual,
-                    'estado' => 'pendiente',
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
-            }
-
-            // Insertar las cuotas en la base de datos
-            DB::table('cuotas_programa_estudiante')->insert($cuotas);
-
-            Log::info("✅ Cuotas generadas exitosamente", [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'cantidad_cuotas_creadas' => count($cuotas),
-                'total_cuotas_ahora' => $numCuotasEsperadas
-            ]);
-
-            // Limpiar cache para forzar recarga
-            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
-
-            return true;
-        } catch (\Throwable $ex) {
-            Log::error("❌ Error al generar cuotas automáticas", [
-                'estudiante_programa_id' => $estudianteProgramaId,
+            Log::warning('⚠️ No se pudo generar el archivo JSON con el resumen final de migración', [
                 'error' => $ex->getMessage(),
-                'trace' => $ex->getTraceAsString()
             ]);
-            return false;
         }
     }
 
