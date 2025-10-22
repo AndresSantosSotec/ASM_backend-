@@ -17,7 +17,6 @@ use App\Models\ReconciliationRecord;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 
 class PaymentHistoryImport implements ToCollection, WithHeadingRow
@@ -38,11 +37,8 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     public int $pagosParciales = 0;
     public float $totalDiscrepancias = 0;
 
-    // 🆕 Métricas de validación final
-    public int $totalCuotasRegistradas = 0;
-    public int $cuotasPendientesGeneradas = 0;
+    // 🆕 Métricas de control
     public int $duplicadosPermitidos = 0;
-    public array $resumenValidacion = [];
 
     private array $estudiantesCache = [];
     private array $cuotasPorEstudianteCache = [];
@@ -50,7 +46,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     private ?string $columnaMensualidad = null;
 
     private ?bool $kardexTienePeriodoPago = null;
-    private array $cacheColumnasCuotas = [];
 
     // 🆕 NUEVO: Servicio de estudiantes
     private EstudianteService $estudianteService;
@@ -161,19 +156,16 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
         $reporteFinal = [
             'timestamp' => now()->toIso8601String(),
-            'total_cuotas_generadas' => $this->totalCuotasRegistradas,
-            'total_cuotas_pendientes_creadas' => $this->cuotasPendientesGeneradas,
+            'validacion_cuotas_ejecutada' => false,
             'total_duplicados_permitidos' => $this->duplicadosPermitidos,
             'total_errores_criticos' => count($this->errores),
-            'detalle_validacion' => $this->resumenValidacion,
         ];
 
-        Log::info('📋 RESUMEN FINAL DE VALIDACIÓN DE MIGRACIÓN', $reporteFinal);
+        Log::info('📋 RESUMEN FINAL DE MIGRACIÓN (sin generación automática de cuotas)', $reporteFinal);
 
-        if ($this->duplicadosPermitidos > 0 || $this->cuotasPendientesGeneradas > 0) {
+        if ($this->duplicadosPermitidos > 0) {
             Log::warning('⚠️ Incidencias controladas durante la migración', [
                 'duplicados_permitidos' => $this->duplicadosPermitidos,
-                'cuotas_pendientes_creadas' => $this->cuotasPendientesGeneradas,
             ]);
         }
 
@@ -521,7 +513,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             }
         }
 
-        // 🔍 Validación final por estudiante
         $this->validarIntegridadYGenerarPendientes($carnetNormalizado);
     }
 
@@ -1483,208 +1474,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     private function validarIntegridadYGenerarPendientes(string $carnet): void
     {
-        try {
-            $prospecto = DB::table('prospectos')
-                ->select('id', 'carnet')
-                ->where('carnet', $carnet)
-                ->first();
-
-            if (!$prospecto) {
-                Log::warning('⚠️ No se encontró prospecto para validación final', [
-                    'carnet' => $carnet,
-                ]);
-                return;
-            }
-
-            $programas = DB::table('estudiante_programa')
-                ->select('id', 'programa_id', 'prospecto_id', 'fecha_inicio', 'fecha_fin', 'duracion_meses', 'cuota_mensual')
-                ->where('prospecto_id', $prospecto->id)
-                ->get();
-
-            if ($programas->isEmpty()) {
-                Log::info('ℹ️ Prospecto sin programas asociados para validación', [
-                    'carnet' => $carnet,
-                ]);
-                return;
-            }
-
-            foreach ($programas as $programa) {
-                $cuotasPrograma = DB::table('cuotas_programa_estudiante')
-                    ->where('estudiante_programa_id', $programa->id)
-                    ->orderBy('numero_cuota')
-                    ->get();
-
-                $cantidadCuotas = $cuotasPrograma->count();
-                $duracion = (int) ($programa->duracion_meses ?? 0);
-
-                $detalle = [
-                    'carnet' => $carnet,
-                    'estudiante_programa_id' => $programa->id,
-                    'duracion_meses' => $duracion,
-                    'cuotas_existentes' => $cantidadCuotas,
-                    'cuotas_creadas' => 0,
-                ];
-
-                $this->totalCuotasRegistradas += $cantidadCuotas;
-
-                if ($duracion <= 0) {
-                    Log::warning('⚠️ Programa sin duración definida durante validación', [
-                        'carnet' => $carnet,
-                        'estudiante_programa_id' => $programa->id,
-                    ]);
-                    $detalle['estado'] = 'sin_duracion';
-                    $this->resumenValidacion[] = $detalle;
-                    continue;
-                }
-
-                if ($cantidadCuotas > $duracion) {
-                    Log::warning('⚠️ Cantidad de cuotas excede la duración del programa, se respetan datos existentes', [
-                        'carnet' => $carnet,
-                        'estudiante_programa_id' => $programa->id,
-                        'cuotas_existentes' => $cantidadCuotas,
-                        'duracion_meses' => $duracion,
-                    ]);
-                    $detalle['estado'] = 'excede_duracion';
-                    $this->resumenValidacion[] = $detalle;
-                    continue;
-                }
-
-                if ($cantidadCuotas === $duracion) {
-                    Log::info('✅ Cuotas completas según duración del programa', [
-                        'carnet' => $carnet,
-                        'estudiante_programa_id' => $programa->id,
-                        'cuotas' => $cantidadCuotas,
-                        'duracion_meses' => $duracion,
-                    ]);
-                    $detalle['estado'] = 'completo';
-                    $this->resumenValidacion[] = $detalle;
-                    continue;
-                }
-
-                $faltantes = $duracion - $cantidadCuotas;
-                $creadas = $this->crearCuotasPendientes($programa, collect($cuotasPrograma), $faltantes, $carnet);
-
-                if ($creadas > 0) {
-                    $this->cuotasPendientesGeneradas += $creadas;
-                    $this->totalCuotasRegistradas += $creadas;
-                }
-
-                $detalle['cuotas_creadas'] = $creadas;
-                $detalle['estado'] = $creadas > 0 ? 'completado_con_autogeneradas' : 'sin_cambios';
-                $this->resumenValidacion[] = $detalle;
-            }
-        } catch (\Throwable $ex) {
-            Log::error('❌ Error en validación de integridad post-migración', [
-                'carnet' => $carnet,
-                'error' => $ex->getMessage(),
-            ]);
-        }
-    }
-
-    private function crearCuotasPendientes(object $programa, Collection $cuotasExistentes, int $faltantes, string $carnet): int
-    {
-        if ($faltantes <= 0) {
-            return 0;
-        }
-
-        $ultimoNumero = $cuotasExistentes->max('numero_cuota') ?? 0;
-        $ultimaCuota = $cuotasExistentes->sortBy('numero_cuota')->last();
-        $fechaInicio = $programa->fecha_inicio ? Carbon::parse($programa->fecha_inicio) : now()->startOfMonth();
-        $ultimaFecha = null;
-
-        if ($ultimaCuota && !empty($ultimaCuota->fecha_vencimiento)) {
-            try {
-                $ultimaFecha = Carbon::parse($ultimaCuota->fecha_vencimiento);
-            } catch (\Throwable $e) {
-                $ultimaFecha = null;
-            }
-        }
-
-        $montoCuota = (float) ($programa->cuota_mensual ?? 0);
-        if ($montoCuota <= 0 && $ultimaCuota && isset($ultimaCuota->monto)) {
-            $montoCuota = (float) $ultimaCuota->monto;
-        }
-
-        if ($montoCuota <= 0) {
-            Log::warning('⚠️ Monto de cuota no definido, se establecerá en 0 para cuotas auto-generadas', [
-                'carnet' => $carnet,
-                'estudiante_programa_id' => $programa->id,
-            ]);
-        }
-
-        $registros = [];
-        $ahora = now();
-
-        for ($i = 1; $i <= $faltantes; $i++) {
-            $numeroCuota = $ultimoNumero + $i;
-
-            if ($ultimaFecha) {
-                $fechaVencimiento = $ultimaFecha->copy()->addMonths($i);
-            } else {
-                $fechaVencimiento = $fechaInicio->copy()->addMonths($numeroCuota - 1);
-            }
-
-            $registro = [
-                'estudiante_programa_id' => $programa->id,
-                'numero_cuota' => $numeroCuota,
-                'fecha_vencimiento' => $fechaVencimiento->toDateString(),
-                'monto' => $montoCuota,
-                'estado' => 'pendiente',
-                'created_at' => $ahora,
-                'updated_at' => $ahora,
-            ];
-
-            if ($this->cuotasTablaTieneColumna('origen')) {
-                $registro['origen'] = 'auto_generado_por_migracion';
-            }
-
-            if ($this->cuotasTablaTieneColumna('created_by')) {
-                $registro['created_by'] = $this->uploaderId;
-            }
-
-            if ($this->cuotasTablaTieneColumna('updated_by')) {
-                $registro['updated_by'] = $this->uploaderId;
-            }
-
-            $registros[] = $registro;
-        }
-
-        if (empty($registros)) {
-            return 0;
-        }
-
-        DB::table('cuotas_programa_estudiante')->insert($registros);
-
-        Log::info('🆕 Cuotas pendientes generadas automáticamente durante validación', [
+        Log::debug('⏭️ Validación de cuotas omitida (sin generación automática)', [
             'carnet' => $carnet,
-            'estudiante_programa_id' => $programa->id,
-            'cuotas_creadas' => count($registros),
-            'desde_numero' => $ultimoNumero + 1,
-            'hasta_numero' => $ultimoNumero + count($registros),
         ]);
-
-        unset($this->cuotasPorEstudianteCache[$programa->id]);
-
-        return count($registros);
-    }
-
-    private function cuotasTablaTieneColumna(string $columna): bool
-    {
-        if (array_key_exists($columna, $this->cacheColumnasCuotas)) {
-            return $this->cacheColumnasCuotas[$columna];
-        }
-
-        try {
-            $this->cacheColumnasCuotas[$columna] = Schema::hasColumn('cuotas_programa_estudiante', $columna);
-        } catch (\Throwable $ex) {
-            Log::warning('⚠️ No se pudo verificar columna en cuotas_programa_estudiante', [
-                'columna' => $columna,
-                'error' => $ex->getMessage(),
-            ]);
-            $this->cacheColumnasCuotas[$columna] = false;
-        }
-
-        return $this->cacheColumnasCuotas[$columna];
     }
 
 
