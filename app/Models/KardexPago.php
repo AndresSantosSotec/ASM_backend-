@@ -8,6 +8,8 @@ class KardexPago extends Model
 {
     protected $table = 'kardex_pagos';
 
+    public bool $permitirDuplicadoExcel = false;
+
     protected $fillable = [
         'estudiante_programa_id',
         'cuota_id',
@@ -67,11 +69,24 @@ class KardexPago extends Model
             if (!empty($model->banco_normalizado) && !empty($model->numero_boleta_normalizada)) {
                 // Include estudiante_programa_id and fecha_pago to make fingerprint truly unique per payment
                 $estudiante = $model->estudiante_programa_id ?? 'UNKNOWN';
-                $fecha = $model->fecha_pago ? 
-                    (is_string($model->fecha_pago) ? $model->fecha_pago : $model->fecha_pago->format('Y-m-d')) : 
+                $fecha = $model->fecha_pago ?
+                    (is_string($model->fecha_pago) ? $model->fecha_pago : $model->fecha_pago->format('Y-m-d')) :
                     'UNKNOWN';
-                $model->boleta_fingerprint = hash('sha256', 
+
+                $fingerprintBase = hash('sha256',
                     $model->banco_normalizado.'|'.$model->numero_boleta_normalizada.'|'.$estudiante.'|'.$fecha);
+
+                if ($model->permitirDuplicadoExcel) {
+                    try {
+                        $sufijo = microtime(true) . '|' . bin2hex(random_bytes(5));
+                    } catch (\Throwable $e) {
+                        $sufijo = microtime(true) . '|' . uniqid('', true);
+                    }
+
+                    $model->boleta_fingerprint = hash('sha256', $fingerprintBase . '|dup|' . $sufijo);
+                } else {
+                    $model->boleta_fingerprint = $fingerprintBase;
+                }
             }
 
             // Nota: archivo_hash se setea en el controller con hash_file() ANTES de mover el archivo.
