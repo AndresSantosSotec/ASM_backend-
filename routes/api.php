@@ -190,6 +190,13 @@ Route::middleware('auth:sanctum')->group(function () {
         return $request->user();
     });
 
+    Route::prefix('mantenimientos')->group(function () {
+        Route::get('/kardex/dashboard', [MantenimientosController::class, 'kardexDashboard']);
+        Route::get('/kardex/datos', [MantenimientosController::class, 'kardexData']);
+        Route::get('/cuotas/dashboard', [MantenimientosController::class, 'cuotasDashboard']);
+        Route::get('/estudiantes/activos', [MantenimientosController::class, 'estudiantesActivos']);
+    });
+
     // ----------------------
     // Rutas de Prospectos
     // ----------------------
