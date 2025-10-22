@@ -732,7 +732,11 @@ Route::prefix('moodle')->middleware('auth:sanctum')->group(function () {
 });
 
 
-Route::prefix('Mantenimientos')->group(function () {
+//----------
+// Mantenimetos del Sistema
+//----------
+
+Route::prefix('Mantenimientos')->middleware('auth:sanctum')->group(function () {
 
 
 });
