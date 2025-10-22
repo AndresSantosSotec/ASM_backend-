@@ -298,7 +298,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         Log::info('⚠️ ADVERTENCIAS', [
             'total' => count($this->advertencias),
             'sin_cuota' => collect($this->advertencias)->where('tipo', 'SIN_CUOTA')->count(),
-            'duplicados' => collect($this->advertencias)->where('tipo', 'DUPLICADO')->count(),
+            'duplicados_permitidos' => collect($this->advertencias)->where('tipo', 'DUPLICADO_PERMITIDO')->count(),
             'pagos_parciales' => $this->pagosParciales,
             'diferencias_monto' => collect($this->advertencias)->where('tipo', 'DIFERENCIA_MONTO')->count()
         ]);
