@@ -363,6 +363,16 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         ];
     }
 
+    /**
+     * Guarda el resumen de la migración.
+     * Puedes modificar este método para guardar en base de datos, archivo o simplemente loguear.
+     */
+    private function guardarResumenMigracion(array $reporteFinal): void
+    {
+        // Por defecto solo loguea, puedes cambiar esto para guardar en archivo o base de datos si lo necesitas.
+        Log::info('📝 Resumen de migración guardado', $reporteFinal);
+    }
+
     private function validarColumnasExcel($primeraFila): array
     {
         $columnasRequeridas = [
@@ -1470,23 +1480,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return $cuotas;
     }
 
-    private function guardarResumenMigracion(array $reporte): void
-    {
-        try {
-            $ruta = 'import_reports/payment_history_summary_' . now()->format('Ymd_His') . '.json';
-            Storage::disk('local')->put($ruta, json_encode($reporte, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-            Log::info('📝 Reporte final de migración almacenado', [
-                'path' => storage_path('app/' . $ruta),
-                'total_duplicados_permitidos' => $reporte['total_duplicados_permitidos'],
-                'total_errores_criticos' => $reporte['total_errores_criticos'],
-            ]);
-        } catch (\Throwable $ex) {
-            Log::warning('⚠️ No se pudo generar el archivo JSON con el resumen final de migración', [
-                'error' => $ex->getMessage(),
-            ]);
-        }
-    }
 
     private function validarIntegridadYGenerarPendientes(string $carnet): void
     {
@@ -1694,24 +1687,6 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return $this->cacheColumnasCuotas[$columna];
     }
 
-    private function guardarResumenMigracion(array $reporte): void
-    {
-        try {
-            $ruta = 'import_reports/payment_history_summary_' . now()->format('Ymd_His') . '.json';
-            Storage::disk('local')->put($ruta, json_encode($reporte, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-            Log::info('📝 Reporte final de migración almacenado', [
-                'path' => storage_path('app/' . $ruta),
-                'total_cuotas_generadas' => $reporte['total_cuotas_generadas'],
-                'total_cuotas_pendientes_creadas' => $reporte['total_cuotas_pendientes_creadas'],
-                'total_duplicados_permitidos' => $reporte['total_duplicados_permitidos'],
-            ]);
-        } catch (\Throwable $ex) {
-            Log::warning('⚠️ No se pudo generar el archivo JSON con el resumen final de migración', [
-                'error' => $ex->getMessage(),
-            ]);
-        }
-    }
 
     /**
      * 🆕 Determinar si un pago es de tipo mensual
