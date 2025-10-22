@@ -60,7 +60,7 @@ use App\Http\Controllers\Api\AdminEstudiantePagosController;
 use App\Http\Controllers\Api\GestionPagosController;
 use App\Http\Controllers\Api\EstudiantesController;
 use App\Http\Controllers\Api\AdministracionController;
-
+use App\Http\Controllers\Api\MantenimientosController;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
