@@ -10,7 +10,7 @@ use App\Services\EstudianteService;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use App\Models\AdicionalEstudiante;
+use App\Models\ProspectoAdicional;
 use App\Models\KardexPago;
 use App\Models\CuotaProgramaEstudiante;
 use App\Models\ReconciliationRecord;
@@ -42,7 +42,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
     private array $estudiantesCache = [];
     private array $cuotasPorEstudianteCache = [];
-    private array $adicionalEstudianteCache = [];
+    private array $prospectosAdicionalesCache = [];
     private ?string $columnaMensualidad = null;
 
     private ?bool $kardexTienePeriodoPago = null;
@@ -368,18 +368,18 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
     private function validarColumnasExcel($primeraFila): array
     {
         $columnasRequeridas = [
-            'carnet',
-            'nombre_estudiante',
-            'plan_estudios',
-            'estatus',
-            'numero_boleta',
-            'monto',
-            'fecha_pago',
-            'banco',
-            'concepto',
-            'tipo_pago',
-            'mes_pago',
-            'ano',
+            ['carnet'],
+            ['nombre_estudiante'],
+            ['plan_estudios', 'plan_estudio', 'plan'],
+            ['estatus', 'estatus_normalizado'],
+            ['numero_boleta'],
+            ['monto'],
+            ['fecha_pago'],
+            ['banco'],
+            ['concepto'],
+            ['tipo_pago'],
+            ['mes_pago', 'mes'],
+            ['ano', 'año', 'anio', 'year'],
         ];
 
         $columnasOpcionales = [
@@ -388,6 +388,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'mensualidad_aprobada',
             'mensualidad',
             'notas_pago',
+            'notas_de_pago',
             'asesor',
             'empresa_donde_labora',
             'telefono',
@@ -410,10 +411,20 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         }
 
         $faltantes = [];
-        foreach ($columnasRequeridas as $columnaRequerida) {
-            $clave = $this->normalizarClave($columnaRequerida);
-            if (!array_key_exists($clave, $normalizadasEncontradas)) {
-                $faltantes[] = $columnaRequerida;
+        $columnasPresentes = [];
+        foreach ($columnasRequeridas as $grupo) {
+            $encontrada = false;
+            foreach ($grupo as $alias) {
+                $clave = $this->normalizarClave($alias);
+                if (array_key_exists($clave, $normalizadasEncontradas)) {
+                    $columnasPresentes[] = $normalizadasEncontradas[$clave];
+                    $encontrada = true;
+                    break;
+                }
+            }
+
+            if (!$encontrada) {
+                $faltantes[] = $grupo[0];
             }
         }
 
@@ -443,7 +454,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         return [
             'valido' => empty($faltantes),
             'faltantes' => $faltantes,
-            'encontradas' => $columnasEncontradas,
+            'encontradas' => $columnasPresentes,
             'opcionales_encontradas' => $opcionalesEncontradas,
             'columna_mensualidad_detectada' => $this->columnaMensualidad,
         ];
@@ -460,11 +471,13 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'cantidad_pagos' => $pagos->count()
         ]);
 
-        $this->guardarInformacionAdicionalEstudiante($carnetNormalizado, $pagos);
-
         // 🔥 CAMBIO: Pasar primer pago como contexto para creación
         $primerPago = $pagos->first();
         $programasEstudiante = $this->obtenerProgramasEstudiante($carnetNormalizado, $primerPago);
+
+        if ($programasEstudiante->isNotEmpty()) {
+            $this->guardarInformacionAdicionalEstudiante($carnetNormalizado, $pagos, $programasEstudiante);
+        }
 
         if ($programasEstudiante->isEmpty()) {
             $this->errores[] = [
@@ -516,51 +529,117 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $this->validarIntegridadYGenerarPendientes($carnetNormalizado);
     }
 
-    private function guardarInformacionAdicionalEstudiante(string $carnet, Collection $pagos): void
+    private function guardarInformacionAdicionalEstudiante(string $carnet, Collection $pagos, Collection $programasEstudiante): void
     {
-        if (isset($this->adicionalEstudianteCache[$carnet])) {
+        $programaReferencia = $programasEstudiante->first();
+
+        if (!$programaReferencia) {
             return;
         }
 
-        $notasPago = $pagos
-            ->pluck('notas_pago')
-            ->map(fn ($valor, $key) => trim((string) $valor))
-            ->first(fn ($valor, $key) => $valor !== '');
+        $prospectoId = $programaReferencia->prospecto_id ?? null;
 
-        $nomenclatura = $pagos
-            ->pluck('nomenclatura')
-            ->map(fn ($valor, $key) => trim((string) $valor))
-            ->first(fn ($valor, $key) => $valor !== '');
-
-        if ($notasPago === null && $nomenclatura === null) {
-            $this->adicionalEstudianteCache[$carnet] = true;
+        if (!$prospectoId || isset($this->prospectosAdicionalesCache[$prospectoId])) {
             return;
         }
 
-        $registro = AdicionalEstudiante::firstOrNew(['carnet' => $carnet]);
-        $cambios = false;
-
-        if ($notasPago !== null && $notasPago !== '' && $registro->notas_pago !== $notasPago) {
-            $registro->notas_pago = $notasPago;
-            $cambios = true;
-        }
-
-        if ($nomenclatura !== null && $nomenclatura !== '' && $registro->nomenclatura !== $nomenclatura) {
-            $registro->nomenclatura = $nomenclatura;
-            $cambios = true;
-        }
-
-        if (!$registro->exists || $cambios) {
-            $registro->save();
-
-            Log::info('🆕 Información adicional de estudiante registrada/actualizada', [
+        if (ProspectoAdicional::where('id_estudiante', $prospectoId)->exists()) {
+            $this->prospectosAdicionalesCache[$prospectoId] = true;
+            Log::debug('ℹ️ Registro adicional de prospecto ya existe, se omite la creación duplicada', [
                 'carnet' => $carnet,
-                'notas_pago' => $registro->notas_pago,
-                'nomenclatura' => $registro->nomenclatura,
+                'prospecto_id' => $prospectoId,
             ]);
+            return;
         }
 
-        $this->adicionalEstudianteCache[$carnet] = true;
+        $registroConDatos = $pagos->first(function ($pago) {
+            $rowArray = $pago instanceof Collection ? $pago->toArray() : (array) $pago;
+
+            $notas = trim((string) ($this->obtenerValorFila($rowArray, ['notas_pago', 'notas_de_pago'], '') ?? ''));
+            $nomen = trim((string) ($this->obtenerValorFila($rowArray, ['nomenclatura'], '') ?? ''));
+            $estatus = trim((string) ($this->obtenerValorFila($rowArray, ['estatus', 'estatus_normalizado'], '') ?? ''));
+
+            return $notas !== '' || $nomen !== '' || $estatus !== '';
+        });
+
+        if (!$registroConDatos) {
+            $registroConDatos = $pagos->first();
+        }
+
+        if (!$registroConDatos) {
+            $this->prospectosAdicionalesCache[$prospectoId] = true;
+            return;
+        }
+
+        $rowArray = $registroConDatos instanceof Collection ? $registroConDatos->toArray() : (array) $registroConDatos;
+
+        $notasPago = trim((string) ($this->obtenerValorFila($rowArray, ['notas_pago', 'notas_de_pago'], '') ?? ''));
+        $nomenclatura = trim((string) ($this->obtenerValorFila($rowArray, ['nomenclatura'], '') ?? ''));
+        $estatus = trim((string) ($this->obtenerValorFila($rowArray, ['estatus', 'estatus_normalizado'], '') ?? ''));
+
+        if ($estatus === '') {
+            $estatus = 'Activo';
+        }
+
+        $programaSeleccionado = $this->seleccionarProgramaParaInformacionAdicional($programasEstudiante, $pagos);
+
+        $registro = ProspectoAdicional::create([
+            'id_estudiante' => $prospectoId,
+            'id_estudiante_programa' => $programaSeleccionado,
+            'notas_pago' => $notasPago !== '' ? $notasPago : null,
+            'nomenclatura' => $nomenclatura !== '' ? $nomenclatura : null,
+            'status_actual' => $estatus,
+        ]);
+
+        $this->prospectosAdicionalesCache[$prospectoId] = true;
+
+        Log::info('🆕 Información adicional de prospecto registrada', [
+            'carnet' => $carnet,
+            'prospecto_id' => $prospectoId,
+            'estudiante_programa_id' => $registro->id_estudiante_programa,
+            'status' => $registro->status_actual,
+        ]);
+    }
+
+    private function seleccionarProgramaParaInformacionAdicional(Collection $programasEstudiante, Collection $pagos): ?int
+    {
+        if ($programasEstudiante->isEmpty()) {
+            return null;
+        }
+
+        $primerPago = $pagos->first();
+        if ($primerPago) {
+            $rowArray = $primerPago instanceof Collection ? $primerPago->toArray() : (array) $primerPago;
+            $planEstudios = trim((string) ($this->obtenerValorFila($rowArray, ['plan_estudios', 'plan_estudio', 'plan'], '') ?? ''));
+            $planNormalizado = $this->normalizarReferenciaPrograma($planEstudios);
+
+            if ($planNormalizado) {
+                $coincidente = $programasEstudiante->first(function ($programa) use ($planNormalizado) {
+                    $abreviatura = $this->normalizarReferenciaPrograma($programa->programa_abreviatura ?? null);
+                    $nombre = $this->normalizarReferenciaPrograma($programa->nombre_programa ?? null);
+
+                    return $abreviatura === $planNormalizado || $nombre === $planNormalizado;
+                });
+
+                if ($coincidente) {
+                    return $coincidente->estudiante_programa_id ?? null;
+                }
+            }
+        }
+
+        return $programasEstudiante->first()->estudiante_programa_id ?? null;
+    }
+
+    private function normalizarReferenciaPrograma(?string $valor): ?string
+    {
+        if ($valor === null) {
+            return null;
+        }
+
+        $normalizado = strtoupper(trim($valor));
+        $normalizado = str_replace([' ', '_', '-'], '', $normalizado);
+
+        return $normalizado !== '' ? $normalizado : null;
     }
 
     private function procesarPagoIndividual($row, Collection $programasEstudiante, $numeroFila)
@@ -581,7 +660,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         $tipoPagoOriginal = trim((string) $this->obtenerValorFila($rowArray, ['tipo_pago'], 'MENSUAL'));
         $tipoPagoNormalizado = strtoupper($tipoPagoOriginal);
         $ano = trim((string) $this->obtenerValorFila($rowArray, ['año', 'ano'], ''));
-        $estatus = trim((string) $this->obtenerValorFila($rowArray, ['estatus'], ''));
+        $estatus = trim((string) $this->obtenerValorFila($rowArray, ['estatus', 'estatus_normalizado'], ''));
 
         $periodoPagoInfo = $this->obtenerPeriodoDesdeFila($rowArray, $fechaPago);
         $periodoPagoString = $this->formatearPeriodo($periodoPagoInfo['mes'], $periodoPagoInfo['anio']);
