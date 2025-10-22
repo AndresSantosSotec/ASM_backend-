@@ -67,6 +67,6 @@ use App\Models\UserRole;
 
 class MantenimientosController extends Controller
 {
-    //controller dedicado a los mantenimientos creaciones cruds y opciones del sistema
+    //Dasborad de datos generales del mantenimiento
 
 }
