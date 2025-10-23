@@ -195,6 +195,28 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/kardex/datos', [MantenimientosController::class, 'kardexData']);
         Route::get('/cuotas/dashboard', [MantenimientosController::class, 'cuotasDashboard']);
         Route::get('/estudiantes/activos', [MantenimientosController::class, 'estudiantesActivos']);
+
+        // CRUD de Cuotas
+        Route::get('/cuotas', [MantenimientosController::class, 'cuotasIndex']);
+        Route::get('/cuotas/estudiante', [MantenimientosController::class, 'cuotasPorEstudiante']);
+        Route::get('/cuotas/{id}', [MantenimientosController::class, 'cuotasShow']);
+        Route::post('/cuotas', [MantenimientosController::class, 'cuotasStore']);
+        Route::put('/cuotas/{id}', [MantenimientosController::class, 'cuotasUpdate']);
+        Route::delete('/cuotas/{id}', [MantenimientosController::class, 'cuotasDestroy']);
+
+        // CRUD de Kardex (Movimientos de Pago)
+        Route::get('/kardex', [MantenimientosController::class, 'kardexIndex']);
+        Route::get('/kardex/{id}', [MantenimientosController::class, 'kardexShow']);
+        Route::post('/kardex', [MantenimientosController::class, 'kardexStore']);
+        Route::put('/kardex/{id}', [MantenimientosController::class, 'kardexUpdate']);
+        Route::delete('/kardex/{id}', [MantenimientosController::class, 'kardexDestroy']);
+
+        // CRUD de Reconciliaciones Bancarias
+        Route::get('/reconciliaciones', [MantenimientosController::class, 'reconciliacionesIndex']);
+        Route::get('/reconciliaciones/{id}', [MantenimientosController::class, 'reconciliacionesShow']);
+        Route::post('/reconciliaciones', [MantenimientosController::class, 'reconciliacionesStore']);
+        Route::put('/reconciliaciones/{id}', [MantenimientosController::class, 'reconciliacionesUpdate']);
+        Route::delete('/reconciliaciones/{id}', [MantenimientosController::class, 'reconciliacionesDestroy']);
     });
 
     // ----------------------
