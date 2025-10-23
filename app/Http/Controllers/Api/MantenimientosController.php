@@ -277,29 +277,87 @@ class MantenimientosController extends Controller
     }
 
     /**
-     * Dashboard para cuotas por estudiante (restaurado y funcional).
+     * Dashboard para cuotas por estudiante con PAGINACIÓN COMPLETA.
      */
     public function cuotasDashboard(Request $request)
     {
         try {
             $filters = $this->extractCommonFilters($request);
-            $limit = $this->resolveLimit($request);
+            
+            // Paginación
+            $page = max(1, (int)$request->input('page', 1));
+            $perPage = $this->resolveLimit($request, 100, 'per_page'); // Default 100 por página
+            $perPage = min($perPage, 500); // Máximo 500 por página
+            
             $now = Carbon::now();
 
+            // Construir query base de estudiantes activos
+            $estudiantesQuery = EstudiantePrograma::query()
+                ->with([
+                    'prospecto:id,nombre_completo,carnet,correo_electronico,telefono,activo',
+                    'programa:id,nombre_del_programa',
+                ])
+                ->whereHas('prospecto', function ($q) use ($filters) {
+                    $q->where('activo', true);
+                    
+                    // Filtro por prospecto_id
+                    if (!empty($filters['prospecto_id'])) {
+                        $q->where('id', $filters['prospecto_id']);
+                    }
+                    
+                    // Búsqueda general (nombre, carnet, correo)
+                    if (!empty($filters['search'])) {
+                        $like = '%' . $filters['search'] . '%';
+                        $q->where(function ($sq) use ($like) {
+                            $sq->where('nombre_completo', 'like', $like)
+                               ->orWhere('carnet', 'like', $like)
+                               ->orWhere('correo_electronico', 'like', $like);
+                        });
+                    }
+                });
+
+            // Filtro por programa_id
+            if (!empty($filters['programa_id'])) {
+                $estudiantesQuery->where('programa_id', $filters['programa_id']);
+            }
+
+            // Contar total de estudiantes (sin paginación)
+            $estudiantesActivos = (clone $estudiantesQuery)->count();
+            
+            // Calcular paginación
+            $totalPages = (int)ceil($estudiantesActivos / $perPage);
+            $offset = ($page - 1) * $perPage;
+            
+            // Obtener estudiantes con paginación
+            $estudiantesProgramas = $estudiantesQuery
+                ->skip($offset)
+                ->take($perPage)
+                ->get();
+
+            // Log para debug
+            Log::info('cuotasDashboard: Estudiantes encontrados', [
+                'total' => $estudiantesActivos,
+                'page' => $page,
+                'per_page' => $perPage,
+                'total_pages' => $totalPages,
+                'filters' => $filters,
+            ]);
+
+            // Calcular métricas globales
             $cuotasBase = $this->buildCuotasBaseQuery($filters);
-
-            $estudiantesActivos = EstudiantePrograma::query()
-                ->whereHas('prospecto', fn($q) => $q->where('activo', true))
-                ->when($filters['programa_id'] ?? null, fn($q, $id) => $q->where('programa_id', $id))
-                ->when($filters['prospecto_id'] ?? null, fn($q, $id) => $q->where('prospecto_id', $id))
-                ->count();
-
+            
             $saldoPendiente = (float) (clone $cuotasBase)
-                ->where(fn($q) => $q->whereNull('estado')->orWhere('estado', '!=', 'pagado'))
+                ->where(function ($q) {
+                    $q->whereNull('estado')
+                      ->orWhere('estado', '!=', 'pagado');
+                })
                 ->sum('monto');
 
             $cuotasEnMora = (clone $cuotasBase)
-                ->where(fn($q) => $q->whereNull('estado')->orWhere('estado', '!=', 'pagado'))
+                ->where(function ($q) {
+                    $q->whereNull('estado')
+                      ->orWhere('estado', '!=', 'pagado');
+                })
                 ->whereDate('fecha_vencimiento', '<', $now->toDateString())
                 ->count();
 
@@ -308,62 +366,70 @@ class MantenimientosController extends Controller
                 ->whereIn('status', ['restructurado', 'reestructurado', 'restructured'])
                 ->count();
 
-            $cuotas = $this->buildCuotasBaseQuery($filters)
-                ->with([
-                    'estudiantePrograma:id,prospecto_id,programa_id',
-                    'estudiantePrograma.prospecto:id,nombre_completo,carnet,correo_electronico,telefono,activo',
-                    'estudiantePrograma.programa:id,nombre_del_programa as nombre',
-                ])
-                ->orderBy('fecha_vencimiento')
-                ->get();
+            // Mapear estudiantes con sus cuotas
+            $estudiantes = $estudiantesProgramas->map(function ($ep) use ($now) {
+                $prospecto = $ep->prospecto;
+                $programa = $ep->programa;
 
-            $estudiantes = $cuotas->groupBy('estudiante_programa_id')->values()
-                ->map(function ($grupo) use ($limit) {
-                    $cuotasEst = collect($grupo)->sortBy('fecha_vencimiento');
-                    $primera = $cuotasEst->first();
-                    $ep = $primera?->estudiantePrograma;
-                    $prospecto = optional($ep)->prospecto;
-                    $programa = optional($ep)->programa;
-                    $pendientes = $cuotasEst->where('estado', '!=', 'pagado');
-                    $proxima = $pendientes->first();
+                // Obtener cuotas del estudiante
+                $cuotas = CuotaProgramaEstudiante::where('estudiante_programa_id', $ep->id)
+                    ->orderBy('numero_cuota')
+                    ->get();
 
-                    return [
-                        'estudiante_programa_id' => $ep?->id,
-                        'prospecto' => $prospecto ? [
-                            'id' => $prospecto->id,
-                            'nombre' => $prospecto->nombre_completo,
-                            'carnet' => $prospecto->carnet,
-                            'correo' => $prospecto->correo_electronico,
-                            'telefono' => $prospecto->telefono,
-                        ] : null,
-                        'programa' => $programa ? [
-                            'id' => $programa->id,
-                            'nombre' => $programa->nombre,
-                        ] : null,
-                        'saldo_pendiente' => (float) $pendientes->sum('monto'),
-                        'cuotas_pendientes' => $pendientes->count(),
-                        'cuotas_pagadas' => $cuotasEst->count() - $pendientes->count(),
-                        'proxima_cuota' => $proxima ? [
-                            'id' => $proxima->id,
-                            'numero_cuota' => $proxima->numero_cuota,
-                            'fecha_vencimiento' => optional($proxima->fecha_vencimiento)->format('Y-m-d'),
-                            'monto' => (float) $proxima->monto,
-                            'estado' => $proxima->estado,
-                        ] : null,
-                        'cuotas' => $cuotasEst->take($limit)->map(fn($c) => [
+                $pendientes = $cuotas->filter(function ($c) {
+                    return is_null($c->estado) || $c->estado !== 'pagado';
+                });
+
+                $proxima = $pendientes->sortBy('fecha_vencimiento')->first();
+
+                return [
+                    'estudiante_programa_id' => $ep->id,
+                    'prospecto' => $prospecto ? [
+                        'id' => $prospecto->id,
+                        'nombre' => $prospecto->nombre_completo,
+                        'carnet' => $prospecto->carnet,
+                        'correo' => $prospecto->correo_electronico,
+                        'telefono' => $prospecto->telefono,
+                    ] : null,
+                    'programa' => $programa ? [
+                        'id' => $programa->id,
+                        'nombre' => $programa->nombre_del_programa,
+                    ] : null,
+                    'saldo_pendiente' => (float) $pendientes->sum('monto'),
+                    'cuotas_pendientes' => $pendientes->count(),
+                    'cuotas_pagadas' => $cuotas->count() - $pendientes->count(),
+                    'proxima_cuota' => $proxima ? [
+                        'id' => $proxima->id,
+                        'numero_cuota' => $proxima->numero_cuota,
+                        'fecha_vencimiento' => optional($proxima->fecha_vencimiento)->format('Y-m-d'),
+                        'monto' => (float) $proxima->monto,
+                        'estado' => $proxima->estado ?? 'pendiente',
+                    ] : null,
+                    'cuotas' => $cuotas->map(function ($c) {
+                        return [
                             'id' => $c->id,
                             'numero_cuota' => $c->numero_cuota,
                             'fecha_vencimiento' => optional($c->fecha_vencimiento)->format('Y-m-d'),
                             'monto' => (float) $c->monto,
-                            'estado' => $c->estado,
+                            'estado' => $c->estado ?? 'pendiente',
                             'paid_at' => optional($c->paid_at)->format('Y-m-d H:i:s'),
-                        ])->values(),
-                    ];
-                })->take($limit);
+                        ];
+                    })->values(),
+                ];
+            })->values();
 
             return response()->json([
                 'timestamp' => $now->toIso8601String(),
-                'filters' => array_merge($filters, ['limit' => $limit]),
+                'filters' => $filters,
+                'pagination' => [
+                    'current_page' => $page,
+                    'per_page' => $perPage,
+                    'total' => $estudiantesActivos,
+                    'total_pages' => $totalPages,
+                    'from' => $estudiantesActivos > 0 ? $offset + 1 : 0,
+                    'to' => min($offset + $perPage, $estudiantesActivos),
+                    'has_more' => $page < $totalPages,
+                ],
                 'summary' => [
                     'estudiantes_activos' => $estudiantesActivos,
                     'saldo_estimado' => $saldoPendiente,
@@ -373,6 +439,13 @@ class MantenimientosController extends Controller
                 'estudiantes' => $estudiantes,
             ]);
         } catch (\Throwable $th) {
+            Log::error('Error en cuotasDashboard', [
+                'message' => $th->getMessage(),
+                'file' => $th->getFile(),
+                'line' => $th->getLine(),
+                'trace' => $th->getTraceAsString(),
+            ]);
+            
             return $this->errorResponse('Error al generar el dashboard de cuotas', $th);
         }
     }

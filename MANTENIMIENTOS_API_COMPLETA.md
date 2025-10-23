@@ -306,4 +306,4 @@ Los logs de errores se guardan en `storage/logs/laravel.log` con contexto comple
 
 ---
 
-¿Necesitas documentación adicional, ejemplos con Postman/Insomnia, o ajustes en algún endpoint?
+
