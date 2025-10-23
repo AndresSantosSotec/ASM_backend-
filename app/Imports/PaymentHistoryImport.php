@@ -788,34 +788,26 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                     }
                 }
 
-                // 🔥 Buscar cuota con lógica flexible
-                // 🆕 NUEVO: Solo asignar cuota si el tipo_pago es "MENSUAL"
+                // 🔥 Buscar o crear cuota con lógica flexible
+                // 🆕 NUEVO: Siempre intentar crear/buscar cuota si hay datos de mes/año/monto
+                // buscarCuotaFlexible() ahora auto-crea cuotas cuando no existen
                 $cuota = null;
-                $esMenual = $this->esPagoMensual($tipoPagoNormalizado);
+                
+                Log::info("🔍 Buscando/creando cuota para el pago", [
+                    'fila' => $numeroFila,
+                    'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
+                    'fecha_pago' => $fechaPago->toDateString(),
+                    'monto' => $monto,
+                    'tipo_pago' => $tipoPagoNormalizado
+                ]);
 
-                if ($esMenual) {
-                    Log::info("🔍 Buscando cuota para asignar al pago (MENSUAL)", [
-                        'fila' => $numeroFila,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
-                        'fecha_pago' => $fechaPago->toDateString(),
-                        'monto' => $monto,
-                        'tipo_pago' => $tipoPagoNormalizado
-                    ]);
-
-                    $cuota = $this->buscarCuotaFlexible(
-                        $programaAsignado->estudiante_programa_id,
-                        $rowArray,
-                        $fechaPago,
-                        $monto,
-                        $numeroFila
-                    );
-                } else {
-                    Log::info("⏭️ Saltando asignación de cuota (pago NO es mensual)", [
-                        'fila' => $numeroFila,
-                        'tipo_pago' => $tipoPagoNormalizado,
-                        'estudiante_programa_id' => $programaAsignado->estudiante_programa_id
-                    ]);
-                }
+                $cuota = $this->buscarCuotaFlexible(
+                    $programaAsignado->estudiante_programa_id,
+                    $rowArray,
+                    $fechaPago,
+                    $monto,
+                    $numeroFila
+                );
 
                 if (!$cuota) {
                     Log::warning("⚠️ No se encontró cuota pendiente para este pago", [
@@ -1007,6 +999,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             'cuotas_existentes' => $cuotas->count()
         ]);
 
+        // ✅ PASO 1: Buscar por periodo (mes/año)
         if ($mesObjetivo && $anioObjetivo) {
             $cuotaPorPeriodo = $cuotas->first(function ($cuota) use ($mesObjetivo, $anioObjetivo) {
                 if (empty($cuota->fecha_vencimiento)) {
@@ -1037,16 +1030,9 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
 
                 return $cuotaPorPeriodo;
             }
-            Log::warning('⚠️ No se encontró cuota existente que coincida con el periodo declarado', [
-                'estudiante_programa_id' => $estudianteProgramaId,
-                'mes' => $mesObjetivo,
-                'anio' => $anioObjetivo,
-                'monto_pago' => $montoPago,
-                'fila' => $numeroFila,
-                'tipo_archivo' => $this->tipoArchivo,
-            ]);
         }
 
+        // ✅ PASO 2: Buscar por monto exacto
         $cuotaPorMontoExacto = $cuotas->first(function ($cuota) use ($montoPago) {
             return abs($cuota->monto - $montoPago) < 0.01;
         });
@@ -1059,6 +1045,77 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             return $cuotaPorMontoExacto;
         }
 
+        // 🆕 PASO 3: CREAR CUOTA si no existe (para migración histórica)
+        if ($mesObjetivo && $anioObjetivo && $montoPago > 0) {
+            Log::info('🆕 Creando cuota automáticamente para pago histórico', [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'mes' => $mesObjetivo,
+                'anio' => $anioObjetivo,
+                'monto' => $montoPago,
+                'fila' => $numeroFila
+            ]);
+
+            try {
+                // Calcular número de cuota (siguiente disponible)
+                $ultimoNumeroCuota = CuotaProgramaEstudiante::where('estudiante_programa_id', $estudianteProgramaId)
+                    ->max('numero_cuota') ?? 0;
+                
+                $numeroCuota = $ultimoNumeroCuota + 1;
+
+                // Fecha de vencimiento: último día del mes del periodo
+                $fechaVencimiento = Carbon::create($anioObjetivo, $mesObjetivo, 1)
+                    ->endOfMonth();
+
+                // Crear la cuota
+                $nuevaCuota = CuotaProgramaEstudiante::create([
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'numero_cuota' => $numeroCuota,
+                    'fecha_vencimiento' => $fechaVencimiento,
+                    'monto' => $montoPago,
+                    'estado' => 'pendiente', // Se marcará como pagada después
+                    'created_by' => $this->uploaderId,
+                    'updated_by' => $this->uploaderId,
+                ]);
+
+                // Limpiar cache de cuotas para este estudiante
+                unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+                Log::info('✅ Cuota creada exitosamente para migración', [
+                    'cuota_id' => $nuevaCuota->id,
+                    'numero_cuota' => $numeroCuota,
+                    'fecha_vencimiento' => $fechaVencimiento->toDateString(),
+                    'monto' => $montoPago,
+                    'estudiante_programa_id' => $estudianteProgramaId
+                ]);
+
+                $this->advertencias[] = [
+                    'tipo' => 'CUOTA_CREADA_AUTOMATICAMENTE',
+                    'fila' => $numeroFila,
+                    'mensaje' => "Cuota #{$numeroCuota} creada automáticamente para el pago histórico",
+                    'cuota_id' => $nuevaCuota->id,
+                    'periodo' => $this->formatearPeriodo($mesObjetivo, $anioObjetivo)
+                ];
+
+                return $nuevaCuota;
+            } catch (\Throwable $e) {
+                Log::error('❌ Error al crear cuota automáticamente', [
+                    'estudiante_programa_id' => $estudianteProgramaId,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+
+                $this->errores[] = [
+                    'tipo' => 'ERROR_CREAR_CUOTA',
+                    'fila' => $numeroFila,
+                    'error' => 'No se pudo crear la cuota automáticamente: ' . $e->getMessage(),
+                    'estudiante_programa_id' => $estudianteProgramaId
+                ];
+
+                return null;
+            }
+        }
+
+        // No se pudo encontrar ni crear cuota
         if ($mesObjetivo && $anioObjetivo) {
             $this->registrarDesfasePeriodo(
                 $fechaPago,
@@ -1070,7 +1127,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
             );
         }
 
-        Log::warning('⚠️ No se encontró cuota pendiente compatible. No se generará automáticamente.', [
+        Log::warning('⚠️ No se pudo encontrar ni crear cuota para este pago', [
             'estudiante_programa_id' => $estudianteProgramaId,
             'mes' => $mesObjetivo,
             'anio' => $anioObjetivo,
