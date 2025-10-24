@@ -45,14 +45,10 @@ class Permisos extends Model
     ];
 
     /**
-     * Get all users who have this permission.
+     * NOTA: La relación users() fue eliminada porque userpermissions ahora usa moduleview_id
+     * Los permisos de usuarios se manejan directamente a través de ModulesViews
+     * Esta tabla 'permissions' es solo para permisos de ROLES (con actions, effects, etc.)
      */
-    public function users()
-    {
-        return $this->belongsToMany(User::class, 'userpermissions', 'permission_id', 'user_id')
-            ->withPivot('assigned_at', 'scope')
-            ->withTimestamps();
-    }
 
     /**
      * Get the module view that owns this permission.

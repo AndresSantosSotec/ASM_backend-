@@ -21,7 +21,7 @@ class UserPermisosController extends Controller
             ], 400);
         }
 
-        $permissions = UserPermisos::with('permission.moduleView.module')
+        $permissions = UserPermisos::with('moduleView.module')
             ->where('user_id', $user_id)
             ->get();
 
@@ -57,7 +57,7 @@ class UserPermisosController extends Controller
         }
         $request->merge(['permissions' => $permissions]);
 
-        // Valida entrada
+        // Valida entrada - AHORA valida directamente contra moduleviews
         $validator = Validator::make($request->all(), [
             'user_id'       => 'required|exists:users,id',
             'permissions'   => 'required|array',
@@ -78,33 +78,6 @@ class UserPermisosController extends Controller
         $userId = (int) $request->input('user_id');
         $moduleviewIds = $request->input('permissions', []);
 
-        // Mapea TODOS los moduleview_id -> permission_id con JOIN correcto sobre "permissions as p"
-        $permMap = DB::table('permissions as p')
-            ->join('moduleviews as mv', 'mv.view_path', '=', 'p.route_path')
-            ->whereIn('mv.id', $moduleviewIds)
-            ->where('p.action', '=', 'view')
-            ->where('p.is_enabled', '=', true)
-            ->pluck('p.id', 'mv.id')   // [mv_id => perm_id]
-            ->toArray();
-
-        // Si falta alguno, no borres nada y responde 422
-        $missingMvIds = array_values(array_diff($moduleviewIds, array_keys($permMap)));
-        if (!empty($missingMvIds)) {
-            Log::warning('UserPermisos.store missing view permissions', [
-                'missing_moduleview_ids' => $missingMvIds
-            ]);
-            return response()->json([
-                'success' => false,
-                'message' => "Algunas vistas seleccionadas no tienen permiso 'view' configurado o habilitado.",
-                'errors'  => [
-                    'permissions' => array_map(
-                        fn($id) => "moduleview_id {$id} no tiene permiso 'view' configurado en permissions o está deshabilitado.",
-                        $missingMvIds
-                    )
-                ]
-            ], 422);
-        }
-
         DB::beginTransaction();
         try {
             // Bloquea filas actuales del usuario para evitar carreras
@@ -121,7 +94,7 @@ class UserPermisosController extends Controller
             foreach ($moduleviewIds as $mvId) {
                 $rows[] = [
                     'user_id'       => $userId,
-                    'permission_id' => $permMap[$mvId],
+                    'moduleview_id' => $mvId,
                     'assigned_at'   => $now,
                     'scope'         => 'self'
                 ];
@@ -132,7 +105,7 @@ class UserPermisosController extends Controller
 
             DB::commit();
 
-            $updated = UserPermisos::with('permission.moduleView.module')
+            $updated = UserPermisos::with('moduleView.module')
                 ->where('user_id', $userId)
                 ->get();
 

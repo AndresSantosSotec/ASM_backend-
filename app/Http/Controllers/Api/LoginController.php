@@ -55,15 +55,14 @@ class LoginController extends Controller
         // Generar token de acceso usando Laravel Sanctum
         $token = $user->createToken('authToken')->plainTextToken;
 
-        // Obtener permisos asignados al usuario (opcional, si los necesitas en el frontend)
-        $permissions = UserPermisos::with('permission')
+        // Obtener permisos asignados al usuario (ahora usa moduleView)
+        $permissions = UserPermisos::with('moduleView')
             ->where('user_id', $user->id)
             ->get();
 
         // Obtener únicamente las vistas de módulos que el usuario tiene asignadas.
-        // Se hace una subconsulta para obtener solo aquellas moduleviews cuyo id esté presente en la tabla de permisos del usuario.
         $allowedViews = ModulesViews::whereIn('id', function($query) use ($user) {
-                $query->select('permission_id')
+                $query->select('moduleview_id')
                       ->from('userpermissions')
                       ->where('user_id', $user->id);
             })

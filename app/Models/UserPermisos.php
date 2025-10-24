@@ -37,7 +37,7 @@ class UserPermisos extends Model
      */
     protected $fillable = [
         'user_id',
-        'permission_id',
+        'moduleview_id',
         'assigned_at',
         'scope'
     ];
@@ -50,7 +50,7 @@ class UserPermisos extends Model
     protected $casts = [
         'assigned_at' => 'datetime',
         'user_id' => 'integer',
-        'permission_id' => 'integer'
+        'moduleview_id' => 'integer'
     ];
 
     /**
@@ -62,10 +62,10 @@ class UserPermisos extends Model
     }
 
     /**
-     * Get the permission details.
+     * Get the moduleview details.
      */
-    public function permission()
+    public function moduleView()
     {
-        return $this->belongsTo(Permisos::class, 'permission_id', 'id');
+        return $this->belongsTo(ModulesViews::class, 'moduleview_id', 'id');
     }
 }

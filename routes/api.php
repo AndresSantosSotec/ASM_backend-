@@ -764,6 +764,8 @@ Route::prefix('moodle')->middleware('auth:sanctum')->group(function () {
     Route::get('/consultas/estatus/{carnet?}', [MoodleConsultasController::class, 'estatusAcademico']);
     Route::get('/consultas', [MoodleConsultasController::class, 'cursosPorCarnet']);
     Route::get('/programacion-cursos', [MoodleConsultasController::class, 'programacionCursos']);
+    // Additional Moodle integration routes can be added here
+
 });
 
 //----------
@@ -777,6 +779,8 @@ Route::prefix('moodle/test')->middleware('auth:sanctum')->group(function () {
     Route::post('/courses', [App\Http\Controllers\Api\MoodleTestController::class, 'createCourse']);
     Route::delete('/courses/{id}', [App\Http\Controllers\Api\MoodleTestController::class, 'deleteCourse']);
     Route::get('/categories', [App\Http\Controllers\Api\MoodleTestController::class, 'getCategories']);
+
+
 });
 
 
