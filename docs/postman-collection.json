@@ -1,0 +1,456 @@
+{
+  "info": {
+    "name": "ASMProlink - Password Recovery",
+    "description": "Colección de Postman para probar el sistema de recuperación de contraseña",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Password Recovery",
+      "item": [
+        {
+          "name": "1. Recuperar Contraseña - Exitoso",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"usuario@ejemplo.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/password/recover",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "password",
+                "recover"
+              ]
+            },
+            "description": "Solicitud exitosa de recuperación de contraseña. El usuario recibirá un email con su contraseña temporal."
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"usuario@ejemplo.com\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/password/recover",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "password",
+                    "recover"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Si el correo electrónico está registrado, recibirás un email con tu nueva contraseña temporal.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "2. Email No Registrado",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"noencontrado@ejemplo.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/password/recover",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "password",
+                "recover"
+              ]
+            },
+            "description": "Email no registrado - Respuesta genérica (prevención de enumeración)"
+          },
+          "response": [
+            {
+              "name": "Generic Response (Same as Success)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"noencontrado@ejemplo.com\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/password/recover",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "password",
+                    "recover"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Si el correo electrónico está registrado, recibirás un email con tu nueva contraseña temporal.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "3. Email Inválido - Validación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"email-invalido\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/password/recover",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "password",
+                "recover"
+              ]
+            },
+            "description": "Email con formato inválido - Error de validación"
+          },
+          "response": [
+            {
+              "name": "Validation Error",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"email-invalido\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/password/recover",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "password",
+                    "recover"
+                  ]
+                }
+              },
+              "status": "Unprocessable Entity",
+              "code": 422,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": false,\n  \"message\": \"El correo electrónico proporcionado no es válido.\",\n  \"errors\": {\n    \"email\": [\n      \"El campo email debe ser una dirección de correo válida.\"\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "4. Email Faltante - Validación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/password/recover",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "password",
+                "recover"
+              ]
+            },
+            "description": "Email vacío - Error de validación"
+          },
+          "response": [
+            {
+              "name": "Required Field Error",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/password/recover",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "password",
+                    "recover"
+                  ]
+                }
+              },
+              "status": "Unprocessable Entity",
+              "code": 422,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": false,\n  \"message\": \"El correo electrónico proporcionado no es válido.\",\n  \"errors\": {\n    \"email\": [\n      \"El campo email es obligatorio.\"\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "5. Rate Limit - Múltiples Solicitudes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"usuario@ejemplo.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/password/recover",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "password",
+                "recover"
+              ]
+            },
+            "description": "Segunda solicitud dentro de 1 hora - Rate limit excedido"
+          },
+          "response": [
+            {
+              "name": "Too Many Requests",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"usuario@ejemplo.com\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/password/recover",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "password",
+                    "recover"
+                  ]
+                }
+              },
+              "status": "Too Many Requests",
+              "code": 429,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Retry-After",
+                  "value": "3600"
+                }
+              ],
+              "body": "{\n  \"message\": \"Too Many Requests\"\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Endpoints relacionados con la recuperación de contraseña"
+    },
+    {
+      "name": "Utilities",
+      "item": [
+        {
+          "name": "Ping API",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ping",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ping"
+              ]
+            },
+            "description": "Verificar que el API esté funcionando"
+          },
+          "response": [
+            {
+              "name": "Pong",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/ping",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "ping"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"message\": \"pong!\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Database Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/db-status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "db-status"
+              ]
+            },
+            "description": "Verificar conexión a la base de datos"
+          },
+          "response": [
+            {
+              "name": "Connected",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/db-status",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "db-status"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"db\": \"connected\",\n  \"status\": \"ok\",\n  \"time\": \"2025-10-24 13:53:45\"\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Utilidades para verificar el estado del API"
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ]
+}

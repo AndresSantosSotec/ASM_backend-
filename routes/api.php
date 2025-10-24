@@ -61,6 +61,7 @@ use App\Http\Controllers\Api\GestionPagosController;
 use App\Http\Controllers\Api\EstudiantesController;
 use App\Http\Controllers\Api\AdministracionController;
 use App\Http\Controllers\Api\MantenimientosController;
+use App\Http\Controllers\Api\PasswordRecoveryController;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -159,6 +160,11 @@ Route::get('/health', function () {
 // Rutas de autenticación
 Route::post('/login', [LoginController::class, 'login'])->name('login');
 Route::post('/logout', [LoginController::class, 'logout'])->middleware('auth:sanctum');
+
+// Recuperación de contraseña (pública, con rate limiting)
+Route::post('/password/recover', [PasswordRecoveryController::class, 'recover'])
+    ->middleware('throttle:1,60') // 1 solicitud por hora
+    ->name('password.recover');
 
 // Inscripciones y generación de plan de pagos
 Route::post('/plan-pagos/generar', [PlanPagosController::class, 'generar']);
@@ -758,6 +764,19 @@ Route::prefix('moodle')->middleware('auth:sanctum')->group(function () {
     Route::get('/consultas/estatus/{carnet?}', [MoodleConsultasController::class, 'estatusAcademico']);
     Route::get('/consultas', [MoodleConsultasController::class, 'cursosPorCarnet']);
     Route::get('/programacion-cursos', [MoodleConsultasController::class, 'programacionCursos']);
+});
+
+//----------
+// Moodle Test & Management APIs
+//----------
+Route::prefix('moodle/test')->middleware('auth:sanctum')->group(function () {
+    Route::get('/connection', [App\Http\Controllers\Api\MoodleTestController::class, 'testConnection']);
+    Route::get('/functions', [App\Http\Controllers\Api\MoodleTestController::class, 'listFunctions']);
+    Route::get('/courses', [App\Http\Controllers\Api\MoodleTestController::class, 'listCourses']);
+    Route::get('/courses/{id}', [App\Http\Controllers\Api\MoodleTestController::class, 'getCourse']);
+    Route::post('/courses', [App\Http\Controllers\Api\MoodleTestController::class, 'createCourse']);
+    Route::delete('/courses/{id}', [App\Http\Controllers\Api\MoodleTestController::class, 'deleteCourse']);
+    Route::get('/categories', [App\Http\Controllers\Api\MoodleTestController::class, 'getCategories']);
 });
 
 
