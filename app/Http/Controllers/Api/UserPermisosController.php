@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\UserPermisos;
+use App\Models\Permisos;
+use App\Models\ModulesViews;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -78,31 +80,73 @@ class UserPermisosController extends Controller
         $userId = (int) $request->input('user_id');
         $moduleviewIds = $request->input('permissions', []);
 
-        // Mapea TODOS los moduleview_id -> permission_id con JOIN correcto sobre "permissions as p"
-        $permMap = DB::table('permissions as p')
-            ->join('moduleviews as mv', 'mv.view_path', '=', 'p.route_path')
-            ->whereIn('mv.id', $moduleviewIds)
-            ->where('p.action', '=', 'view')
-            ->where('p.is_enabled', '=', true)
-            ->pluck('p.id', 'mv.id')   // [mv_id => perm_id]
+        // Mapea TODOS los moduleview_id -> permission_id
+        // Busca permisos directamente por moduleview_id en la tabla permisos (NO permissions)
+        $permMap = DB::table('permisos')
+            ->whereIn('moduleview_id', $moduleviewIds)
+            ->where('action', '=', 'view')
+            ->pluck('id', 'moduleview_id')
             ->toArray();
 
-        // Si falta alguno, no borres nada y responde 422
+        // Verificar si faltan permisos 'view' para algunos moduleviews
         $missingMvIds = array_values(array_diff($moduleviewIds, array_keys($permMap)));
+        
+        // Si faltan permisos, intentar crearlos automáticamente
         if (!empty($missingMvIds)) {
-            Log::warning('UserPermisos.store missing view permissions', [
+            Log::info('UserPermisos.store creating missing view permissions', [
                 'missing_moduleview_ids' => $missingMvIds
             ]);
-            return response()->json([
-                'success' => false,
-                'message' => "Algunas vistas seleccionadas no tienen permiso 'view' configurado o habilitado.",
-                'errors'  => [
-                    'permissions' => array_map(
-                        fn($id) => "moduleview_id {$id} no tiene permiso 'view' configurado en permissions o está deshabilitado.",
-                        $missingMvIds
-                    )
-                ]
-            ], 422);
+            
+            $createdPerms = [];
+            foreach ($missingMvIds as $mvId) {
+                $moduleView = ModulesViews::find($mvId);
+                if ($moduleView) {
+                    try {
+                        $permName = 'view:' . $moduleView->view_path;
+                        
+                        // Verificar si ya existe un permiso con este nombre
+                        $existingPerm = Permisos::where('name', $permName)->first();
+                        
+                        if (!$existingPerm) {
+                            $perm = Permisos::create([
+                                'moduleview_id' => $mvId,
+                                'action' => 'view',
+                                'name' => $permName,
+                                'description' => 'Auto-created view permission for ' . $moduleView->submenu
+                            ]);
+                            $permMap[$mvId] = $perm->id;
+                            $createdPerms[] = $mvId;
+                        } else {
+                            $permMap[$mvId] = $existingPerm->id;
+                            $createdPerms[] = $mvId;
+                        }
+                    } catch (\Exception $e) {
+                        Log::error('UserPermisos.store failed to create permission', [
+                            'moduleview_id' => $mvId,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                }
+            }
+            
+            // Re-verificar permisos faltantes después del intento de creación
+            $missingMvIds = array_values(array_diff($missingMvIds, $createdPerms));
+            
+            if (!empty($missingMvIds)) {
+                Log::warning('UserPermisos.store still missing view permissions after auto-creation', [
+                    'missing_moduleview_ids' => $missingMvIds
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => "No se pudieron crear permisos 'view' para algunas vistas seleccionadas.",
+                    'errors'  => [
+                        'permissions' => array_map(
+                            fn($id) => "moduleview_id {$id} no tiene permiso 'view' y no se pudo crear automáticamente.",
+                            $missingMvIds
+                        )
+                    ]
+                ], 422);
+            }
         }
 
         DB::beginTransaction();

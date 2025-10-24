@@ -4,19 +4,21 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Role;
-use App\Models\Permisos;
+use App\Models\Permission;
 use App\Models\ModulesViews;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class RolePermissionController extends Controller
 {
     /**
      * List permissions grouped by module for the given role.
+     * Uses role permissions (permissions table, not permisos).
      */
     public function index(Role $role)
     {
-        // Eager load con la relación corregida (permissions por route_path)
-        $moduleviews = ModulesViews::with('permissions')
+        // Eager load moduleviews with their role permissions
+        $moduleviews = ModulesViews::with('rolePermissions')
             ->orderBy('menu')->orderBy('submenu')->get();
 
         $assigned = $role->permissions->pluck('id')->toArray();
@@ -30,7 +32,7 @@ class RolePermissionController extends Controller
                 'export' => false,
             ];
 
-            foreach ($mv->permissions as $p) {
+            foreach ($mv->rolePermissions as $p) {
                 if (in_array($p->id, $assigned)) {
                     $perms[$p->action] = true;
                 }
@@ -50,6 +52,7 @@ class RolePermissionController extends Controller
 
     /**
      * Update permissions for the given role.
+     * Uses role permissions (permissions table, not permisos).
      *
      * Espera payload:
      * {
@@ -80,11 +83,10 @@ class RolePermissionController extends Controller
                 continue;
             }
 
-            // 2) Buscar en permissions por (route_path = view_path) y action IN (...)
-            $ids = Permisos::query()
-                ->where('route_path', $mv->view_path)
+            // 2) Buscar en permissions (role permissions) por moduleview_id y action
+            $ids = Permission::query()
+                ->where('moduleview_id', $moduleviewId)
                 ->whereIn('action', $actions)
-                ->where('is_enabled', true)
                 ->pluck('id')
                 ->toArray();
 

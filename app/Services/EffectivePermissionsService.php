@@ -16,52 +16,66 @@ class EffectivePermissionsService
      */
     public function forUser(User $user): array
     {
-        // 1) Vistas (moduleviews) asignadas al usuario
-        $userViews = DB::table('userpermissions as up')
-            ->join('moduleviews as mv', 'mv.id', '=', 'up.permission_id')
+        // 1) Obtener los moduleview_ids asignados al usuario desde userpermissions
+        // IMPORTANTE: Ahora usa la tabla 'permisos' (user permissions) en lugar de 'permissions' (role permissions)
+        $userPermissions = DB::table('userpermissions as up')
+            ->join('permisos as p', 'p.id', '=', 'up.permission_id')
             ->where('up.user_id', $user->id)
-            ->select('mv.view_path')
-            ->pluck('mv.view_path')
+            ->where('p.action', 'view')
+            ->whereNotNull('p.moduleview_id')
+            ->pluck('p.moduleview_id')
             ->unique()
             ->values();
+
+        if ($userPermissions->isEmpty()) {
+            return [];
+        }
+
+        // 2) Obtener las view_paths de esos moduleviews
+        $userViews = DB::table('moduleviews')
+            ->whereIn('id', $userPermissions)
+            ->pluck('view_path', 'id');
 
         if ($userViews->isEmpty()) {
             return [];
         }
 
-        // 2) Acciones permitidas por el ROL del usuario en esas view_paths
-        // rolepermissions → permissions (filtrando is_enabled y haciendo match por route_path)
+        // 3) Acciones permitidas por el ROL del usuario en esas moduleviews
         $roleId = $user->role_id ?? null;
 
         if (!$roleId) {
-            // Sin rol, no hay acciones
-            return $userViews->mapWithKeys(function ($vp) {
-                return [$vp => $this->emptyActionSet()];
+            // Sin rol, solo retorna las vistas sin acciones
+            return $userViews->mapWithKeys(function ($viewPath) {
+                return [$viewPath => $this->emptyActionSet()];
             })->toArray();
         }
 
+        // 4) Obtener permisos del rol para esos moduleviews
+        // IMPORTANTE: Aquí sí usa 'permissions' porque son permisos de ROL
         $rows = DB::table('rolepermissions as rp')
             ->join('permissions as p', 'p.id', '=', 'rp.permission_id')
+            ->join('moduleviews as mv', 'mv.id', '=', 'p.moduleview_id')
             ->where('rp.role_id', $roleId)
-            ->where('p.is_enabled', true)
-            ->whereIn('p.route_path', $userViews)
-            ->select('p.route_path', 'p.action')
+            ->whereIn('p.moduleview_id', $userPermissions->toArray())
+            ->select('mv.view_path', 'p.action')
             ->get();
 
-        // 3) Consolidar por view_path → {view,create,edit,delete,export}
+        // 5) Consolidar por view_path → {view,create,edit,delete,export}
         $result = [];
-        foreach ($userViews as $vp) {
-            $result[$vp] = $this->emptyActionSet();
+        foreach ($userViews as $moduleviewId => $viewPath) {
+            $result[$viewPath] = $this->emptyActionSet();
         }
 
         foreach ($rows as $r) {
-            if (isset($result[$r->route_path]) && isset($result[$r->action])) {
-                $result[$r->route_path][$r->action] = true;
+            if (isset($result[$r->view_path])) {
+                $action = $r->action;
+                if (isset($result[$r->view_path][$action])) {
+                    $result[$r->view_path][$action] = true;
+                }
             }
         }
 
-        // Reglas de negocio opcionales:
-        // - Si no tiene "view", bloquea todo en esa vista
+        // 6) Reglas de negocio: Si no tiene "view", bloquea todo en esa vista
         foreach ($result as $vp => $set) {
             if (!$set['view']) {
                 $result[$vp] = $this->emptyActionSet(); // sin ver, no haces nada

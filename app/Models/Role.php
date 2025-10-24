@@ -27,17 +27,18 @@ class Role extends Model
     ];
 
     /**
-     * Permisos asociados al rol mediante la pivote rolepermissions.
+     * Permissions associated with the role via rolepermissions pivot table.
+     * Uses the Permission model for role-based permissions (NOT Permisos which is for user permissions).
      */
     public function permissions()
     {
         return $this->belongsToMany(
-            \App\Models\Permisos::class, // <- usa tu modelo Permisos
-            'rolepermissions',           // tabla pivote
-            'role_id',                   // FK de Role en la pivote
-            'permission_id'              // FK de Permisos en la pivote
+            \App\Models\Permission::class,   // Role permissions use Permission model
+            'rolepermissions',               // pivot table
+            'role_id',                       // FK of Role in pivot
+            'permission_id'                  // FK of Permission in pivot
         )
-        ->withPivot('scope', 'assigned_at'); // campos extra de la pivote
-        // ->withTimestamps(); // SOLO si la pivote tiene created_at/updated_at
+        ->withPivot('scope', 'assigned_at'); // extra pivot columns
+        // ->withTimestamps(); // ONLY if pivot has created_at/updated_at
     }
 }
