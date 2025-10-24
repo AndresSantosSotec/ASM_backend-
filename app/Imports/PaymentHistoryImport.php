@@ -792,7 +792,7 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
                 // 🆕 NUEVO: Siempre intentar crear/buscar cuota si hay datos de mes/año/monto
                 // buscarCuotaFlexible() ahora auto-crea cuotas cuando no existen
                 $cuota = null;
-                
+
                 Log::info("🔍 Buscando/creando cuota para el pago", [
                     'fila' => $numeroFila,
                     'estudiante_programa_id' => $programaAsignado->estudiante_programa_id,
@@ -981,162 +981,105 @@ class PaymentHistoryImport implements ToCollection, WithHeadingRow
         float $montoPago,
         int $numeroFila
     ) {
-        $cuotas = $this->obtenerCuotasDelPrograma($estudianteProgramaId)
-            ->sortBy('fecha_vencimiento');
+        // 🔥 PARA MIGRACIÓN HISTÓRICA: SIEMPRE CREAR CUOTAS NUEVAS
+        // No reutilizar cuotas existentes porque cada pago del Excel = 1 cuota única
 
         $periodo = $this->obtenerPeriodoDesdeFila($rowData, $fechaPago);
         $mesObjetivo = $periodo['mes'];
         $anioObjetivo = $periodo['anio'];
-        $cuotaPorPeriodo = null;
-        $cuotaPorMontoExacto = null;
 
-        Log::info('🔍 Buscando cuota basada en periodo declarado en Excel', [
-            'estudiante_programa_id' => $estudianteProgramaId,
-            'mes' => $mesObjetivo,
-            'anio' => $anioObjetivo,
-            'monto_pago' => $montoPago,
-            'fila' => $numeroFila,
-            'cuotas_existentes' => $cuotas->count()
-        ]);
-
-        // ✅ PASO 1: Buscar por periodo (mes/año)
-        if ($mesObjetivo && $anioObjetivo) {
-            $cuotaPorPeriodo = $cuotas->first(function ($cuota) use ($mesObjetivo, $anioObjetivo) {
-                if (empty($cuota->fecha_vencimiento)) {
-                    return false;
-                }
-
-                $fecha = Carbon::parse($cuota->fecha_vencimiento);
-                return $fecha->month === $mesObjetivo && $fecha->year === $anioObjetivo;
-            });
-
-            if ($cuotaPorPeriodo) {
-                Log::info('✅ Cuota encontrada por coincidencia de periodo', [
-                    'cuota_id' => $cuotaPorPeriodo->id,
-                    'fecha_vencimiento' => $cuotaPorPeriodo->fecha_vencimiento,
-                    'monto_cuota' => $cuotaPorPeriodo->monto,
-                    'periodo_pago' => $this->formatearPeriodo($mesObjetivo, $anioObjetivo)
-                ]);
-
-                $this->registrarDesfasePeriodo(
-                    $fechaPago,
-                    $mesObjetivo,
-                    $anioObjetivo,
-                    $estudianteProgramaId,
-                    $numeroFila,
-                    'coincidencia_existente',
-                    $cuotaPorPeriodo->id
-                );
-
-                return $cuotaPorPeriodo;
-            }
-        }
-
-        // ✅ PASO 2: Buscar por monto exacto
-        $cuotaPorMontoExacto = $cuotas->first(function ($cuota) use ($montoPago) {
-            return abs($cuota->monto - $montoPago) < 0.01;
-        });
-
-        if ($cuotaPorMontoExacto) {
-            Log::info('✅ Cuota encontrada por coincidencia exacta de monto', [
-                'cuota_id' => $cuotaPorMontoExacto->id,
-                'monto_cuota' => $cuotaPorMontoExacto->monto
-            ]);
-            return $cuotaPorMontoExacto;
-        }
-
-        // 🆕 PASO 3: CREAR CUOTA si no existe (para migración histórica)
-        if ($mesObjetivo && $anioObjetivo && $montoPago > 0) {
-            Log::info('🆕 Creando cuota automáticamente para pago histórico', [
+        // 🆕 FALLBACK: Si no hay mes/año en Excel, usar fecha_pago como fuente
+        if (!$mesObjetivo || !$anioObjetivo) {
+            Log::info('🔄 Usando fecha_pago como fallback (no hay mes/año en Excel)', [
                 'estudiante_programa_id' => $estudianteProgramaId,
-                'mes' => $mesObjetivo,
-                'anio' => $anioObjetivo,
-                'monto' => $montoPago,
+                'fecha_pago' => $fechaPago->toDateString(),
                 'fila' => $numeroFila
             ]);
 
-            try {
-                // Calcular número de cuota (siguiente disponible)
-                $ultimoNumeroCuota = CuotaProgramaEstudiante::where('estudiante_programa_id', $estudianteProgramaId)
-                    ->max('numero_cuota') ?? 0;
-                
-                $numeroCuota = $ultimoNumeroCuota + 1;
-
-                // Fecha de vencimiento: último día del mes del periodo
-                $fechaVencimiento = Carbon::create($anioObjetivo, $mesObjetivo, 1)
-                    ->endOfMonth();
-
-                // Crear la cuota
-                $nuevaCuota = CuotaProgramaEstudiante::create([
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'numero_cuota' => $numeroCuota,
-                    'fecha_vencimiento' => $fechaVencimiento,
-                    'monto' => $montoPago,
-                    'estado' => 'pendiente', // Se marcará como pagada después
-                    'created_by' => $this->uploaderId,
-                    'updated_by' => $this->uploaderId,
-                ]);
-
-                // Limpiar cache de cuotas para este estudiante
-                unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
-
-                Log::info('✅ Cuota creada exitosamente para migración', [
-                    'cuota_id' => $nuevaCuota->id,
-                    'numero_cuota' => $numeroCuota,
-                    'fecha_vencimiento' => $fechaVencimiento->toDateString(),
-                    'monto' => $montoPago,
-                    'estudiante_programa_id' => $estudianteProgramaId
-                ]);
-
-                $this->advertencias[] = [
-                    'tipo' => 'CUOTA_CREADA_AUTOMATICAMENTE',
-                    'fila' => $numeroFila,
-                    'mensaje' => "Cuota #{$numeroCuota} creada automáticamente para el pago histórico",
-                    'cuota_id' => $nuevaCuota->id,
-                    'periodo' => $this->formatearPeriodo($mesObjetivo, $anioObjetivo)
-                ];
-
-                return $nuevaCuota;
-            } catch (\Throwable $e) {
-                Log::error('❌ Error al crear cuota automáticamente', [
-                    'estudiante_programa_id' => $estudianteProgramaId,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString()
-                ]);
-
-                $this->errores[] = [
-                    'tipo' => 'ERROR_CREAR_CUOTA',
-                    'fila' => $numeroFila,
-                    'error' => 'No se pudo crear la cuota automáticamente: ' . $e->getMessage(),
-                    'estudiante_programa_id' => $estudianteProgramaId
-                ];
-
-                return null;
-            }
+            $mesObjetivo = (int) $fechaPago->format('m');
+            $anioObjetivo = (int) $fechaPago->format('Y');
         }
 
-        // No se pudo encontrar ni crear cuota
-        if ($mesObjetivo && $anioObjetivo) {
-            $this->registrarDesfasePeriodo(
-                $fechaPago,
-                $mesObjetivo,
-                $anioObjetivo,
-                $estudianteProgramaId,
-                $numeroFila,
-                'sin_coincidencia'
-            );
-        }
-
-        Log::warning('⚠️ No se pudo encontrar ni crear cuota para este pago', [
+        Log::info('🆕 Creando cuota automáticamente para pago histórico (migración)', [
             'estudiante_programa_id' => $estudianteProgramaId,
             'mes' => $mesObjetivo,
             'anio' => $anioObjetivo,
-            'monto_pago' => $montoPago,
+            'monto' => $montoPago,
+            'fecha_pago' => $fechaPago->toDateString(),
             'fila' => $numeroFila,
-            'tipo_archivo' => $this->tipoArchivo,
+            'fuente_periodo' => ($periodo['mes'] && $periodo['anio']) ? 'Excel (mes/año)' : 'fecha_pago (fallback)'
         ]);
 
-        return null;
+        // Validar que tengamos datos mínimos para crear la cuota
+        if (!$mesObjetivo || !$anioObjetivo || $montoPago <= 0) {
+            Log::error('❌ Datos insuficientes para crear cuota (sin mes/año/monto)', [
+                'mes' => $mesObjetivo,
+                'anio' => $anioObjetivo,
+                'monto' => $montoPago,
+                'fecha_pago' => $fechaPago->toDateString(),
+                'fila' => $numeroFila
+            ]);
+            return null;
+        }
+
+        try {
+            // Calcular número de cuota (siguiente disponible)
+            $ultimoNumeroCuota = CuotaProgramaEstudiante::where('estudiante_programa_id', $estudianteProgramaId)
+                ->max('numero_cuota') ?? 0;
+
+            $numeroCuota = $ultimoNumeroCuota + 1;
+
+            // Fecha de vencimiento: último día del mes del periodo
+            $fechaVencimiento = Carbon::create($anioObjetivo, $mesObjetivo, 1)
+                ->endOfMonth();
+
+            // Crear la cuota
+            $nuevaCuota = CuotaProgramaEstudiante::create([
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'numero_cuota' => $numeroCuota,
+                'fecha_vencimiento' => $fechaVencimiento,
+                'monto' => $montoPago,
+                'estado' => 'pendiente', // Se marcará como pagada después en actualizarCuotaYConciliar
+                'created_by' => $this->uploaderId,
+                'updated_by' => $this->uploaderId,
+            ]);
+
+            // Limpiar cache de cuotas para este estudiante
+            unset($this->cuotasPorEstudianteCache[$estudianteProgramaId]);
+
+            Log::info('✅ Cuota creada exitosamente para migración histórica', [
+                'cuota_id' => $nuevaCuota->id,
+                'numero_cuota' => $numeroCuota,
+                'fecha_vencimiento' => $fechaVencimiento->toDateString(),
+                'monto' => $montoPago,
+                'estudiante_programa_id' => $estudianteProgramaId
+            ]);
+
+            $this->advertencias[] = [
+                'tipo' => 'CUOTA_CREADA_AUTOMATICAMENTE',
+                'fila' => $numeroFila,
+                'mensaje' => "Cuota #{$numeroCuota} creada automáticamente para migración de pago histórico",
+                'cuota_id' => $nuevaCuota->id,
+                'periodo' => $this->formatearPeriodo($mesObjetivo, $anioObjetivo)
+            ];
+
+            return $nuevaCuota;
+        } catch (\Throwable $e) {
+            Log::error('❌ Error al crear cuota automáticamente', [
+                'estudiante_programa_id' => $estudianteProgramaId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            $this->errores[] = [
+                'tipo' => 'ERROR_CREAR_CUOTA',
+                'fila' => $numeroFila,
+                'error' => 'No se pudo crear la cuota automáticamente: ' . $e->getMessage(),
+                'estudiante_programa_id' => $estudianteProgramaId
+            ];
+
+            return null;
+        }
     }
 
     private function actualizarCuotaYConciliar($cuota, $kardex, $numeroFila, $montoPago)

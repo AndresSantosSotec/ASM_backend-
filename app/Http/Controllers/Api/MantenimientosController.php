@@ -283,12 +283,12 @@ class MantenimientosController extends Controller
     {
         try {
             $filters = $this->extractCommonFilters($request);
-            
+
             // Paginación
             $page = max(1, (int)$request->input('page', 1));
             $perPage = $this->resolveLimit($request, 100, 'per_page'); // Default 100 por página
             $perPage = min($perPage, 500); // Máximo 500 por página
-            
+
             $now = Carbon::now();
 
             // Construir query base de estudiantes activos
@@ -299,12 +299,12 @@ class MantenimientosController extends Controller
                 ])
                 ->whereHas('prospecto', function ($q) use ($filters) {
                     $q->where('activo', true);
-                    
+
                     // Filtro por prospecto_id
                     if (!empty($filters['prospecto_id'])) {
                         $q->where('id', $filters['prospecto_id']);
                     }
-                    
+
                     // Búsqueda general (nombre, carnet, correo)
                     if (!empty($filters['search'])) {
                         $like = '%' . $filters['search'] . '%';
@@ -323,11 +323,11 @@ class MantenimientosController extends Controller
 
             // Contar total de estudiantes (sin paginación)
             $estudiantesActivos = (clone $estudiantesQuery)->count();
-            
+
             // Calcular paginación
             $totalPages = (int)ceil($estudiantesActivos / $perPage);
             $offset = ($page - 1) * $perPage;
-            
+
             // Obtener estudiantes con paginación
             $estudiantesProgramas = $estudiantesQuery
                 ->skip($offset)
@@ -345,7 +345,7 @@ class MantenimientosController extends Controller
 
             // Calcular métricas globales
             $cuotasBase = $this->buildCuotasBaseQuery($filters);
-            
+
             $saldoPendiente = (float) (clone $cuotasBase)
                 ->where(function ($q) {
                     $q->whereNull('estado')
@@ -445,7 +445,7 @@ class MantenimientosController extends Controller
                 'line' => $th->getLine(),
                 'trace' => $th->getTraceAsString(),
             ]);
-            
+
             return $this->errorResponse('Error al generar el dashboard de cuotas', $th);
         }
     }
@@ -861,8 +861,21 @@ class MantenimientosController extends Controller
      *   "estado": "pendiente"
      * }
      */
+    /**
+     * Crear una nueva cuota.
+     *
+     * NOTA: Al crear una cuota manualmente desde el frontend:
+     * - Solo se crea el registro en cuotas_programa_estudiante
+     * - NO se crea kardex ni reconciliation automáticamente
+     * - Si quieres registrar un pago, debes:
+     *   1. Crear la cuota (este endpoint)
+     *   2. Crear el kardex_pago (endpoint de kardex) con cuota_id
+     *   3. El kardex puede crear reconciliation_record si viene de importación bancaria
+     */
     public function cuotasStore(Request $request)
     {
+        DB::beginTransaction();
+
         try {
             $validated = $request->validate([
                 'estudiante_programa_id' => 'required|exists:estudiante_programas,id',
@@ -870,7 +883,19 @@ class MantenimientosController extends Controller
                 'fecha_vencimiento' => 'required|date',
                 'monto' => 'required|numeric|min:0',
                 'estado' => 'nullable|string|in:pendiente,pagado,vencido,cancelado',
+                'paid_at' => 'nullable|date',
             ]);
+
+            // Validar que numero_cuota no esté duplicado para el mismo estudiante
+            $existeCuota = CuotaProgramaEstudiante::where('estudiante_programa_id', $validated['estudiante_programa_id'])
+                ->where('numero_cuota', $validated['numero_cuota'])
+                ->exists();
+
+            if ($existeCuota) {
+                return response()->json([
+                    'message' => 'Ya existe una cuota con ese número para este estudiante',
+                ], 422);
+            }
 
             $cuota = CuotaProgramaEstudiante::create([
                 'estudiante_programa_id' => $validated['estudiante_programa_id'],
@@ -878,7 +903,17 @@ class MantenimientosController extends Controller
                 'fecha_vencimiento' => $validated['fecha_vencimiento'],
                 'monto' => $validated['monto'],
                 'estado' => $validated['estado'] ?? 'pendiente',
+                'paid_at' => $validated['paid_at'] ?? null,
                 'created_by' => auth()->id(),
+            ]);
+
+            Log::info('✅ Cuota creada manualmente', [
+                'cuota_id' => $cuota->id,
+                'estudiante_programa_id' => $cuota->estudiante_programa_id,
+                'numero_cuota' => $cuota->numero_cuota,
+                'monto' => $cuota->monto,
+                'estado' => $cuota->estado,
+                'user_id' => auth()->id()
             ]);
 
             // Cargar relaciones
@@ -886,6 +921,8 @@ class MantenimientosController extends Controller
                 'estudiantePrograma.prospecto:id,nombre_completo,carnet',
                 'estudiantePrograma.programa:id,nombre_del_programa',
             ]);
+
+            DB::commit();
 
             return response()->json([
                 'message' => 'Cuota creada exitosamente',
@@ -896,16 +933,19 @@ class MantenimientosController extends Controller
                     'fecha_vencimiento' => optional($cuota->fecha_vencimiento)->format('Y-m-d'),
                     'monto' => (float) $cuota->monto,
                     'estado' => $cuota->estado,
+                    'paid_at' => $cuota->paid_at ? $cuota->paid_at->format('Y-m-d H:i:s') : null,
                     'prospecto' => optional($cuota->estudiantePrograma->prospecto)->nombre_completo,
                     'programa' => optional($cuota->estudiantePrograma->programa)->nombre_del_programa,
                 ],
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
             return response()->json([
                 'message' => 'Error de validación',
                 'errors' => $e->errors(),
             ], 422);
         } catch (\Throwable $th) {
+            DB::rollBack();
             return $this->errorResponse('Error al crear la cuota', $th);
         }
     }
@@ -961,30 +1001,142 @@ class MantenimientosController extends Controller
 
     /**
      * Eliminar una cuota.
-     * Solo se permite eliminar si no tiene pagos aplicados (kardex).
+     *
+     * IMPORTANTE: Borrado en cascada implementado
+     * - Si la cuota está pagada y tiene kardex/reconciliation asociados, se eliminan en cascada
+     * - Si la cuota está pendiente, se elimina directamente
+     *
+     * Flujo de eliminación:
+     * 1. Encuentra cuota
+     * 2. Busca kardex_pagos relacionados (por cuota_id)
+     * 3. Para cada kardex, busca reconciliation_records relacionados (por fingerprint u otros campos)
+     * 4. Elimina: reconciliation_records → kardex_pagos → cuota
      */
     public function cuotasDestroy($id)
     {
+        DB::beginTransaction();
+
         try {
             $cuota = CuotaProgramaEstudiante::findOrFail($id);
 
-            // Verificar si tiene pagos aplicados
-            $tienePagos = KardexPago::where('cuota_id', $id)->exists();
+            Log::info('🗑️ Iniciando eliminación de cuota', [
+                'cuota_id' => $id,
+                'estado' => $cuota->estado,
+                'monto' => $cuota->monto,
+                'estudiante_programa_id' => $cuota->estudiante_programa_id,
+                'user_id' => auth()->id()
+            ]);
 
-            if ($tienePagos) {
+            // Buscar kardex relacionados
+            $kardexRelacionados = KardexPago::where('cuota_id', $id)->get();
+
+            if ($kardexRelacionados->isEmpty()) {
+                // Cuota sin pagos aplicados - eliminación simple
+                Log::info('✅ Cuota sin kardex relacionados - eliminación directa', ['cuota_id' => $id]);
+
+                $cuota->deleted_by = auth()->id();
+                $cuota->save();
+                $cuota->delete();
+
+                DB::commit();
+
                 return response()->json([
-                    'message' => 'No se puede eliminar la cuota porque tiene pagos aplicados',
-                ], 400);
+                    'message' => 'Cuota eliminada exitosamente',
+                    'details' => [
+                        'cuota_id' => $id,
+                        'kardex_eliminados' => 0,
+                        'reconciliaciones_eliminadas' => 0
+                    ]
+                ]);
             }
 
+            // Cuota con pagos - eliminar en cascada
+            Log::warning('⚠️ Cuota con kardex relacionados - eliminación en cascada', [
+                'cuota_id' => $id,
+                'kardex_count' => $kardexRelacionados->count()
+            ]);
+
+            $reconciliacionesEliminadas = 0;
+            $kardexEliminados = 0;
+
+            foreach ($kardexRelacionados as $kardex) {
+                // Buscar reconciliation_records relacionados
+                // Buscar por varios criterios: fingerprint, monto, fecha, banco
+                $reconciliaciones = ReconciliationRecord::where(function($query) use ($kardex) {
+                    // Buscar por monto y fecha exactos
+                    $query->where('amount', $kardex->monto_pagado)
+                          ->whereDate('transaction_date', $kardex->fecha_pago);
+
+                    // Si tiene banco, agregar filtro
+                    if ($kardex->banco) {
+                        $query->where('bank', 'like', '%' . $kardex->banco . '%');
+                    }
+                })->get();
+
+                Log::info('🔍 Buscando reconciliaciones para kardex', [
+                    'kardex_id' => $kardex->id,
+                    'reconciliaciones_encontradas' => $reconciliaciones->count(),
+                    'criterios' => [
+                        'monto' => $kardex->monto_pagado,
+                        'fecha' => $kardex->fecha_pago,
+                        'banco' => $kardex->banco
+                    ]
+                ]);
+
+                // Eliminar reconciliaciones
+                foreach ($reconciliaciones as $recon) {
+                    Log::info('🗑️ Eliminando reconciliation_record', [
+                        'reconciliation_id' => $recon->id,
+                        'fingerprint' => $recon->fingerprint,
+                        'monto' => $recon->amount
+                    ]);
+
+                    $recon->delete();
+                    $reconciliacionesEliminadas++;
+                }
+
+                // Eliminar kardex
+                Log::info('🗑️ Eliminando kardex_pago', [
+                    'kardex_id' => $kardex->id,
+                    'cuota_id' => $kardex->cuota_id,
+                    'monto' => $kardex->monto_pagado
+                ]);
+
+                $kardex->delete();
+                $kardexEliminados++;
+            }
+
+            // Finalmente eliminar la cuota
             $cuota->deleted_by = auth()->id();
             $cuota->save();
             $cuota->delete();
 
-            return response()->json([
-                'message' => 'Cuota eliminada exitosamente',
+            DB::commit();
+
+            Log::info('✅ Eliminación en cascada completada exitosamente', [
+                'cuota_id' => $id,
+                'kardex_eliminados' => $kardexEliminados,
+                'reconciliaciones_eliminadas' => $reconciliacionesEliminadas
             ]);
+
+            return response()->json([
+                'message' => 'Cuota y registros relacionados eliminados exitosamente',
+                'details' => [
+                    'cuota_id' => $id,
+                    'kardex_eliminados' => $kardexEliminados,
+                    'reconciliaciones_eliminadas' => $reconciliacionesEliminadas
+                ]
+            ]);
+
         } catch (\Throwable $th) {
+            DB::rollBack();
+
+            Log::error('❌ Error al eliminar cuota', [
+                'cuota_id' => $id,
+                'error' => $th->getMessage(),
+                'trace' => $th->getTraceAsString()
+            ]);
+
             return $this->errorResponse('Error al eliminar la cuota', $th);
         }
     }
