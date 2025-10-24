@@ -1062,16 +1062,15 @@ class MantenimientosController extends Controller
             foreach ($kardexRelacionados as $kardex) {
                 // Buscar reconciliation_records relacionados
                 // Buscar por varios criterios: fingerprint, monto, fecha, banco
-                $reconciliaciones = ReconciliationRecord::where(function($query) use ($kardex) {
-                    // Buscar por monto y fecha exactos
-                    $query->where('amount', $kardex->monto_pagado)
-                          ->whereDate('transaction_date', $kardex->fecha_pago);
-
-                    // Si tiene banco, agregar filtro
-                    if ($kardex->banco) {
-                        $query->where('bank', 'like', '%' . $kardex->banco . '%');
-                    }
-                })->get();
+                $reconciliaciones = ReconciliationRecord::where('amount', $kardex->monto_pagado)
+                    ->whereDate('transaction_date', $kardex->fecha_pago);
+                
+                // Si tiene banco, agregar filtro
+                if ($kardex->banco) {
+                    $reconciliaciones->where('bank', 'like', '%' . $kardex->banco . '%');
+                }
+                
+                $reconciliaciones = $reconciliaciones->get();
 
                 Log::info('🔍 Buscando reconciliaciones para kardex', [
                     'kardex_id' => $kardex->id,
@@ -1475,6 +1474,8 @@ class MantenimientosController extends Controller
      */
     public function kardexUpdate(Request $request, $id)
     {
+        DB::beginTransaction();
+
         try {
             $kardex = KardexPago::findOrFail($id);
 
@@ -1493,10 +1494,18 @@ class MantenimientosController extends Controller
             $kardex->updated_by = auth()->id();
             $kardex->save();
 
+            Log::info('✅ Kardex actualizado', [
+                'kardex_id' => $kardex->id,
+                'cambios' => $validated,
+                'user_id' => auth()->id()
+            ]);
+
             $kardex->load([
                 'estudiantePrograma.prospecto:id,nombre_completo,carnet',
                 'estudiantePrograma.programa:id,nombre_del_programa',
             ]);
+
+            DB::commit();
 
             return response()->json([
                 'message' => 'Movimiento de kardex actualizado exitosamente',
@@ -1513,11 +1522,17 @@ class MantenimientosController extends Controller
                 ],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
             return response()->json([
                 'message' => 'Error de validación',
                 'errors' => $e->errors(),
             ], 422);
         } catch (\Throwable $th) {
+            DB::rollBack();
+            Log::error('❌ Error al actualizar kardex', [
+                'kardex_id' => $id,
+                'error' => $th->getMessage()
+            ]);
             return $this->errorResponse('Error al actualizar el movimiento de kardex', $th);
         }
     }
@@ -1527,17 +1542,33 @@ class MantenimientosController extends Controller
      */
     public function kardexDestroy($id)
     {
+        DB::beginTransaction();
+
         try {
             $kardex = KardexPago::findOrFail($id);
+
+            Log::info('🗑️ Eliminando kardex', [
+                'kardex_id' => $id,
+                'cuota_id' => $kardex->cuota_id,
+                'monto' => $kardex->monto_pagado,
+                'user_id' => auth()->id()
+            ]);
 
             $kardex->deleted_by = auth()->id();
             $kardex->save();
             $kardex->delete();
 
+            DB::commit();
+
             return response()->json([
                 'message' => 'Movimiento de kardex eliminado exitosamente',
             ]);
         } catch (\Throwable $th) {
+            DB::rollBack();
+            Log::error('❌ Error al eliminar kardex', [
+                'kardex_id' => $id,
+                'error' => $th->getMessage()
+            ]);
             return $this->errorResponse('Error al eliminar el movimiento de kardex', $th);
         }
     }
@@ -1763,6 +1794,8 @@ class MantenimientosController extends Controller
      */
     public function reconciliacionesUpdate(Request $request, $id)
     {
+        DB::beginTransaction();
+
         try {
             $reconciliacion = ReconciliationRecord::findOrFail($id);
 
@@ -1775,6 +1808,14 @@ class MantenimientosController extends Controller
 
             $reconciliacion->fill($validated);
             $reconciliacion->save();
+
+            Log::info('✅ Reconciliación actualizada', [
+                'reconciliation_id' => $reconciliacion->id,
+                'cambios' => $validated,
+                'user_id' => auth()->id()
+            ]);
+
+            DB::commit();
 
             return response()->json([
                 'message' => 'Reconciliación actualizada exitosamente',
@@ -1790,11 +1831,17 @@ class MantenimientosController extends Controller
                 ],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
             return response()->json([
                 'message' => 'Error de validación',
                 'errors' => $e->errors(),
             ], 422);
         } catch (\Throwable $th) {
+            DB::rollBack();
+            Log::error('❌ Error al actualizar reconciliación', [
+                'reconciliation_id' => $id,
+                'error' => $th->getMessage()
+            ]);
             return $this->errorResponse('Error al actualizar la reconciliación', $th);
         }
     }
@@ -1804,14 +1851,31 @@ class MantenimientosController extends Controller
      */
     public function reconciliacionesDestroy($id)
     {
+        DB::beginTransaction();
+
         try {
             $reconciliacion = ReconciliationRecord::findOrFail($id);
+
+            Log::info('🗑️ Eliminando reconciliación', [
+                'reconciliation_id' => $id,
+                'banco' => $reconciliacion->bank,
+                'monto' => $reconciliacion->amount,
+                'user_id' => auth()->id()
+            ]);
+
             $reconciliacion->delete();
+
+            DB::commit();
 
             return response()->json([
                 'message' => 'Reconciliación eliminada exitosamente',
             ]);
         } catch (\Throwable $th) {
+            DB::rollBack();
+            Log::error('❌ Error al eliminar reconciliación', [
+                'reconciliation_id' => $id,
+                'error' => $th->getMessage()
+            ]);
             return $this->errorResponse('Error al eliminar la reconciliación', $th);
         }
     }
