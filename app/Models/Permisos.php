@@ -30,7 +30,7 @@ class Permisos extends Model
      */
     protected $fillable = [
         'action',
-        'moduleview_id',
+        'route_path',
         'name',
         'description'
     ];
@@ -41,7 +41,7 @@ class Permisos extends Model
      * @var array
      */
     protected $casts = [
-        'moduleview_id' => 'integer'
+        'route_path' => 'string'
     ];
 
     /**
@@ -59,7 +59,7 @@ class Permisos extends Model
      */
     public function moduleView()
     {
-        return $this->belongsTo(ModulesViews::class, 'moduleview_id', 'id');
+        return $this->belongsTo(ModulesViews::class, 'route_path', 'view_path');
     }
 
 
